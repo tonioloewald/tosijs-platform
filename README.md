@@ -13,7 +13,7 @@ Then Node.js became the "standard stack" and standing up "hello world" became a 
 ## The Solution
 
 1. Install [Bun](https://bun.sh) if you haven't: `curl -fsSL https://bun.sh/install | bash`
-2. Set up a Google developer account
+2. Create a [Firebase project](https://console.firebase.google.com) on the Blaze plan and note its project ID
 3. Run `bunx create-tosijs-platform-app my-site`
 4. Follow the prompts
 5. You have a working, production-ready website

@@ -1,6 +1,6 @@
 {
   "name": "create-tosijs-platform-app",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Create a full-stack web app with tosijs (front-end) and Firebase (back-end)",
   "type": "module",
   "bin": {

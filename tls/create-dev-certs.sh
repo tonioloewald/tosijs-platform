@@ -13,7 +13,7 @@ echo "Generating certificate signing request..."
 openssl req -new -sha256 -key key.pem -out csr.csr -subj "$SUBJ"
 
 echo "Generating self-signed certificate (valid for 365 days)..."
-openssl req -x509 -sha256 -days 365 -key key.pem -in csr.csr -out certificate.pem -subj "$SUBJ"
+openssl x509 -req -sha256 -days 365 -in csr.csr -signkey key.pem -out certificate.pem
 
 # Verify
 openssl req -in csr.csr -text -noout | grep -i "Signature.*SHA256" > /dev/null && echo "✓ TLS certificates created successfully"
