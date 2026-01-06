@@ -316,8 +316,9 @@ async function main() {
 
   console.log('🧹 Cleaning up...')
   fs.rmSync(path.join(projectPath, '.git'), { recursive: true })
-  if (fs.existsSync(path.join(projectPath, 'bin'))) {
-    fs.rmSync(path.join(projectPath, 'bin'), { recursive: true })
+  // Remove create-script directory (utility scripts are in scripts/)
+  if (fs.existsSync(path.join(projectPath, 'create-script'))) {
+    fs.rmSync(path.join(projectPath, 'create-script'), { recursive: true })
   }
 
   // Configure initial_state: update owner role with admin email
@@ -685,7 +686,8 @@ setup()
   console.log(`   node setup.js`)
 
   console.log(`\n7. Start local development:`)
-  console.log(`   bun start`)
+  console.log(`   bun start                  # Uses production Firebase`)
+  console.log(`   bun start-emulated         # Uses local emulators`)
   console.log(`   Visit https://localhost:8020`)
 
   console.log('\n━'.repeat(60))

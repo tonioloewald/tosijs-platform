@@ -25,9 +25,9 @@
   "scripts": {
     "start": "bun --watch dev.ts",
     "kill-ports": "lsof -ti:4000,5001,5002,8080,9099,9199 | xargs kill -9 2>/dev/null || true",
-    "start-emulated": "bun run kill-ports && bun run build && (cd functions && bun run build) && bun bin/start-emulated.js",
-    "seed": "bun bin/seed-emulators.js",
-    "seed-clear": "bun bin/seed-emulators.js --clear",
+    "start-emulated": "bun run kill-ports && bun run build && (cd functions && bun run build) && bun scripts/start-emulated.js",
+    "seed": "bun scripts/seed-emulators.js",
+    "seed-clear": "bun scripts/seed-emulators.js --clear",
     "build": "bun build ./src/index.ts --outdir ./dist --sourcemap=linked --minify && cp -a public/. dist/ && rm dist/index.html",
     "format": "bun prettier --write src functions/src",
     "latest": "bun upgrade && bun install && cd functions && npm install && cd ..",

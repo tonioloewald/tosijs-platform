@@ -7,8 +7,8 @@
  * Run this after starting emulators to populate them with seed data.
  *
  * Usage:
- *   node bin/seed-emulators.js
- *   node bin/seed-emulators.js --clear  # Clear existing data first
+ *   bun scripts/seed-emulators.js
+ *   bun scripts/seed-emulators.js --clear  # Clear existing data first
  */
 
 import fs from 'fs'
