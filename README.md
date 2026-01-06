@@ -12,14 +12,17 @@ Then Node.js became the "standard stack" and standing up "hello world" became a 
 
 ## The Solution
 
-1. Set up a Google developer account
-2. Run `npx create-tosijs-platform-app my-site`
-3. Follow the prompts
-4. You have a working, production-ready website
+1. Install [Bun](https://bun.sh) if you haven't: `curl -fsSL https://bun.sh/install | bash`
+2. Set up a Google developer account
+3. Run `bunx create-tosijs-platform-app my-site`
+4. Follow the prompts
+5. You have a working, production-ready website
+
+> **Note**: You can use `npx` instead of `bunx`, but some utility scripts are TypeScript and may need transpiling if you're not using Bun.
 
 The database is configured. Permissions are set up. Authentication works. You can use it as-is, or customize it *without ever deploying code* - using the `/esm` endpoint and `<tosi-esm>` component to load and run modules dynamically.
 
-**tosijs-platform** is built on [tosijs](https://tosijs.net), which distills 30 years of UI development lessons into one small library. It eliminates the need for most state management and binding code (typically 75%+ of a React app) through automatic binding conventions - the same patterns that made 90s RAD tools so productive - while keeping your business logic free of framework dependencies.
+**tosijs-platform** is built on [tosijs](https://tosijs.net), which distills 30 years of UI development lessons into one small library. It eliminates the need for most state management and binding code (typically 75%+ of a React app) through automatic binding conventions - patterns that made 90s RAD tools even more productive - while keeping your business logic free of framework dependencies.
 
 ## What You Get
 
@@ -33,7 +36,7 @@ The database is configured. Permissions are set up. Authentication works. You ca
 ## Quick Start
 
 ```bash
-npx create-tosijs-platform-app my-awesome-site
+bunx create-tosijs-platform-app my-awesome-site
 ```
 
 The CLI will:
@@ -171,7 +174,7 @@ Most small-to-medium sites stay **completely free** within these limits. You onl
 ### Step 1: Create Project
 
 ```bash
-npx create-tosijs-platform-app my-site
+bunx create-tosijs-platform-app my-site
 ```
 
 You'll be prompted for:
