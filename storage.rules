@@ -1,0 +1,54 @@
+rules_version = '2';
+
+// Storage rules for tosijs-platform
+//
+// Role-based access is enforced via Firebase Auth custom claims.
+// Custom claims are synced from Firestore roles when users make authenticated requests.
+//
+// For custom claims to be available, users must have made at least one
+// authenticated API request (e.g., to /doc or /docs) after being assigned a role.
+// This triggers the syncRolesToCustomClaims function in utilities.ts.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Helper function to check if user has any of the specified roles
+    function hasRole(role) {
+      return request.auth != null
+        && request.auth.token.roles != null
+        && role in request.auth.token.roles;
+    }
+
+    // Helper function to check if user has any content creation role
+    function canCreateContent() {
+      return hasRole('author')
+        || hasRole('editor')
+        || hasRole('admin')
+        || hasRole('developer')
+        || hasRole('owner');
+    }
+
+    // Blog assets - only content creators can write
+    match /blog/{path=**} {
+      allow read: if true;
+      allow write: if canCreateContent();
+    }
+
+    // Public assets - only admins/developers can write
+    match /public/{path=**} {
+      allow read: if true;
+      allow write: if hasRole('admin') || hasRole('developer') || hasRole('owner');
+    }
+
+    // User uploads - users can write to their own folder
+    match /users/{userId}/{path=**} {
+      allow read: if true;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Default: public read, no write
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

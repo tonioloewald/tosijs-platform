@@ -1,0 +1,15 @@
+[
+  {
+    "_id": "app",
+    "title": "My Site",
+    "subtitle": "A tagline for my site",
+    "description": "Welcome to my site",
+    "defaultPath": "default",
+    "host": "example.com"
+  },
+  {
+    "_id": "blog",
+    "prefix": "My Site | ",
+    "cacheDuration": 3600000
+  }
+]

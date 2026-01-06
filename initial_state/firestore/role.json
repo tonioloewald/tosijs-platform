@@ -1,0 +1,30 @@
+[
+  {
+    "_id": "owner-role",
+    "name": "Owner",
+    "contacts": [{ "type": "email", "value": "owner@gmail.com" }],
+    "roles": ["owner", "developer", "admin", "editor", "author"],
+    "userIds": []
+  },
+  {
+    "_id": "admin-role",
+    "name": "Admin",
+    "contacts": [{ "type": "email", "value": "admin@gmail.com" }],
+    "roles": ["admin", "editor", "author"],
+    "userIds": []
+  },
+  {
+    "_id": "writer-role",
+    "name": "Writer",
+    "contacts": [{ "type": "email", "value": "writer@gmail.com" }],
+    "roles": ["author"],
+    "userIds": []
+  },
+  {
+    "_id": "rando-role",
+    "name": "Random User",
+    "contacts": [{ "type": "email", "value": "rando@gmail.com" }],
+    "roles": [],
+    "userIds": []
+  }
+]

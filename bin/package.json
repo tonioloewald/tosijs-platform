@@ -1,0 +1,33 @@
+{
+  "name": "create-tosijs-platform-app",
+  "version": "1.0.0",
+  "description": "Create a full-stack web app with tosijs (front-end) and Firebase (back-end)",
+  "type": "module",
+  "bin": {
+    "create-tosijs-platform-app": "./create-tosijs-platform-app.js"
+  },
+  "files": [
+    "create-tosijs-platform-app.js"
+  ],
+  "keywords": [
+    "tosijs",
+    "firebase",
+    "create",
+    "scaffold",
+    "fullstack",
+    "web-app"
+  ],
+  "author": "Tonio Loewald",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tonioloewald/tosijs-platform.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tonioloewald/tosijs-platform/issues"
+  },
+  "homepage": "https://github.com/tonioloewald/tosijs-platform#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

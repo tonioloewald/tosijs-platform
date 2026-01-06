@@ -1,0 +1,42 @@
+[
+  {
+    "uid": "owner-uid",
+    "email": "owner@gmail.com",
+    "displayName": "Owner User",
+    "disabled": false,
+    "emailVerified": true,
+    "provider": "google"
+  },
+  {
+    "uid": "admin-uid",
+    "email": "admin@gmail.com",
+    "displayName": "Admin User",
+    "disabled": false,
+    "emailVerified": true,
+    "provider": "google"
+  },
+  {
+    "uid": "writer-uid",
+    "email": "writer@gmail.com",
+    "displayName": "Writer User",
+    "disabled": false,
+    "emailVerified": true,
+    "provider": "google"
+  },
+  {
+    "uid": "rando-uid",
+    "email": "rando@gmail.com",
+    "displayName": "Random User",
+    "disabled": false,
+    "emailVerified": true,
+    "provider": "google"
+  },
+  {
+    "uid": "password-uid",
+    "email": "testuser@example.com",
+    "displayName": "Test Password User",
+    "disabled": false,
+    "emailVerified": true,
+    "provider": "password"
+  }
+]

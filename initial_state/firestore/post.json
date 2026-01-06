@@ -1,0 +1,20 @@
+[
+  {
+    "_id": "welcome-post",
+    "title": "Welcome to the Blog",
+    "path": "welcome",
+    "content": "<p><img src=\"/stored/blog/tosi-favicon.png\" alt=\"tosijs favicon\" style=\"max-width: 100%; height: auto;\"></p><p>This is your first blog post. You can edit or delete it to get started.</p>\n<h2>Getting Started</h2>\n<ol>\n<li>Sign in with your admin account</li>\n<li>Navigate to the blog section</li>\n<li>Start creating content!</li>\n</ol>",
+    "date": "2025-01-01T00:00:00.000Z",
+    "summary": "Getting started with your new blog",
+    "keywords": ["welcome", "getting-started"]
+  },
+  {
+    "_id": "older-post",
+    "title": "An Earlier Post",
+    "path": "earlier-post",
+    "content": "<p><img src=\"/stored/blog/react-tosijs.png\" alt=\"react-tosijs product icon\" style=\"max-width: 100%; height: auto;\"></p><p>This is an older post to demonstrate the recent posts feature.</p>\n<p>When you have multiple posts, the blog will show them in chronological order with the most recent first.</p>",
+    "date": "2024-12-15T00:00:00.000Z",
+    "summary": "A sample older post for testing",
+    "keywords": ["test", "sample"]
+  }
+]

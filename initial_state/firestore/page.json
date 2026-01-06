@@ -1,0 +1,58 @@
+[
+  {
+    "_id": "default-page",
+    "title": "Home",
+    "description": "Welcome to this site",
+    "path": "default",
+    "imageUrl": "/logo.png",
+    "icon": "home",
+    "navSort": "a",
+    "source": "<h1>Hello World</h1>\n<p>Welcome to the site. Edit this page to customize your home page.</p><xin-lottie style=\"margin: auto\" src=\"/stored/public/tosi-platform.json\"></xin-lottie>",
+    "tags": ["public", "visible"],
+    "type": "website"
+  },
+  {
+    "_id": "blog-page",
+    "title": "Blog",
+    "description": "Blog posts",
+    "path": "blog",
+    "imageUrl": "/logo.png",
+    "icon": "blog",
+    "navSort": "b",
+    "source": "<xin-blog></xin-blog>",
+    "tags": ["blog", "public", "visible"],
+    "type": "website"
+  },
+  {
+    "_id": "about-page",
+    "title": "About…",
+    "description": "About this site",
+    "path": "about",
+    "imageUrl": "/logo.png",
+    "icon": "info",
+    "navSort": "z",
+    "source": "# About this site\n\nThis site was created using [tosijs-platform](https://github.com/tonioloewald/tosijs-platform), a modern web application framework built with TypeScript and Firebase.\n\n<tosi-esm module=\"example\" method=\"render\" pass-reference></tosi-esm>",
+    "tags": ["public", "visible"],
+    "type": "website"
+  },
+  {
+    "_id": "sekrit-page",
+    "title": "Secret Page",
+    "description": "A secret page for testing",
+    "path": "sekrit",
+    "imageUrl": "/logo.png",
+    "source": "<h1>Secret Page</h1>\n<p>This page is not public.</p>",
+    "tags": [],
+    "type": "website"
+  },
+  {
+    "_id": "404-page",
+    "title": "Page Not Found",
+    "description": "The requested page could not be found",
+    "path": "404",
+    "imageUrl": "/logo.png",
+    "source": "<h1>404 - Page Not Found</h1>\n<p>The page you're looking for doesn't exist.</p>",
+    "tags": ["public"],
+    "type": "website"
+  }
+]

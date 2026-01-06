@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "lib": ["es2020", "DOM"],
+    "module": "esnext",
+    "target": "esnext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "downlevelIteration": true,
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true,
+    "types": ["bun-types"],
+    "noEmit": true
+  },
+  "include": ["src", "functions/shared"],
+  "exclude": ["functions/src"]
+}

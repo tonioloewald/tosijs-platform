@@ -1,0 +1,10 @@
+[
+  {
+    "_id": "example-module",
+    "name": "example",
+    "source": "// Example module\nexport const hello = () => 'Hello, World!'\n\nexport const render = (element) => {\n  const div = document.createElement('div')\n  div.textContent = 'inserted by example'\n  element.after(div)\n}\n",
+    "version": "1.0.0",
+    "tags": ["public", "visible"],
+    "revisions": 0
+  }
+]
