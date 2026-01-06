@@ -1,15 +1,14 @@
 {
-  "name": "create-tosijs-platform-app",
+  "name": "tosijs-platform",
   "version": "1.0.0",
-  "description": "Create a tosijs-platform web application - Firebase + tosijs stack as easy as PHP",
+  "description": "Full-stack web application platform - Firebase + tosijs, simpler than PHP/LAMP",
   "keywords": [
     "tosijs",
     "firebase",
     "cms",
     "blog",
     "platform",
-    "create-app",
-    "starter"
+    "full-stack"
   ],
   "homepage": "https://github.com/tonioloewald/tosijs-platform",
   "repository": {
@@ -19,22 +18,9 @@
   "license": "MIT",
   "author": "Tonio Loewald",
   "type": "module",
-  "bin": {
-    "create-tosijs-platform-app": "./bin/create-tosijs-platform-app.js"
-  },
   "files": [
-    "bin",
-    "src",
-    "functions",
-    "public",
-    "initial_state",
-    "dev.ts",
-    "firebase.json",
-    "firestore.rules",
-    "firestore.indexes.json",
-    "storage.rules",
-    "tsconfig.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "start": "bun --watch dev.ts",
