@@ -1,6 +1,6 @@
 {
   "name": "tosijs-platform",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "description": "Full-stack web application platform - Firebase + tosijs, simpler than PHP/LAMP",
   "keywords": [
     "tosijs",
@@ -28,11 +28,14 @@
     "start-emulated": "bun run kill-ports && bun run build && (cd functions && bun run build) && bun scripts/start-emulated.js",
     "seed": "bun scripts/seed-emulators.js",
     "seed-clear": "bun scripts/seed-emulators.js --clear",
+    "seed-production": "bun scripts/seed-production.js",
     "build": "bun build ./src/index.ts --outdir ./dist --sourcemap=linked --minify && cp -a public/. dist/ && rm dist/index.html",
     "format": "bun prettier --write src functions/src",
     "latest": "bun upgrade && bun install && cd functions && npm install && cd ..",
-    "deploy-hosting": "firebase deploy --only hosting && echo 'deployed hosting'",
-    "deploy-functions": "firebase deploy --only functions && echo 'deployed functions'"
+    "deploy": "firebase deploy",
+    "deploy-hosting": "firebase deploy --only hosting",
+    "deploy-functions": "firebase deploy --only functions",
+    "initial-deploy": "bun scripts/initial-deploy.js"
   },
   "devDependencies": {
     "@types/bun": "^1.3.5",

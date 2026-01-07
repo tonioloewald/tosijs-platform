@@ -633,7 +633,12 @@ setup()
   }
   console.log('\n━'.repeat(60))
 
-  console.log('\n📋 Next Steps:\n')
+  console.log('\n🚀 To deploy your site:\n')
+  console.log(`   cd ${projectName}`)
+  console.log(`   bun initial-deploy`)
+  console.log('\n━'.repeat(60))
+
+  console.log('\n📋 Detailed Steps:\n')
 
   if (hasBlazePlan === false) {
     console.log('⚠️  FIRST: Upgrade to Blaze Plan (REQUIRED)')
@@ -672,20 +677,19 @@ setup()
     console.log(`   • ⚠️  UPGRADE TO BLAZE PLAN (required for Cloud Functions)`)
   }
 
-  console.log(`\n3. Deploy Cloud Functions:`)
+  console.log(
+    `\n3. Run initial deployment (builds, deploys, and seeds database):`
+  )
   console.log(`   cd ${projectName}`)
-  console.log(`   bun deploy-functions`)
+  console.log(`   bun initial-deploy`)
 
-  console.log(`\n4. Deploy Hosting:`)
-  console.log(`   bun deploy-hosting`)
+  console.log(`\n4. Run setup to grant yourself owner access:`)
+  console.log(`   node setup.js`)
 
   console.log(`\n5. Visit your site and sign in with ${adminEmail}`)
   console.log(`   https://${firebaseProjectId}.web.app`)
 
-  console.log(`\n6. Run setup to grant admin access:`)
-  console.log(`   node setup.js`)
-
-  console.log(`\n7. Start local development:`)
+  console.log(`\n6. Start local development:`)
   console.log(`   bun start                  # Uses production Firebase`)
   console.log(`   bun start-emulated         # Uses local emulators`)
   console.log(`   Visit https://localhost:8020`)
