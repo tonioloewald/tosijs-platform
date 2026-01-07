@@ -148,7 +148,7 @@ function getProjects() {
   return []
 }
 
-async function getProjectId() {
+async function getProjectId(defaultId) {
   console.log('\n📋 Firebase Project Configuration\n')
 
   const projects = getProjects()
@@ -161,13 +161,23 @@ async function getProjectId() {
     console.log()
   }
 
-  let projectId = await question('Enter Firebase Project ID: ')
+  const defaultValid = validateProjectId(defaultId)
+  const prompt = defaultValid
+    ? `Firebase Project ID [${defaultId}]: `
+    : 'Firebase Project ID: '
+
+  let projectId = await question(prompt)
+
+  // Use default if they just hit enter
+  if (!projectId && defaultValid) {
+    projectId = defaultId
+  }
 
   while (!validateProjectId(projectId)) {
     console.log(
       '❌ Invalid project ID. Use lowercase letters, numbers, and hyphens (6-30 chars).'
     )
-    projectId = await question('Enter Firebase Project ID: ')
+    projectId = await question('Firebase Project ID: ')
   }
 
   // Check if project exists in user's account
@@ -369,7 +379,7 @@ async function main() {
   await ensurePrerequisites()
 
   // Step 2 & 3: Get and validate project ID
-  const projectId = await getProjectId()
+  const projectId = await getProjectId(projectName)
 
   // Step 4: Ensure Blaze plan
   await ensureBlazePlan(projectId)
