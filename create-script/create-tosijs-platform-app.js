@@ -1,4 +1,4 @@
-#! /usr/bin/env node
+#!/usr/bin/env node
 
 'use strict'
 
@@ -7,16 +7,22 @@ import path from 'path'
 import fs from 'fs'
 import readline from 'readline'
 
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-})
-
+// Helper to prompt user
 function question(query) {
-  return new Promise((resolve) => rl.question(query, resolve))
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  })
+  return new Promise((resolve) => {
+    rl.question(query, (answer) => {
+      rl.close()
+      resolve(answer)
+    })
+  })
 }
 
-function execCommand(command, options = {}) {
+// Execute shell command
+function exec(command, options = {}) {
   try {
     return execSync(command, {
       stdio: options.silent ? 'pipe' : 'inherit',
@@ -24,12 +30,40 @@ function execCommand(command, options = {}) {
       ...options,
     })
   } catch (error) {
-    if (!options.allowFailure) {
-      throw error
+    if (options.allowFailure) {
+      return null
     }
+    throw error
+  }
+}
+
+// Execute and parse JSON output
+function execJson(command) {
+  try {
+    const result = execSync(command, {
+      stdio: 'pipe',
+      encoding: 'utf-8',
+    })
+    return JSON.parse(result)
+  } catch {
     return null
   }
 }
+
+// Validation helpers
+function validateProjectId(projectId) {
+  const re = /^[a-z][a-z0-9-]*[a-z0-9]$/
+  return re.test(projectId) && projectId.length >= 6 && projectId.length <= 30
+}
+
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return re.test(email)
+}
+
+// ============================================================================
+// Step 1: Check prerequisites (Bun, Firebase CLI, logged in)
+// ============================================================================
 
 function checkBun() {
   try {
@@ -39,8 +73,7 @@ function checkBun() {
     }).trim()
     console.log(`✓ Bun installed (${version})`)
     return true
-  } catch (error) {
-    console.log('✗ Bun not found')
+  } catch {
     return false
   }
 }
@@ -53,8 +86,7 @@ function checkFirebaseCLI() {
     }).trim()
     console.log(`✓ Firebase CLI installed (${version})`)
     return true
-  } catch (error) {
-    console.log('✗ Firebase CLI not found')
+  } catch {
     return false
   }
 }
@@ -68,104 +100,257 @@ function checkFirebaseLogin() {
     if (result.includes('No authorized accounts')) {
       return false
     }
-    console.log('✓ Firebase CLI is logged in')
+    console.log('✓ Logged in to Firebase')
     return true
-  } catch (error) {
+  } catch {
     return false
   }
 }
 
-function validateEmail(email) {
-  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-  return re.test(email)
-}
+async function ensurePrerequisites() {
+  console.log('\n📋 Checking prerequisites...\n')
 
-function validateProjectId(projectId) {
-  const re = /^[a-z0-9-]+$/
-  return re.test(projectId) && projectId.length >= 6 && projectId.length <= 30
-}
+  if (!checkBun()) {
+    console.log('\n❌ Bun is required but not installed.')
+    console.log('\nInstall Bun:')
+    console.log('  curl -fsSL https://bun.sh/install | bash\n')
+    process.exit(1)
+  }
 
-function getFirebaseConfig(projectId) {
-  try {
-    console.log('\n🔍 Fetching Firebase configuration...')
-    const appsJson = execSync(
-      `firebase apps:sdkconfig web --project ${projectId}`,
-      {
-        stdio: 'pipe',
-        encoding: 'utf-8',
-      }
-    )
+  if (!checkFirebaseCLI()) {
+    console.log('\n❌ Firebase CLI is required but not installed.')
+    console.log('\nInstall Firebase CLI:')
+    console.log('  bun install -g firebase-tools\n')
+    process.exit(1)
+  }
 
-    const config = JSON.parse(appsJson)
-    if (config && config.projectId) {
-      console.log('✓ Successfully retrieved Firebase config')
-      return config
+  if (!checkFirebaseLogin()) {
+    console.log('\n❌ Not logged in to Firebase.')
+    console.log('\nLogging you in now...\n')
+    exec('firebase login')
+
+    if (!checkFirebaseLogin()) {
+      console.log('\n❌ Login failed. Please try again.\n')
+      process.exit(1)
     }
-    return null
-  } catch (error) {
-    console.log('⚠ Could not auto-fetch Firebase config')
-    if (error.message.includes('No apps found')) {
-      console.log('  You need to create a Web App in Firebase Console first.')
-    }
-    return null
   }
 }
 
-function checkFirestoreExists(projectId) {
-  try {
-    execSync(`firebase firestore:databases:list --project ${projectId}`, {
-      stdio: 'pipe',
-      encoding: 'utf-8',
+// ============================================================================
+// Step 2 & 3: Get project ID and verify it exists
+// ============================================================================
+
+function getProjects() {
+  const result = execJson('firebase projects:list --json')
+  if (result?.status === 'success') {
+    return result.result || []
+  }
+  return []
+}
+
+async function getProjectId() {
+  console.log('\n📋 Firebase Project Configuration\n')
+
+  const projects = getProjects()
+
+  if (projects.length > 0) {
+    console.log('Your Firebase projects:')
+    projects.forEach((p, i) => {
+      console.log(`  ${i + 1}. ${p.projectId} (${p.displayName})`)
     })
-    return true
-  } catch (error) {
-    return false
+    console.log()
   }
+
+  let projectId = await question('Enter Firebase Project ID: ')
+
+  while (!validateProjectId(projectId)) {
+    console.log(
+      '❌ Invalid project ID. Use lowercase letters, numbers, and hyphens (6-30 chars).'
+    )
+    projectId = await question('Enter Firebase Project ID: ')
+  }
+
+  // Check if project exists in user's account
+  const project = projects.find((p) => p.projectId === projectId)
+
+  if (!project) {
+    console.log(
+      `\n❌ Project "${projectId}" not found in your Firebase account.`
+    )
+    console.log('\nTo create a new project:')
+    console.log('  1. Go to: https://console.firebase.google.com')
+    console.log('  2. Click "Add project"')
+    console.log(`  3. Name it "${projectId}"`)
+    console.log('  4. Enable Google Analytics (optional)')
+    console.log('  5. Upgrade to Blaze plan (required for Cloud Functions)')
+    console.log('\nThen run this command again.\n')
+    process.exit(1)
+  }
+
+  console.log(`✓ Found project: ${project.displayName}`)
+  return projectId
 }
+
+// ============================================================================
+// Step 4: Check Blaze plan
+// ============================================================================
 
 function checkBlazePlan(projectId) {
+  // Try to list functions - this will fail with specific error if not on Blaze
   try {
-    // Try to get project info - Blaze plan info is in the project details
-    const projectInfo = execSync(`firebase projects:list --json`, {
-      stdio: 'pipe',
-      encoding: 'utf-8',
-    })
-
-    const projects = JSON.parse(projectInfo)
-    const project = projects.find((p) => p.projectId === projectId)
-
-    // If we can't determine, return null (unknown)
-    // The billing plan isn't directly in projects:list, so we'll try another approach
-
-    // Try to list functions - this will fail if not on Blaze plan
     execSync(`firebase functions:list --project ${projectId}`, {
       stdio: 'pipe',
       encoding: 'utf-8',
     })
-
-    // If the command succeeds, they likely have functions enabled (Blaze plan)
     return true
   } catch (error) {
-    // If error mentions billing or quota, definitely not on Blaze
+    const msg = error.message || error.stderr || ''
     if (
-      error.message.includes('billing') ||
-      error.message.includes('quota') ||
-      error.message.includes('upgrade') ||
-      error.message.includes('requires a paid plan')
+      msg.includes('billing') ||
+      msg.includes('Billing account') ||
+      msg.includes('upgrade') ||
+      msg.includes('pay-as-you-go') ||
+      msg.includes('Cloud Functions')
     ) {
       return false
     }
-    // Otherwise, we can't determine - return null
-    return null
+    // Could be other errors (no functions deployed yet, etc.) - assume OK
+    return true
   }
 }
 
+async function ensureBlazePlan(projectId) {
+  console.log('\n🔍 Checking billing plan...')
+
+  const hasBlaze = checkBlazePlan(projectId)
+
+  if (!hasBlaze) {
+    console.log('\n❌ Blaze plan required but not detected.')
+    console.log(
+      '\ntosijs-platform uses Cloud Functions, which require the Blaze (pay-as-you-go) plan.'
+    )
+    console.log('\n💡 Blaze includes generous FREE tier:')
+    console.log('   • 2M function invocations/month')
+    console.log('   • 5GB storage')
+    console.log('   • 10GB hosting transfer')
+    console.log('   Most small sites stay completely free!')
+    console.log('\nTo upgrade:')
+    console.log(
+      `  1. Go to: https://console.firebase.google.com/project/${projectId}/usage/details`
+    )
+    console.log('  2. Click "Modify plan" → "Blaze"')
+    console.log('  3. Add billing account')
+    console.log('\nThen run this command again.\n')
+    process.exit(1)
+  }
+
+  console.log('✓ Blaze plan active')
+  return true
+}
+
+// ============================================================================
+// Step 5: Check/create web app
+// ============================================================================
+
+function getWebApps(projectId) {
+  const result = execJson(
+    `firebase apps:list WEB --project ${projectId} --json`
+  )
+  if (result?.status === 'success') {
+    return result.result || []
+  }
+  return []
+}
+
+function createWebApp(projectId, appName) {
+  console.log(`\n📱 Creating web app "${appName}"...`)
+  try {
+    exec(`firebase apps:create WEB "${appName}" --project ${projectId}`, {
+      silent: true,
+    })
+    console.log('✓ Web app created')
+    return true
+  } catch (error) {
+    console.log('❌ Failed to create web app:', error.message)
+    return false
+  }
+}
+
+async function ensureWebApp(projectId, projectName) {
+  console.log('\n🔍 Checking web apps...')
+
+  const apps = getWebApps(projectId)
+
+  // Look for an app with matching name
+  let app = apps.find((a) => a.displayName === projectName)
+
+  if (!app && apps.length > 0) {
+    console.log('\nExisting web apps:')
+    apps.forEach((a, i) => {
+      console.log(`  ${i + 1}. ${a.displayName}`)
+    })
+
+    const answer = await question(
+      `\nUse existing app, or create new "${projectName}"? [1-${apps.length}/new]: `
+    )
+
+    if (answer.toLowerCase() === 'new') {
+      createWebApp(projectId, projectName)
+      // Refresh the list
+      const newApps = getWebApps(projectId)
+      app = newApps.find((a) => a.displayName === projectName)
+    } else {
+      const index = parseInt(answer) - 1
+      if (index >= 0 && index < apps.length) {
+        app = apps[index]
+      }
+    }
+  } else if (!app) {
+    // No apps exist, create one
+    createWebApp(projectId, projectName)
+    const newApps = getWebApps(projectId)
+    app = newApps.find((a) => a.displayName === projectName) || newApps[0]
+  }
+
+  if (!app) {
+    console.log('\n❌ No web app available. Please create one manually:')
+    console.log(
+      `   https://console.firebase.google.com/project/${projectId}/settings/general`
+    )
+    process.exit(1)
+  }
+
+  console.log(`✓ Using web app: ${app.displayName}`)
+  return app
+}
+
+// ============================================================================
+// Step 6: Get SDK config
+// ============================================================================
+
+function getWebAppConfig(projectId, appId) {
+  const result = execJson(
+    `firebase apps:sdkconfig WEB ${appId} --project ${projectId} --json`
+  )
+  if (result?.status === 'success' && result.result?.sdkConfig) {
+    return result.result.sdkConfig
+  }
+  return null
+}
+
+// ============================================================================
+// Main
+// ============================================================================
+
 async function main() {
   console.log('\n🚀 Create tosijs-platform App\n')
+  console.log('━'.repeat(50))
 
+  // Check command line args
   if (process.argv.length < 3) {
-    console.log('Usage: npx create-tosijs-platform-app <project-name>')
-    console.log('Example: npx create-tosijs-platform-app my-awesome-site\n')
+    console.log('\nUsage: bunx create-tosijs-platform-app <project-name>')
+    console.log('\nExample:')
+    console.log('  bunx create-tosijs-platform-app my-awesome-site\n')
     process.exit(1)
   }
 
@@ -174,156 +359,105 @@ async function main() {
   const projectPath = path.join(currentPath, projectName)
   const gitRepo = 'https://github.com/tonioloewald/tosijs-platform.git'
 
-  console.log('Checking prerequisites...\n')
-
-  const hasBun = checkBun()
-  if (!hasBun) {
-    console.log('\n❌ Bun is required but not installed.')
-    console.log('\nTo install Bun, run:')
-    console.log('  curl -fsSL https://bun.sh/install | bash\n')
-    console.log('Then run this command again.\n')
+  // Check if directory already exists
+  if (fs.existsSync(projectPath)) {
+    console.log(`\n❌ Directory "${projectName}" already exists.\n`)
     process.exit(1)
   }
 
-  const hasFirebase = checkFirebaseCLI()
-  if (!hasFirebase) {
-    console.log('\n❌ Firebase CLI is required but not installed.')
-    console.log('\nTo install Firebase CLI, run:')
-    console.log('  bun install -g firebase-tools\n')
-    console.log('Then run this command again.\n')
+  // Step 1: Prerequisites
+  await ensurePrerequisites()
+
+  // Step 2 & 3: Get and validate project ID
+  const projectId = await getProjectId()
+
+  // Step 4: Ensure Blaze plan
+  await ensureBlazePlan(projectId)
+
+  // Step 5: Ensure web app exists
+  const webApp = await ensureWebApp(projectId, projectName)
+
+  // Step 6: Get SDK config
+  console.log('\n🔍 Fetching SDK configuration...')
+  const sdkConfig = getWebAppConfig(projectId, webApp.appId)
+
+  if (!sdkConfig) {
+    console.log('❌ Failed to get SDK config')
     process.exit(1)
   }
+  console.log('✓ Got SDK configuration')
 
-  const isLoggedIn = checkFirebaseLogin()
-  if (!isLoggedIn) {
-    console.log('\n❌ You need to be logged in to Firebase.')
-    console.log('\nRun this command to log in:')
-    console.log('  firebase login\n')
-    console.log('Then run this command again.\n')
-    process.exit(1)
-  }
-
-  console.log('\n📋 Project Configuration\n')
-  console.log('Required information:\n')
-
-  let firebaseProjectId = await question('Firebase Project ID: ')
-  while (!validateProjectId(firebaseProjectId)) {
-    console.log(
-      '❌ Invalid project ID. Use lowercase letters, numbers, and hyphens only (6-30 characters).'
-    )
-    firebaseProjectId = await question('Firebase Project ID: ')
-  }
-
-  let adminEmail = await question('Admin Email (Google account): ')
+  // Get admin email
+  console.log()
+  let adminEmail = await question(
+    'Admin email (Google account for owner access): '
+  )
   while (!validateEmail(adminEmail)) {
     console.log('❌ Invalid email address.')
-    adminEmail = await question('Admin Email (Google account): ')
+    adminEmail = await question('Admin email: ')
   }
 
-  rl.close()
-
-  const firestoreExists = checkFirestoreExists(firebaseProjectId)
-  if (firestoreExists) {
-    console.log(
-      '\n⚠️  Warning: Firestore database already exists in this project.'
-    )
-    console.log('This tool will NOT modify your existing data.\n')
-  }
-
-  const hasBlazePlan = checkBlazePlan(firebaseProjectId)
-  if (hasBlazePlan === false) {
-    console.log('\n🚨 CRITICAL: Blaze Plan Required\n')
-    console.log('━'.repeat(60))
-    console.log(
-      '\ntosijs-platform uses Cloud Functions for secure data access.'
-    )
-    console.log(
-      'Cloud Functions require the Firebase Blaze (pay-as-you-go) plan.\n'
-    )
-    console.log('⚠️  Your project is currently on the FREE (Spark) plan.')
-    console.log('\n❌ The platform will NOT work without upgrading.\n')
-    console.log('To upgrade to Blaze plan:')
-    console.log(
-      `1. Visit: https://console.firebase.google.com/project/${firebaseProjectId}/usage/details`
-    )
-    console.log('2. Click "Modify plan"')
-    console.log('3. Select "Blaze - Pay as you go"')
-    console.log('4. Add a billing account\n')
-    console.log('💡 Blaze plan includes generous free tier:')
-    console.log('   • 2M function invocations/month FREE')
-    console.log('   • 5GB storage FREE')
-    console.log('   • Most small sites stay within free limits\n')
-    console.log('━'.repeat(60))
-
-    const answer = await new Promise((resolve) => {
-      const newRl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-      })
-      newRl.question(
-        '\nContinue anyway? (you must upgrade before deploying) [y/N]: ',
-        (ans) => {
-          newRl.close()
-          resolve(ans)
-        }
-      )
-    })
-
-    if (!answer || answer.toLowerCase() !== 'y') {
-      console.log(
-        '\nSetup cancelled. Please upgrade to Blaze plan and try again.\n'
-      )
-      process.exit(0)
-    }
-
-    console.log(
-      '\n⚠️  Remember: You MUST upgrade to Blaze plan before deploying!\n'
-    )
-  } else if (hasBlazePlan === true) {
-    console.log('✓ Blaze plan detected - Cloud Functions enabled')
-  } else {
-    console.log('⚠️  Could not verify billing plan (you may need Blaze plan)')
-  }
-
-  const firebaseConfig = getFirebaseConfig(firebaseProjectId)
-
-  if (!firebaseConfig) {
-    console.log('\n⚠️  Could not automatically fetch Firebase config.')
-    console.log('\nYou will need to manually configure src/firebase-config.ts')
-    console.log('Get your config from:')
-    console.log(
-      `https://console.firebase.google.com/project/${firebaseProjectId}/settings/general\n`
-    )
-  }
+  // ============================================================================
+  // Create project
+  // ============================================================================
 
   console.log('\n📦 Creating project...\n')
 
-  try {
-    fs.mkdirSync(projectPath)
-  } catch (err) {
-    if (err.code === 'EEXIST') {
-      console.log(`❌ Directory "${projectName}" already exists.\n`)
-    } else {
-      console.log(`❌ Error creating directory: ${err.message}\n`)
-    }
-    process.exit(1)
-  }
+  fs.mkdirSync(projectPath)
 
-  console.log('📥 Downloading template...')
-  execCommand(`git clone --depth 1 ${gitRepo} ${projectPath}`)
+  console.log('📥 Cloning template...')
+  exec(`git clone --depth 1 ${gitRepo} ${projectPath}`, { silent: true })
 
   process.chdir(projectPath)
 
   console.log('🧹 Cleaning up...')
   fs.rmSync(path.join(projectPath, '.git'), { recursive: true })
-  // Remove create-script directory (utility scripts are in scripts/)
   if (fs.existsSync(path.join(projectPath, 'create-script'))) {
     fs.rmSync(path.join(projectPath, 'create-script'), { recursive: true })
   }
 
-  // Configure initial_state: update owner role with admin email
-  // (keeps other test roles for emulator development)
-  console.log('📝 Configuring initial state...')
+  // Configure firebase-config.ts with full SDK config
+  console.log('⚙️  Configuring Firebase...')
+
+  const configContent = `// Auto-generated by create-tosijs-platform-app
+
+const PROJECT_ID = '${sdkConfig.projectId}'
+
+export const PRODUCTION_BASE = \`//us-central1-\${PROJECT_ID}.cloudfunctions.net/\`
+
+export const config = {
+  apiKey: '${sdkConfig.apiKey}',
+  authDomain: '${sdkConfig.authDomain}',
+  projectId: '${sdkConfig.projectId}',
+  storageBucket: '${sdkConfig.storageBucket}',
+  messagingSenderId: '${sdkConfig.messagingSenderId}',
+  appId: '${sdkConfig.appId}',
+  measurementId: '${sdkConfig.measurementId || ''}',
+}
+`
+  fs.writeFileSync(
+    path.join(projectPath, 'src/firebase-config.ts'),
+    configContent
+  )
+
+  // Configure .firebaserc
+  fs.writeFileSync(
+    path.join(projectPath, '.firebaserc'),
+    JSON.stringify({ projects: { default: projectId } }, null, 2)
+  )
+
+  // Update package.json
+  const packageJson = JSON.parse(
+    fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8')
+  )
+  packageJson.name = projectName
+  packageJson.version = '0.1.0'
+  fs.writeFileSync(
+    path.join(projectPath, 'package.json'),
+    JSON.stringify(packageJson, null, 2)
+  )
+
+  // Update initial_state role with admin email
   const roleFilePath = path.join(
     projectPath,
     'initial_state/firestore/role.json'
@@ -332,105 +466,44 @@ async function main() {
     const roles = JSON.parse(fs.readFileSync(roleFilePath, 'utf8'))
     const ownerRole = roles.find((r) => r._id === 'owner-role')
     if (ownerRole) {
-      // Update the owner role's email contact
       ownerRole.contacts = [{ type: 'email', value: adminEmail }]
     }
     fs.writeFileSync(roleFilePath, JSON.stringify(roles, null, 2))
   }
 
-  // Remove test auth users (only used for emulator development)
+  // Clear test auth users
   const authUsersPath = path.join(projectPath, 'initial_state/auth/users.json')
   if (fs.existsSync(authUsersPath)) {
     fs.writeFileSync(authUsersPath, '[]')
   }
 
-  console.log('⚙️  Configuring project...')
-
-  let configContent
-  if (firebaseConfig) {
-    configContent = `const PROJECT_ID = '${firebaseProjectId}'
-
-export const PRODUCTION_BASE = \`//us-central1-\${PROJECT_ID}.cloudfunctions.net/\`
-
-export const config = {
-  authDomain: '${firebaseConfig.authDomain}',
-  projectId: '${firebaseConfig.projectId}',
-  storageBucket: '${firebaseConfig.storageBucket}',
-  apiKey: '${firebaseConfig.apiKey}',
-  messagingSenderId: '${firebaseConfig.messagingSenderId}',
-  appId: '${firebaseConfig.appId}',
-  measurementId: '${firebaseConfig.measurementId || 'G-XXXXXXXXXX'}',
-}
-`
-  } else {
-    configContent = `const PROJECT_ID = '${firebaseProjectId}'
-
-export const PRODUCTION_BASE = \`//us-central1-\${PROJECT_ID}.cloudfunctions.net/\`
-
-export const config = {
-  authDomain: \`\${PROJECT_ID}.firebaseapp.com\`,
-  projectId: PROJECT_ID,
-  storageBucket: \`\${PROJECT_ID}.appspot.com\`,
-  apiKey: 'YOUR_API_KEY_HERE',
-  messagingSenderId: 'YOUR_SENDER_ID_HERE',
-  appId: 'YOUR_APP_ID_HERE',
-  measurementId: 'YOUR_MEASUREMENT_ID_HERE',
-}
-`
-  }
-
-  fs.writeFileSync(
-    path.join(projectPath, 'src/firebase-config.ts'),
-    configContent
-  )
-
-  // Update config.json with project-specific values
+  // Update config.json
   const configJsonPath = path.join(
     projectPath,
     'initial_state/firestore/config.json'
   )
-  const configData = JSON.parse(fs.readFileSync(configJsonPath, 'utf8'))
-
-  // Update app config
-  const appConfig = configData.find((c) => c._id === 'app')
-  if (appConfig) {
-    appConfig.title = projectName
-    appConfig.subtitle = `Welcome to ${projectName}`
-    appConfig.description = `A tosijs-platform site`
-    appConfig.host = `${firebaseProjectId}.web.app`
+  if (fs.existsSync(configJsonPath)) {
+    const configData = JSON.parse(fs.readFileSync(configJsonPath, 'utf8'))
+    const appConfig = configData.find((c) => c._id === 'app')
+    if (appConfig) {
+      appConfig.title = projectName
+      appConfig.subtitle = `Welcome to ${projectName}`
+      appConfig.description = `A tosijs-platform site`
+      appConfig.host = `${projectId}.web.app`
+    }
+    fs.writeFileSync(configJsonPath, JSON.stringify(configData, null, 2))
   }
 
-  // Update blog config
-  const blogConfig = configData.find((c) => c._id === 'blog')
-  if (blogConfig) {
-    blogConfig.prefix = `${projectName} | `
-  }
-
-  fs.writeFileSync(configJsonPath, JSON.stringify(configData, null, 2))
-
-  const firebaserc = {
-    projects: {
-      default: firebaseProjectId,
-    },
-  }
-
-  fs.writeFileSync(
-    path.join(projectPath, '.firebaserc'),
-    JSON.stringify(firebaserc, null, 2)
-  )
-
+  // Generate index.html
   const indexHtml = `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-
     <title>${projectName}</title>
     <meta name="description" content="A tosijs-platform site" />
-    <meta property="og:url" content="" />
-    <meta property="og:title" content="" />
-    <meta property="og:description" content="" />
+    <meta property="og:title" content="${projectName}" />
+    <meta property="og:description" content="A tosijs-platform site" />
     <meta property="og:image" content="/logo.png" />
-
     <link rel="icon" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#000000" />
@@ -441,305 +514,152 @@ export const config = {
   <body></body>
 </html>
 `
-
   fs.writeFileSync(path.join(projectPath, 'public/index.html'), indexHtml)
 
-  const packageJson = JSON.parse(
-    fs.readFileSync(path.join(projectPath, 'package.json'), 'utf8')
-  )
-  packageJson.name = projectName
-  packageJson.version = '0.1.0'
-  delete packageJson.bin
-
-  fs.writeFileSync(
-    path.join(projectPath, 'package.json'),
-    JSON.stringify(packageJson, null, 2)
-  )
-
+  // Generate setup.js
   const setupScript = `#!/usr/bin/env node
-
-/*
- * Setup admin user and seed initial content
- * Run after deploying functions: node setup.js
- */
+// Setup script - run after deploying: node setup.js
 
 import admin from 'firebase-admin'
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const ADMIN_EMAIL = '${adminEmail}'
-const PROJECT_ID = '${firebaseProjectId}'
-const SKIP_EXISTING_DATA = ${firestoreExists}
+const PROJECT_ID = '${projectId}'
 
-admin.initializeApp({
-  projectId: PROJECT_ID,
-})
-
+admin.initializeApp({ projectId: PROJECT_ID })
 const db = admin.firestore()
 
-async function seedFirestore() {
-  if (SKIP_EXISTING_DATA) {
-    console.log('Skipping seed data: database already exists')
-    return
-  }
-
-  console.log('Seeding Firestore from initial_state...')
-  const firestorePath = path.join(__dirname, 'initial_state/firestore')
-
-  if (!fs.existsSync(firestorePath)) {
-    console.log('  No seed data found')
-    return
-  }
-
-  const files = fs.readdirSync(firestorePath).filter(f => f.endsWith('.json'))
-
-  for (const file of files) {
-    const collectionPath = file.replace(/\\.json$/, '').replace(/\\|/g, '/')
-    const filePath = path.join(firestorePath, file)
-
-    try {
-      const documents = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-
-      if (!Array.isArray(documents)) continue
-
-      let count = 0
-      for (const doc of documents) {
-        const docId = doc._id
-        if (!docId) continue
-
-        const data = { ...doc }
-        delete data._id
-
-        const now = new Date().toISOString()
-        data._created = data._created || now
-        data._modified = data._modified || now
-        data._path = \`\${collectionPath}/\${docId}\`
-
-        await db.collection(collectionPath).doc(docId).set(data)
-        count++
-      }
-
-      console.log(\`  \${collectionPath}: \${count} documents\`)
-    } catch (error) {
-      console.log(\`  Error processing \${file}: \${error.message}\`)
-    }
-  }
-}
-
-async function setupAdminRole() {
-  console.log('Setting up admin role...\\n')
+async function setup() {
+  console.log('\\nSetting up admin access...\\n')
 
   try {
-    const userByEmail = await admin.auth().getUserByEmail(ADMIN_EMAIL)
-    const userId = userByEmail.uid
+    const user = await admin.auth().getUserByEmail(ADMIN_EMAIL)
+    console.log(\`Found user: \${ADMIN_EMAIL} (uid: \${user.uid})\`)
 
-    console.log(\`Found user: \${ADMIN_EMAIL} (uid: \${userId})\`)
-
-    // Update the owner role document to include this user's UID
     const rolesSnapshot = await db.collection('role')
       .where('contacts', 'array-contains', { type: 'email', value: ADMIN_EMAIL })
       .get()
 
-    if (!rolesSnapshot.empty) {
-      for (const doc of rolesSnapshot.docs) {
-        const data = doc.data()
-        if (!data.userIds?.includes(userId)) {
-          await doc.ref.update({
-            userIds: admin.firestore.FieldValue.arrayUnion(userId)
-          })
-          console.log(\`Added uid to role: \${data.name}\`)
-        } else {
-          console.log(\`User already in role: \${data.name}\`)
-        }
+    for (const doc of rolesSnapshot.docs) {
+      const data = doc.data()
+      if (!data.userIds?.includes(user.uid)) {
+        await doc.ref.update({
+          userIds: admin.firestore.FieldValue.arrayUnion(user.uid)
+        })
+        console.log(\`Added to role: \${data.name}\`)
+      } else {
+        console.log(\`Already in role: \${data.name}\`)
       }
-    } else {
-      console.log('No matching role found, creating owner role...')
-      await db.collection('role').doc('owner-role').set({
-        name: 'Owner',
-        contacts: [{ type: 'email', value: ADMIN_EMAIL }],
-        roles: ['owner', 'developer', 'admin', 'editor', 'author'],
-        userIds: [userId],
-        _created: new Date().toISOString(),
-        _modified: new Date().toISOString(),
-        _path: 'role/owner-role'
-      })
     }
 
-    console.log('\\nAdmin role setup complete!')
+    console.log('\\n✓ Setup complete!')
+    console.log(\`\\nYou can now sign in at: https://${projectId}.web.app\`)
+
   } catch (error) {
     if (error.code === 'auth/user-not-found') {
-      console.error(\`\\nUser \${ADMIN_EMAIL} does not exist in Firebase Auth.\`)
-      console.error('\\nNext steps:')
-      console.error('  1. Deploy functions: bun deploy-functions')
-      console.error('  2. Deploy hosting: bun deploy-hosting')
-      console.error(\`  3. Visit your site and sign in with \${ADMIN_EMAIL}\`)
-      console.error('  4. Run this script again: node setup.js')
-      return false
+      console.log(\`User \${ADMIN_EMAIL} not found.\\n\`)
+      console.log('Please:')
+      console.log(\`  1. Visit https://${projectId}.web.app\`)
+      console.log(\`  2. Sign in with \${ADMIN_EMAIL}\`)
+      console.log('  3. Run this script again: node setup.js')
+    } else {
+      throw error
     }
-    throw error
-  }
-  return true
-}
-
-async function setup() {
-  console.log('\\nSetting up ${projectName}...\\n')
-
-  try {
-    await seedFirestore()
-    console.log('')
-    const success = await setupAdminRole()
-
-    if (success) {
-      console.log(\`\\nYou can now:
-  1. Run: bun start
-  2. Visit: https://localhost:8020
-  3. Sign in with: ${adminEmail}
-\`)
-    }
-  } catch (error) {
-    console.error('Setup failed:', error.message)
-    console.error('\\nMake sure:')
-    console.error('  1. Functions are deployed: bun deploy-functions')
-    console.error('  2. Firebase services are enabled (Auth, Firestore, Storage)')
-    process.exit(1)
   }
 }
 
-setup()
+setup().catch(console.error)
 `
-
   fs.writeFileSync(path.join(projectPath, 'setup.js'), setupScript)
-  fs.chmodSync(path.join(projectPath, 'setup.js'), '755')
 
-  console.log('📦 Installing client dependencies...')
-  execCommand('bun install')
+  console.log('📦 Installing dependencies...')
+  exec('bun install', { silent: true })
+  exec('cd functions && bun install', { silent: true })
 
-  console.log('📦 Installing function dependencies...')
-  execCommand('cd functions && bun install && cd ..')
+  console.log('🔐 Generating TLS certificates...')
+  exec('cd tls && ./create-dev-certs.sh', { silent: true })
 
-  console.log('🔐 Generating TLS certificates for local development...')
-  execCommand('cd tls && ./create-dev-certs.sh && cd ..', { silent: true })
+  // ============================================================================
+  // Success output
+  // ============================================================================
 
+  console.log('\n' + '━'.repeat(50))
   console.log('\n✅ Project created successfully!\n')
-  console.log('━'.repeat(60))
+  console.log('━'.repeat(50))
   console.log(`\n📁 Project: ${projectName}`)
-  console.log(`🔥 Firebase: ${firebaseProjectId}`)
+  console.log(`�� Firebase: ${projectId}`)
   console.log(`👤 Admin: ${adminEmail}`)
-  if (firestoreExists) {
-    console.log(`⚠️  Existing data: Will be preserved`)
-  }
-  console.log('\n━'.repeat(60))
+  console.log('\n' + '━'.repeat(50))
 
-  console.log('\n🚀 To deploy your site:\n')
-  console.log(`   cd ${projectName}`)
-  console.log(`   bun initial-deploy`)
-  console.log('\n━'.repeat(60))
+  // Step 7: Offer initial deployment
+  console.log('\n🚀 Ready to deploy!\n')
 
-  console.log('\n📋 Detailed Steps:\n')
+  const deploy = await question('Run initial deployment now? [Y/n]: ')
 
-  if (hasBlazePlan === false) {
-    console.log('⚠️  FIRST: Upgrade to Blaze Plan (REQUIRED)')
-    console.log(
-      `   https://console.firebase.google.com/project/${firebaseProjectId}/usage/details`
-    )
-    console.log('   Without Blaze plan, Cloud Functions will not work!\n')
-  }
+  if (deploy.toLowerCase() !== 'n') {
+    console.log('\n📦 Running initial deployment...\n')
+    console.log('This will:')
+    console.log('  1. Build the client and functions')
+    console.log('  2. Deploy to Firebase')
+    console.log('  3. Seed the database\n')
 
-  if (!firebaseConfig) {
-    console.log(
-      `${hasBlazePlan === false ? '1' : '1'}. Get your Firebase Web App config:`
-    )
-    console.log(
-      `   https://console.firebase.google.com/project/${firebaseProjectId}/settings/general`
-    )
-    console.log(`   • Scroll to "Your apps" → Add web app (if none exist)`)
-    console.log(`   • Copy the config object`)
-    console.log(`   • Update src/firebase-config.ts with the values\n`)
+    try {
+      exec('bun run initial-deploy')
+
+      console.log('\n' + '━'.repeat(50))
+      console.log('\n✅ Deployment complete!\n')
+      console.log('━'.repeat(50))
+      console.log(`\nYour site is live at: https://${projectId}.web.app`)
+      console.log('\nNext steps:')
+      console.log(`  1. Visit your site and sign in with ${adminEmail}`)
+      console.log('  2. Run: node setup.js')
+      console.log('  3. Start developing: bun start')
+    } catch {
+      console.log('\n⚠️  Deployment had issues. You can run it manually:')
+      console.log(`  cd ${projectName}`)
+      console.log('  bun initial-deploy')
+    }
   } else {
-    console.log(
-      `${
-        hasBlazePlan === false ? '1' : '1'
-      }. ✓ Firebase config automatically configured\n`
-    )
+    console.log('\nTo deploy later:')
+    console.log(`  cd ${projectName}`)
+    console.log('  bun initial-deploy')
   }
 
-  console.log(`2. Enable Firebase services (if not already enabled):`)
-  console.log(
-    `   https://console.firebase.google.com/project/${firebaseProjectId}`
-  )
-  console.log(`   • Authentication → Google sign-in method`)
-  console.log(`   • Firestore Database → Create database (production mode)`)
-  console.log(`   • Cloud Storage → Get started`)
-  if (hasBlazePlan !== true) {
-    console.log(`   • ⚠️  UPGRADE TO BLAZE PLAN (required for Cloud Functions)`)
-  }
+  // Generate TODO.md
+  const todoContent = `# ${projectName} Setup
 
-  console.log(
-    `\n3. Run initial deployment (builds, deploys, and seeds database):`
-  )
-  console.log(`   cd ${projectName}`)
-  console.log(`   bun initial-deploy`)
+## Project Info
 
-  console.log(`\n4. Run setup to grant yourself owner access:`)
-  console.log(`   node setup.js`)
+- **Project:** ${projectName}
+- **Firebase:** ${projectId}
+- **Admin:** ${adminEmail}
+- **URL:** https://${projectId}.web.app
 
-  console.log(`\n5. Visit your site and sign in with ${adminEmail}`)
-  console.log(`   https://${firebaseProjectId}.web.app`)
+## Commands
 
-  console.log(`\n6. Start local development:`)
-  console.log(`   bun start                  # Uses production Firebase`)
-  console.log(`   bun start-emulated         # Uses local emulators`)
-  console.log(`   Visit https://localhost:8020`)
+\`\`\`bash
+bun start              # Local dev (production Firebase)
+bun start-emulated     # Local dev (emulators)
+bun deploy             # Deploy everything
+bun deploy-functions   # Deploy functions only
+bun deploy-hosting     # Deploy hosting only
+\`\`\`
 
-  console.log('\n━'.repeat(60))
-  console.log('\n📚 Custom Domain Setup:\n')
-  console.log('To add a custom domain (e.g., yoursite.com):')
-  console.log(
-    `1. Go to: https://console.firebase.google.com/project/${firebaseProjectId}/hosting/sites`
-  )
-  console.log('2. Click "Add custom domain"')
-  console.log('3. Follow the wizard to:')
-  console.log('   • Verify domain ownership (add TXT record to DNS)')
-  console.log('   • Add A/AAAA records to point to Firebase')
-  console.log('4. Wait for SSL certificate provisioning (~15 minutes)')
-  console.log(
-    '5. Update the host field in the config/app document in Firestore:'
-  )
-  console.log(
-    `   https://console.firebase.google.com/project/${firebaseProjectId}/firestore/data/~2Fconfig~2Fapp`
-  )
-  console.log(`   Set host to: yoursite.com\n`)
+## Setup Checklist
 
-  console.log('━'.repeat(60))
-  console.log('\n🔐 API Keys for AI Features (Optional):\n')
-  console.log('If you want to use the /gen endpoint for AI completions,')
-  console.log('you need to set up API keys using Firebase Secrets Manager:\n')
-  console.log('  # For Gemini (Google AI):')
-  console.log(
-    '  firebase functions:secrets:set gemini-api-key --project ' +
-      firebaseProjectId
-  )
-  console.log('  # Get your key at: https://aistudio.google.com/apikey\n')
-  console.log('  # For ChatGPT (OpenAI):')
-  console.log(
-    '  firebase functions:secrets:set chatgpt-api-key --project ' +
-      firebaseProjectId
-  )
-  console.log('  # Get your key at: https://platform.openai.com/api-keys\n')
-  console.log(
-    'After setting secrets, redeploy functions: bun deploy-functions\n'
-  )
+- [ ] Enable Google sign-in: https://console.firebase.google.com/project/${projectId}/authentication/providers
+- [ ] Deploy: \`bun initial-deploy\`
+- [ ] Sign in at https://${projectId}.web.app
+- [ ] Run: \`node setup.js\`
 
-  console.log('━'.repeat(60))
-  console.log(
-    '\n📖 Documentation: https://github.com/tonioloewald/tosijs-platform'
-  )
-  console.log(
-    '💬 Issues: https://github.com/tonioloewald/tosijs-platform/issues'
-  )
+## Resources
+
+- Documentation: https://github.com/tonioloewald/tosijs-platform
+- tosijs: https://tosijs.net
+- tosijs-ui: https://ui.tosijs.net
+`
+  fs.writeFileSync(path.join(projectPath, 'TODO.md'), todoContent)
+
+  console.log('\n📝 Setup instructions saved to TODO.md')
   console.log('\n🎉 Happy building!\n')
 }
 

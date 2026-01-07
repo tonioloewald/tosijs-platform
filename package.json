@@ -1,6 +1,6 @@
 {
   "name": "tosijs-platform",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Full-stack web application platform - Firebase + tosijs, simpler than PHP/LAMP",
   "keywords": [
     "tosijs",
