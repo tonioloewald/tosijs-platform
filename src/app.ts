@@ -28,6 +28,11 @@ window.addEventListener('popstate', () => {
 })
 
 getPrefetched('appConfig').then((config) => {
+  // appConfig is optional in the prefetch payload — the shell handler that
+  // provides it isn't always registered — so tolerate its absence instead of
+  // throwing on config.title (which took the whole app down). The other
+  // getPrefetched() handlers below already fall back the same way.
+  if (!config) return
   app.title = config.title
   app.subtitle = config.subtitle
 })
