@@ -32,6 +32,9 @@ async function build() {
       outdir: './build',
       sourcemap: 'linked',
       minify: true,
+      // tosijs-ui lazily imports tjs-lang (live-example) and codemirror; without
+      // splitting Bun inlines those dynamic imports into the entry bundle.
+      splitting: true,
     })
     if (!result.success) {
       if (!lastBuildFailed) {
@@ -48,6 +51,7 @@ async function build() {
       outdir: './dist',
       sourcemap: 'linked',
       minify: true,
+      splitting: true,
     })
     if (!result.success) {
       if (!lastBuildFailed) {

@@ -62,7 +62,9 @@ document.body.append(
         },
         img({
           alt: 'favicon',
-          src: '/stored/public/favicon.svg',
+          // static asset, not /stored: app-shell chrome shouldn't depend on a
+          // Storage round-trip (and seed-production.js never uploads Storage)
+          src: '/logo.svg',
           class: 'logo',
         })
       ),
@@ -84,7 +86,7 @@ document.body.append(
             popMenu({
               target,
               menuItems: [
-                ...app.pages.xinValue.map((page) => ({
+                ...app.pages.value.map((page) => ({
                   icon: page.icon,
                   caption: page.title,
                   action() {
@@ -100,7 +102,7 @@ document.body.append(
                       caption: 'Light',
                       checked: () => theme.mode.valueOf() === 'light',
                       action() {
-                        theme.mode.xinValue = 'light'
+                        theme.mode.value = 'light'
                       },
                     },
                     {
@@ -108,7 +110,7 @@ document.body.append(
                       caption: 'Dark',
                       checked: () => theme.mode.valueOf() === 'dark',
                       action() {
-                        theme.mode.xinValue = 'dark'
+                        theme.mode.value = 'dark'
                       },
                     },
                     null,
@@ -117,7 +119,7 @@ document.body.append(
                       caption: 'System',
                       checked: () => theme.mode.valueOf() === 'system',
                       action() {
-                        theme.mode.xinValue = 'system'
+                        theme.mode.value = 'system'
                       },
                     },
                   ],
@@ -188,7 +190,7 @@ document.body.append(
             cursor: 'default',
           },
           onClick() {
-            app.showSignIn.xinValue = true
+            app.showSignIn.value = true
             document.body.querySelector('header')!.scrollIntoView()
           },
         },

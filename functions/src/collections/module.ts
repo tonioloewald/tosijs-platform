@@ -7,11 +7,15 @@ COLLECTIONS.module = {
   schema: ModuleSchema,
   unique: ['name'],
   async validate(data, userRoles, existing): Promise<Error | any> {
-    // Track revision count when source changes
-    if (existing && existing.source !== data.source) {
-      data.revisions = existing.revisions + 1
-    } else if (!existing) {
+    // Track revision count when source changes.
+    // NOTE: the /doc handler passes `existing = {}` (not undefined) on create,
+    // so detect "create" by emptiness, and guard the increment against a
+    // missing prior count so older records don't produce NaN.
+    const isUpdate = existing && Object.keys(existing).length > 0
+    if (!isUpdate) {
       data.revisions = 0
+    } else if (existing.source !== data.source) {
+      data.revisions = (existing.revisions ?? 0) + 1
     }
 
     return data

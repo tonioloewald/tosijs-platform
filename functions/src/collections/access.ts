@@ -224,11 +224,15 @@ export const getMethodAccess = (
         return map
       }, {} as FieldAccessMap)
     } else if (typeof access === 'object') {
-      for (const key in Object.keys(access)) {
-        if (!filterFields.includes(key)) {
-          delete access.key
+      // Intersect the role's field map with the requested fields. Build a new
+      // object so we never mutate the shared COLLECTIONS config.
+      const current = access as FieldAccessMap
+      access = Object.keys(current).reduce((map, key) => {
+        if (filterFields.includes(key)) {
+          map[key] = current[key]
         }
-      }
+        return map
+      }, {} as FieldAccessMap)
     }
   }
 

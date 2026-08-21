@@ -739,29 +739,60 @@ export const service = new Proxy(
             return async (data?: any, options?: RequestInit) => {
               const description = `${method} ${url} ${++timerId}`
               if (perf) console.time(description)
-              options = Object.assign(
-                deepClone(FETCH_DEFAULTS),
-                options
-              ) as Object
-              if (firebaseUser) {
-                // @ts-expect-error typescript is wrong
-                options.headers['Authorization'] =
-                  'Bearer ' + (await firebaseUser.getIdToken(true))
-              }
-              if (data != null) {
-                if (method.match(/GET|DELETE/)) {
-                  url = url + '?' + new URLSearchParams(data).toString()
-                } else if (method.match(/POST|PUT|PATCH/)) {
-                  options.body = JSON.stringify(data)
-                } else {
-                  throw new Error(`${method} request may not have body!`)
+
+              // Build the request fresh on each attempt: this keeps a retry from
+              // inheriting a mutated URL/body, and lets us re-mint the auth token
+              // on the second try. `forceRefreshToken` forces Firebase to fetch a
+              // new ID token instead of returning its cached one.
+              const sendRequest = async (
+                forceRefreshToken: boolean
+              ): Promise<Response> => {
+                const requestOptions = Object.assign(
+                  deepClone(FETCH_DEFAULTS),
+                  options
+                ) as RequestInit
+                if (firebaseUser) {
+                  // @ts-expect-error headers is always a plain object here
+                  requestOptions.headers['Authorization'] =
+                    'Bearer ' +
+                    (await firebaseUser.getIdToken(forceRefreshToken))
                 }
+                let requestUrl = `${baseServiceUrl}${String(url)}`
+                if (data != null) {
+                  if (method.match(/GET|DELETE/)) {
+                    requestUrl += '?' + new URLSearchParams(data).toString()
+                  } else if (method.match(/POST|PUT|PATCH/)) {
+                    requestOptions.body = JSON.stringify(data)
+                  } else {
+                    throw new Error(`${method} request may not have body!`)
+                  }
+                }
+                requestOptions.method = method
+                return fetch(requestUrl, requestOptions)
               }
-              options.method = method
-              const response = await fetch(
-                `${baseServiceUrl}${String(url)}`,
-                options
-              )
+
+              let response = await sendRequest(false)
+
+              // Stale-token recovery. When an ID token has expired the server
+              // can't verify it and falls back to treating the caller as
+              // anonymous (see functions/src/utilities.ts getUser), so an
+              // authorized write returns 401/403/404 rather than a token error.
+              // Force-refresh the token and retry once before surfacing the
+              // failure — this is what a manual page refresh did by hand.
+              // Restricted to mutating methods so read probes (which legitimately
+              // 404) don't pay a double round-trip, and these denial statuses are
+              // deterministic given doc state, so retrying can't double-write.
+              if (
+                firebaseUser &&
+                method.match(/POST|PUT|PATCH|DELETE/) &&
+                [401, 403, 404].includes(response.status)
+              ) {
+                console.warn(
+                  `${method} ${url} returned ${response.status}; refreshing auth token and retrying once`
+                )
+                response = await sendRequest(true)
+              }
+
               if (Math.floor(response.status / 100) !== 2) {
                 const message = await response.text()
                 console.error(
@@ -772,15 +803,14 @@ export const service = new Proxy(
                   'color: white; background: #444; padding: 0 5px;'
                 )
                 console.log({
-                  options,
                   data,
                 })
                 return new Error(message)
               }
               const payload =
-                response!.headers.get('Content-Type') ===
+                response.headers.get('Content-Type') ===
                 'application/json; charset=utf-8'
-                  ? await response!.json()
+                  ? await response.json()
                   : undefined
               if (perf) console.timeEnd(description)
               return payload

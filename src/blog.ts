@@ -6,9 +6,10 @@ import {
   varDefault,
   bindings,
   getListItem,
-  xinValue,
+  tosiValue,
   PartsMap,
 } from 'tosijs'
+import { setDiagnostics, type Diagnostic } from '@codemirror/lint'
 import {
   markdownViewer,
   sideNav,
@@ -23,7 +24,7 @@ import {
   MarkdownViewer,
   TabSelector,
   makeSorter,
-  xinSegmented,
+  tosiSegmented,
 } from 'tosijs-ui'
 
 import * as tosijs from 'tosijs'
@@ -128,7 +129,7 @@ export const { blog } = tosi({
     otherPosts: [] as BlogPost[],
     filterIndex(filterText?: string) {
       if (filterText !== undefined) {
-        blog.filterText.xinValue = filterText
+        blog.filterText.value = filterText
       }
       const visible =
         blog.indexVisible.valueOf() === 'published'
@@ -136,7 +137,7 @@ export const { blog } = tosi({
           : (ref: { date?: any }) => !ref.date
       if (blog.filterText) {
         const needle = blog.filterText.toLocaleLowerCase()
-        blog.filtered.xinValue = blog.index.xinValue
+        blog.filtered.value = blog.index.value
           .filter(visible)
           .filter(
             (ref) =>
@@ -146,9 +147,7 @@ export const { blog } = tosi({
           )
           .sort(recentFirst)
       } else {
-        blog.filtered.xinValue = blog.index.xinValue
-          .filter(visible)
-          .sort(recentFirst)
+        blog.filtered.value = blog.index.value.filter(visible).sort(recentFirst)
       }
     },
     route: '/blog',
@@ -163,7 +162,7 @@ export const { blog } = tosi({
       if (!skipPrefetched && recentPosts && recentPosts.length >= c) {
         return recentPosts
       }
-      const roles = app.user.roles.xinValue || []
+      const roles = app.user.roles.value || []
       const o =
         roles.includes('author') || roles.includes('editor') ? '' : 'date(desc)'
       return await service.docs.get({
@@ -272,7 +271,7 @@ export const { blog } = tosi({
       }
     },
     async editPost(post?: BlogPost) {
-      post = xinValue(post)
+      post = tosiValue(post)
       // @ts-ignore-error
       blog.editorPost = post
         ? {
@@ -305,7 +304,7 @@ async function initBlog() {
   // @ts-ignore-error
   const posts = await blog.getLatest(blog.visiblePosts)
 
-  if (!blog.currentPost || blog.currentPost.content.xinValue === '') {
+  if (!blog.currentPost || blog.currentPost.content.value === '') {
     // @ts-ignore-error
     blog.currentPost = posts[0] || emptyPost
     console.timeEnd('post loaded')
@@ -642,8 +641,8 @@ export const xinBlog = XinBlog.elementCreator({
       _xinBlogPad: varDefault.pad('10px'),
       _xinBlogBodyBg: varDefault.bodyBg('white'),
       _spacing: varDefault.pad('10px'),
-      _xinTabsSelectedColor: varDefault.brandColor('blue'),
-      _xinTabsBarColor: vars.paleBrandColor,
+      _tosiTabsSelectedColor: varDefault.brandColor('blue'),
+      _tosiTabsBarColor: vars.paleBrandColor,
     },
 
     ':host [part="menuTrigger"]:not(.author)': {
@@ -654,7 +653,7 @@ export const xinBlog = XinBlog.elementCreator({
       display: 'none',
     },
 
-    ':host xin-sidenav:not([compact]) [part="show-sidebar"]': {
+    ':host tosi-sidenav:not([compact]) [part="show-sidebar"]': {
       display: 'none',
     },
 
@@ -733,7 +732,7 @@ export class XinBlogSearch extends Component {
             icons.downloadCloud()
           )
         ),
-        xinSegmented('Show', {
+        tosiSegmented('Show', {
           part: 'showMode',
           value: 'published',
           choices: 'published,drafts',
@@ -786,7 +785,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   updateContent = () => {
     const { source, preview } = this.parts
 
-    blog.editorPost.content.xinValue = source.value
+    blog.editorPost.content.value = source.value
     preview.post = { ...blog.editorPost }
   }
 
@@ -798,14 +797,14 @@ export class XinPostEditor extends Component<PostEditorParts> {
     if (this.parts.tabSelector.value > 0) {
       const { source, preview } = this.parts
 
-      blog.editorPost.content.xinValue = source.value
+      blog.editorPost.content.value = source.value
       preview.post = { ...blog.editorPost }
     }
   }
 
   closeEditor = () => {
     const { source } = this.parts
-    blog.editorPost.content.xinValue = source.value
+    blog.editorPost.content.value = source.value
 
     localStorage.setItem(
       'xin-blog-editor-post',
@@ -816,7 +815,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
 
   savePost = async () => {
     const { source } = this.parts
-    blog.editorPost.content.xinValue = source.value
+    blog.editorPost.content.value = source.value
 
     let method: ServiceRequestType = 'put'
     if (!blog.editorPost._path) {
@@ -833,7 +832,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
       'xin-blog-editor-post',
       JSON.stringify(blog.editorPost.valueOf())
     )
-    const data = xinValue(blog.editorPost)
+    const data = tosiValue(blog.editorPost)
     const result = await service.doc[method]({ p: data._path, data })
     closeNotification()
     if (result instanceof Error) {
@@ -842,13 +841,30 @@ export class XinPostEditor extends Component<PostEditorParts> {
         type: 'error',
       })
     } else {
-      blog.loadPost(data._path!.xinValue)
       localStorage.removeItem('xin-blog-editor-post')
+      // Reflect the save in the underlying open post. We can't use
+      // loadPost() here: `data._path` is a plain string (the old
+      // `data._path!.value` evaluated to undefined, so nothing reloaded), and
+      // getPrefetchedDoc() would hand back the pre-save prefetched copy. Drop
+      // any stale prefetch entries, fetch the canonical doc fresh, and update
+      // currentPost so the open post re-renders.
+      // tosiValue() has unwrapped this to a plain object at runtime, but TS
+      // still sees the boxed-scalar type, so cast through unknown.
+      const path = data._path as unknown as string
+      if (window.prefetched) {
+        delete window.prefetched[path]
+        if (data.path) {
+          delete window.prefetched[`post/path=${data.path}`]
+        }
+      }
+      const fresh = await service.doc.get({ p: path })
+      // @ts-ignore-error currentPost accepts a plain post object
+      blog.currentPost = fresh instanceof Error || !fresh ? data : fresh
     }
   }
 
   unpublish = () => {
-    blog.editorPost.date!.xinValue = ''
+    blog.editorPost.date!.value = ''
   }
 
   proofread = async () => {
@@ -866,26 +882,32 @@ export class XinPostEditor extends Component<PostEditorParts> {
     })
     close()
     try {
-      const issues = text
+      const editor = this.parts.source.editor
+      if (!editor) return
+      // The model reports 0-based line numbers; CodeMirror wants character
+      // offsets, and its `doc.line()` is 1-based.
+      const { doc } = editor.state
+      const issues: Diagnostic[] = text
         .split('\n')
         .map((line: string) => {
           const [, rowNumber, content] = line.match(/^(\d+)\s(.*)$/) || []
           const row = Number(rowNumber)
-          if (content || !isNaN(row)) {
-            return [
-              {
-                row,
-                text: content,
-                type: 'warning',
-              },
-            ]
-          } else {
+          if (!content || isNaN(row) || row < 0 || row >= doc.lines) {
             return []
           }
+          const { from, to } = doc.line(row + 1)
+          return [
+            {
+              from,
+              to,
+              severity: 'warning' as const,
+              message: content,
+            },
+          ]
         })
         .flat()
       console.log(issues)
-      this.parts.source.editor.getSession().setAnnotations(issues)
+      editor.dispatch(setDiagnostics(editor.state, issues))
     } catch (e) {
       console.error(e)
       console.log(text)
@@ -915,7 +937,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   }
 
   publishNow = () => {
-    blog.editorPost.date!.xinValue = new Date().toISOString()
+    blog.editorPost.date!.value = new Date().toISOString()
   }
 
   showEditorMenu = () => {
@@ -1071,10 +1093,11 @@ export const xinPostEditor = XinPostEditor.elementCreator({
       fontFamily: vars.codeFont,
       fontSize: '16px',
     },
-    ':host xin-code': {
+    ':host tosi-code': {
       fontFamily: vars.codeFont,
     },
-    '.ace-tooltip': {
+    // was .ace-tooltip before tosijs-ui 1.7 swapped ACE for CodeMirror 6
+    '.cm-tooltip': {
       maxWidth: 300,
       wordWrap: 'break-word',
       whiteSpace: 'pre-wrap !important',
@@ -1082,7 +1105,7 @@ export const xinPostEditor = XinPostEditor.elementCreator({
     ':host input': {
       margin: '2px',
     },
-    ':host xin-word [part=doc]': {
+    ':host tosi-rich-text [part=doc]': {
       overflowY: 'auto',
       padding: vars.xinBlogPad,
     },

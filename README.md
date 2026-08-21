@@ -4,7 +4,7 @@
 
 Developer experience has been in freefall since the late 1990s.
 
-In the REALbasic era, you could build an app, package it, and distribute it in a day. With PHP/LAMP, you could download a project, copy it to a server, edit a config file, and have a working app in an hour.
+In the 90s, Visual Basic and Delphi let you build an app in a few hours. REALbasic didn't even need you to write an installer and let you build for Mac and Windows from a single code base. With PHP/LAMP, you could download a project, copy it to a server, edit a config file, and have a working app in an hour.
 
 Then Node.js became the "standard stack" and standing up "hello world" became a nightmare of tooling, configuration, and dependencies. Platforms like Heroku helped, but we're still miles behind where we were with WordPress - let alone RAD tools from the 90s.
 

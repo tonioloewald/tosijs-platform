@@ -29,7 +29,7 @@
     "seed": "bun scripts/seed-emulators.js",
     "seed-clear": "bun scripts/seed-emulators.js --clear",
     "seed-production": "bun scripts/seed-production.js",
-    "build": "bun build ./src/index.ts --outdir ./dist --sourcemap=linked --minify && cp -a public/. dist/ && rm dist/index.html",
+    "build": "bun build ./src/index.ts --outdir ./dist --sourcemap=linked --minify --splitting && cp -a public/. dist/ && rm dist/index.html",
     "format": "bun prettier --write src functions/src",
     "latest": "bun upgrade && bun install && cd functions && npm install && cd ..",
     "deploy": "firebase deploy",
@@ -38,7 +38,8 @@
     "initial-deploy": "bun scripts/initial-deploy.js"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.5",
+    "@codemirror/lint": "^6.9.7",
+    "@types/bun": "^1.3.14",
     "@types/marked": "^5.0.2",
     "@types/turndown": "^5.0.6",
     "@types/web": "^0.0.99",
@@ -47,13 +48,14 @@
     "http-server": "^14.1.1",
     "marked": "^16.4.2",
     "prettier": "^2.8.8",
-    "tosijs": "^1.0.10",
-    "tosijs-schema": "^1.0.3",
-    "tosijs-ui": "^1.0.10",
+    "tjs-lang": "^0.12.0",
+    "tosijs": "^1.7.5",
+    "tosijs-schema": "^1.4.0",
+    "tosijs-ui": "^1.7.1",
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "firebase": "^12.7.0",
-    "turndown": "^7.2.2"
+    "firebase": "^12.16.0",
+    "turndown": "^7.2.4"
   }
 }

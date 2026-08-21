@@ -16,8 +16,8 @@ import {
   tosi,
 } from 'tosijs'
 import {
-  xinFloat,
-  xinSizer,
+  tosiFloat,
+  tosiSizer,
   icons,
   postNotification,
   TosiDialog,
@@ -84,7 +84,7 @@ class RoleManager extends Component<RoleManagerParts> {
       console.log('Loading roles...')
       const roles = await fb.service.docs.get({ p: 'role' })
       console.log('Loaded roles:', roles)
-      roleManagerData.roles.xinValue = roles || []
+      roleManagerData.roles.value = roles || []
     } catch (e) {
       console.error('Failed to load roles:', e)
       postNotification({
@@ -95,10 +95,10 @@ class RoleManager extends Component<RoleManagerParts> {
   }
 
   selectRole = (role: Role) => {
-    roleManagerData.selectedRole.xinValue = { ...role }
-    roleManagerData.editingTitle.xinValue = `Edit: ${role.name}`
-    roleManagerData.isEditing.xinValue = true
-    roleManagerData.isExistingRole.xinValue = true
+    roleManagerData.selectedRole.value = { ...role }
+    roleManagerData.editingTitle.value = `Edit: ${role.name}`
+    roleManagerData.isEditing.value = true
+    roleManagerData.isExistingRole.value = true
     this.originalPath = (role as any)._path || ''
     const { editor } = this.parts
     if (editor) {
@@ -107,10 +107,10 @@ class RoleManager extends Component<RoleManagerParts> {
   }
 
   createNew = () => {
-    roleManagerData.selectedRole.xinValue = null
-    roleManagerData.editingTitle.xinValue = 'New Role'
-    roleManagerData.isEditing.xinValue = true
-    roleManagerData.isExistingRole.xinValue = false
+    roleManagerData.selectedRole.value = null
+    roleManagerData.editingTitle.value = 'New Role'
+    roleManagerData.isEditing.value = true
+    roleManagerData.isExistingRole.value = false
     this.originalPath = ''
     const { editor } = this.parts
     if (editor) {
@@ -119,9 +119,9 @@ class RoleManager extends Component<RoleManagerParts> {
   }
 
   cancelEdit = () => {
-    roleManagerData.isEditing.xinValue = false
-    roleManagerData.selectedRole.xinValue = null
-    roleManagerData.isExistingRole.xinValue = false
+    roleManagerData.isEditing.value = false
+    roleManagerData.selectedRole.value = null
+    roleManagerData.isExistingRole.value = false
   }
 
   saveRole = async () => {
@@ -140,7 +140,7 @@ class RoleManager extends Component<RoleManagerParts> {
     })
 
     try {
-      const isNew = !roleManagerData.isExistingRole.xinValue
+      const isNew = !roleManagerData.isExistingRole.value
 
       if (isNew) {
         // Generate ID from name
@@ -182,7 +182,7 @@ class RoleManager extends Component<RoleManagerParts> {
   deleteRole = async () => {
     if (!this.originalPath) return
 
-    const selectedRole = roleManagerData.selectedRole.xinValue as Role | null
+    const selectedRole = roleManagerData.selectedRole.value as Role | null
     const confirmed = await TosiDialog.confirm(
       `Delete role "${selectedRole?.name}"? This cannot be undone.`
     )
@@ -221,7 +221,7 @@ class RoleManager extends Component<RoleManagerParts> {
   }
 
   content = () =>
-    xinFloat(
+    tosiFloat(
       {
         class: 'compact',
         drag: true,
@@ -380,7 +380,7 @@ class RoleManager extends Component<RoleManagerParts> {
         )
       ),
 
-      xinSizer({ class: 'no-drag' }),
+      tosiSizer({ class: 'no-drag' }),
       button(
         {
           title: 'close role manager',
@@ -408,10 +408,10 @@ export const roleManager = RoleManager.elementCreator({
     ':host': {
       _spacing: varDefault.pad('10px'),
     },
-    ':host xin-sizer': {
+    ':host tosi-sizer': {
       _resizeIconFill: vars.textColor,
     },
-    ':host xin-float': {
+    ':host tosi-float': {
       background: vars.panelBg,
       display: 'flex',
       flexDirection: 'column',

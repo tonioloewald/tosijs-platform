@@ -67,7 +67,15 @@ npm run lint                                # Lint (eslint, google config)
 
 Tests come in two flavors. Unit tests (`*.test.ts`, e.g. `access.test.ts`) run standalone. Integration tests (`*.integration.test.ts`, e.g. `access.integration.test.ts`) hit live endpoints and are **skip-guarded** — they pass vacuously (`expect(true).toBe(true)`) unless emulators are up, so a green CI run does not mean they exercised anything. To actually run them: `cd functions && bun run build`, then from the root `bun start-emulated` + `bun seed`, then `bun test src/collections/access.integration.test.ts`. The emulators run compiled code from `lib/`, so **rebuild and restart emulators** after changing functions.
 
-Note: `functions/` installs with npm (`package-lock.json`), even though the root project uses Bun. The root `bun start` connects directly to **production** Firebase over HTTPS — use `bun start-emulated` + `bun seed` for isolated local work.
+**Emulator gotcha:** the globally installed `firebase-tools` is **10.1.0**, which is incompatible with firebase-functions v7 — the functions emulator runtime calls the removed `functions.config()` and crashes on startup, so **`bun start-emulated` fails as written**. Until the global CLI is upgraded, start emulators with:
+
+```bash
+npx -y firebase-tools@latest emulators:start --only auth,functions,firestore
+```
+
+Emulator ports (see `firebase.json`): UI 4000, functions 5001, hosting 5002, firestore 8080, auth 9099, storage 9199. `bun run kill-ports` frees all six; `start-emulated` runs it first.
+
+Note: `functions/` is npm-managed — `package-lock.json` is authoritative and `firebase.json`'s `predeploy` runs `npm run lint` + `npm run build` — even though the root project uses Bun and a stray `functions/bun.lock` exists. `bun test` still works there for running tests. The root `bun start` connects directly to **production** Firebase over HTTPS — use emulators + `bun seed` for isolated local work.
 
 ## Architecture
 
@@ -76,6 +84,18 @@ Note: `functions/` installs with npm (`package-lock.json`), even though the root
 - **`src/`** - Client-side TypeScript, built with Bun to `dist/`
 - **`functions/src/`** - Firebase Cloud Functions (Node.js 20), compiled to `functions/lib/`
 - **`functions/shared/`** - TypeScript types shared between client and server
+
+`functions/shared/` is imported by *both* tiers by relative path — client files do
+`import { Page } from '../functions/shared/page'`, reaching outside `src/`. It is not listed in
+`functions/tsconfig.json`'s `include`, but gets pulled into the build via those imports, which is
+why output lands in `lib/shared/` + `lib/src/` and `functions/package.json` declares
+`main: "lib/src/index.js"`. **Editing a file in `shared/` changes both the client bundle and the
+deployed functions** — check both sides.
+
+Two build quirks worth knowing before touching them: `functions/tsconfig.json` excludes
+`src/gen.ts` (and all `*.test.ts`), and `firebase.json`'s functions `ignore` list excludes
+`**/gen.ts` and `**/gen.js` from upload — while `src/index.ts` still exports `gen`. Verify what
+actually ships before assuming a `gen.ts` change deploys.
 
 ### Key REST Endpoints (Cloud Functions)
 
@@ -123,6 +143,20 @@ Config files are split across two locations and are activated only by being impo
 
 To add a content type: create the config module, assign to `COLLECTIONS.<name>`, and add a side-effect `import './<name>'` in `functions/src/index.ts`. A collection with no config is fully inaccessible (deny-by-default).
 
+### Client Data Access
+
+`src/firebase.ts` exports `service`, a **nested Proxy** — `service.<endpoint>.<method>(data)`
+(e.g. `fb.service.module.post({...})`, `service.record.put({...})`). There are no declared
+per-endpoint members, so grep and autocomplete won't reveal the surface: any property name
+resolves to an endpoint URL, and any HTTP verb resolves to a request function. It attaches the
+Firebase ID token as a `Bearer` header automatically, and routes `GET`/`DELETE` payloads to the
+query string vs. `POST`/`PUT`/`PATCH` to the body. `TEST_MODE` switches `baseServiceUrl` between
+emulators and production.
+
+Global client state lives in `src/app.ts` as a `tosi({ app: {...} })` proxy, imported directly by
+components rather than passed down. It is exposed on `window` (alongside `blog`, `fb`, `tosi`)
+by `src/index.ts`, which is useful for poking at state in the browser console.
+
 ### tosijs Framework Patterns
 
 See `.claude/tosijs-notes.md` for detailed framework notes. Key points:
@@ -131,7 +165,10 @@ See `.claude/tosijs-notes.md` for detailed framework notes. Key points:
 - **`content()` vs `render()`**: `content()` runs once on hydration; `render()` runs when properties change
 - **Parts**: Use `part="name"` attribute, access via `this.parts.name`
 - **Observer pattern**: Build both states in DOM, show/hide based on state (not conditional rendering)
-- **`xinValue`**: Use `proxy.xinValue = newValue` for TypeScript-friendly deep assignment with change detection
+- **`.value`**: Use `proxy.value = newValue` for TypeScript-friendly deep assignment with change
+  detection; `tosiValue(proxy)` unwraps a proxy to a plain object. The `xin*` spellings
+  (`.xinValue`, `xinValue()`) are deprecated — as of tosijs 1.7 `xinValue` is no longer declared
+  on `XinProps`, so `.xinValue` still works at runtime but no longer typechecks.
 
 ### tosijs-schema
 
@@ -146,6 +183,7 @@ Validation library used server-side. Key API:
 ```
 src/                    # Client code (tosijs components)
   index.ts             # App entry, main UI shell
+  app.ts               # The `app` tosi state proxy (global singleton)
   firebase.ts          # Firebase client wrapper with REST calls
   blog.ts              # Blog component
   style.ts             # Theme configuration
@@ -159,8 +197,16 @@ functions/
   shared/             # Shared TypeScript types
 initial_state/        # Seed data for Firestore emulators
 public/               # Static assets copied to dist/
+docs/                 # Endpoint/component reference (see caveat below)
 dev.ts                # HTTPS dev server with hot reload
 ```
+
+`docs/` holds the long-form reference for each subsystem — `FIRESTORE_API.md` (`/doc`, `/docs`,
+roles), `CLOUD_FUNCTIONS.md`, `ESM_MODULES.md`, `PREFETCH.md`, `GEN_ENDPOINT.md`,
+`STORED_ENDPOINT.md`, `SCHEMA_VALIDATION.md`, `BLOG_COMPONENT.md`, `PAGE_COMPONENT.md`. Useful for
+intent, but **the file paths in them predate the `collections/` reorg** — `access.ts`, `roles.ts`,
+`module.ts`, and the `COLLECTIONS` map are cited as `functions/src/*.ts` when they now live in
+`functions/src/collections/`. Trust the code over these paths.
 
 ## Firebase Configuration
 
@@ -169,3 +215,11 @@ dev.ts                # HTTPS dev server with hot reload
 - **`firestore.rules`** - Deny-all (all access through functions)
 - **`storage.rules`** - Storage security rules
 - **`src/firebase-config.ts`** - Client-side Firebase config (API keys)
+
+**Hosting rewrites matter more than they look.** `firebase.json` routes `/sitemap.xml` → `sitemap`,
+`/esm/*` → `esm`, `/stored/**` → `stored`, and then **`**` → `prefetch`** — so every request not
+matching a static file in `dist/` is served by the `prefetch` function, not by static hosting. That
+catch-all is what makes SSR/SEO work, and it means a routing or 404 bug in production is usually a
+`prefetch.ts` bug. (Per ROADMAP Phase 2, `prefetch.ts` and `sitemap.ts` are slated for removal —
+so change these rewrites deliberately, not incidentally.) `hosting.headers` also sets a CSP that
+allows `unsafe-eval` and a specific CDN allowlist; dynamically loaded `/esm` modules depend on it.

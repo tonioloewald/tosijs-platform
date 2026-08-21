@@ -12,7 +12,7 @@ export const { app } = tosi({
     currentPage: loading,
     pages: [] as Page[],
     setPage(page: Page) {
-      app.currentPage.xinValue = page
+      app.currentPage.value = page
       window.history.pushState(null, page.title, `/${page.path}`)
     },
     showSignIn: false,
@@ -23,9 +23,7 @@ export const { app } = tosi({
 
 window.addEventListener('popstate', () => {
   const path = window.location.pathname
-  const page = app.pages.xinValue.find(
-    (page) => page.path === path.substring(1)
-  )
+  const page = app.pages.value.find((page) => page.path === path.substring(1))
   app.setPage(page || loading)
 })
 
@@ -35,11 +33,11 @@ getPrefetched('appConfig').then((config) => {
 })
 
 getPrefetched<Page>('page').then((page) => {
-  app.currentPage.xinValue = page || loading
+  app.currentPage.value = page || loading
 })
 
 getPrefetched<Array<Page>>('visiblePages').then((pages) => {
-  app.pages.xinValue = pages || []
+  app.pages.value = pages || []
 })
 
 fb.authStateChangeListeners.add(async () => {

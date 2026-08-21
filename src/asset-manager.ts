@@ -10,14 +10,14 @@ import {
   touch,
 } from 'tosijs'
 import {
-  xinFloat,
-  xinSizer,
+  tosiFloat,
+  tosiSizer,
   icons,
   postNotification,
   popMenu,
   CodeEditor,
-  xinSelect,
-  XinSelect,
+  tosiSelect,
+  TosiSelect,
   TosiDialog,
 } from 'tosijs-ui'
 import {
@@ -69,9 +69,13 @@ const { assetManagerData } = tosi({
   assetManagerData: {
     files: [] as Asset[],
     filter: '',
+    // Must use `this`, not the outer `assetManagerData` binding, and must have a
+    // setter. tosijs 1.7 Object.assigns over this literal during registration,
+    // which evaluates the getter before `assetManagerData` is assigned (throws)
+    // and then writes the result back (throws on a getter-only property).
     get filteredFiles(): Asset[] {
-      const filter = assetManagerData.filter.toLocaleLowerCase()
-      const { files } = assetManagerData as unknown as { files: Asset[] }
+      const filter = String(this.filter).toLocaleLowerCase()
+      const { files } = this as unknown as { files: Asset[] }
       return filter === ''
         ? files
         : files.filter(
@@ -80,13 +84,16 @@ const { assetManagerData } = tosi({
               asset.path.toLocaleLowerCase().includes(filter)
           )
     },
+    set filteredFiles(_files: Asset[]) {
+      /* computed from files + filter; the registration write-back is ignored */
+    },
   },
 })
 
 interface AssetManagerParts extends PartsMap {
   search: HTMLInputElement
   fileInput: HTMLInputElement
-  pathSelector: XinSelect
+  pathSelector: TosiSelect
   filePath: HTMLInputElement
   convertToWebP: HTMLInputElement
 }
@@ -96,7 +103,7 @@ class AssetManager extends Component<AssetManagerParts> {
     const target = event.target as HTMLElement
     const file = getListItem(target)
     const codeEditor = document.querySelector(
-      'xin-post-editor xin-code'
+      'xin-post-editor tosi-code'
     ) as CodeEditor | null
     const { getFiles } = this
     const storedUrl = pathToStoredUrl(file.path)
@@ -116,9 +123,11 @@ class AssetManager extends Component<AssetManagerParts> {
               type === 'image'
                 ? `![${altText(file.name)}](${storedUrl})`
                 : `[${altText(file.name)}](${storedUrl})`
-            if (codeEditor) {
-              const { editor } = codeEditor
-              editor.session.insert(editor.getCursorPosition(), code)
+            // tosijs-ui 1.7 swapped ACE for CodeMirror 6: `editor` is an
+            // EditorView, and it's undefined until the editor has mounted.
+            const editor = codeEditor?.editor
+            if (editor) {
+              editor.dispatch(editor.state.replaceSelection(code))
             } else {
               navigator.clipboard.writeText(code)
             }
@@ -151,9 +160,11 @@ class AssetManager extends Component<AssetManagerParts> {
               code = `<a href="${storedUrl}">${altText(file.name)}</a>`
             }
 
-            if (codeEditor) {
-              const { editor } = codeEditor
-              editor.session.insert(editor.getCursorPosition(), code)
+            // tosijs-ui 1.7 swapped ACE for CodeMirror 6: `editor` is an
+            // EditorView, and it's undefined until the editor has mounted.
+            const editor = codeEditor?.editor
+            if (editor) {
+              editor.dispatch(editor.state.replaceSelection(code))
             } else {
               navigator.clipboard.writeText(code)
             }
@@ -264,7 +275,7 @@ class AssetManager extends Component<AssetManagerParts> {
           type: 'info',
           message: `${file.name} uploaded to path '${path}'`,
         })
-        assetManagerData.filter.xinValue = filePath.value
+        assetManagerData.filter.value = filePath.value
         filePath.value = ''
         fileInput.value = ''
         this.getFiles()
@@ -298,7 +309,7 @@ class AssetManager extends Component<AssetManagerParts> {
   getFiles = async () => {
     const { pathSelector } = this.parts
     try {
-      assetManagerData.files.xinValue = await listFiles(pathSelector.value)
+      assetManagerData.files.value = await listFiles(pathSelector.value)
       touch(assetManagerData.filteredFiles)
     } catch (e) {
       postNotification({
@@ -313,7 +324,7 @@ class AssetManager extends Component<AssetManagerParts> {
   }
 
   content = () =>
-    xinFloat(
+    tosiFloat(
       {
         class: 'compact',
         drag: true,
@@ -350,7 +361,7 @@ class AssetManager extends Component<AssetManagerParts> {
             },
           },
           span('Path'),
-          xinSelect({
+          tosiSelect({
             options: 'blog,public',
             value: 'blog',
             part: 'pathSelector',
@@ -441,7 +452,7 @@ class AssetManager extends Component<AssetManagerParts> {
           )
         )
       ),
-      xinSizer({ class: 'no-drag' }),
+      tosiSizer({ class: 'no-drag' }),
       button(
         {
           title: 'close asset manager',
@@ -471,19 +482,19 @@ export const assetManager = AssetManager.elementCreator({
     ':host': {
       _spacing: varDefault.pad('10px'),
     },
-    ':host xin-sizer': {
+    ':host tosi-sizer': {
       _resizeIconFill: vars.textColor,
     },
     ':host [part=assetList] .row': {
       padding: 2,
     },
-    ':host xin-select': {
+    ':host tosi-select': {
       display: 'inline-flex',
       width: 100,
       _fieldWidth: 40,
       _touchSize: 32,
     },
-    ':host xin-float': {
+    ':host tosi-float': {
       background: vars.panelBg,
       display: 'flex',
       flexDirection: 'column',

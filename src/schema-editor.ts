@@ -6,7 +6,7 @@
  */
 
 import { Component, ElementCreator, PartsMap, elements, vars } from 'tosijs'
-import { icons, xinSelect, XinSelect, popMenu } from 'tosijs-ui'
+import { icons, tosiSelect, TosiSelect, popMenu } from 'tosijs-ui'
 import { isSystemField } from '../functions/shared/system-fields'
 
 const { div, label, input, fieldset, legend, button, span, form } = elements
@@ -87,12 +87,12 @@ export class SchemaEditor extends Component<SchemaEditorParts> {
             })
             values.push(obj)
           } else {
-            // Simple value in array - check for xinSelect first
-            const xinSelectEl = item.querySelector(
-              'xin-select'
-            ) as XinSelect | null
-            if (xinSelectEl) {
-              values.push(xinSelectEl.value)
+            // Simple value in array - check for tosiSelect first
+            const tosiSelectEl = item.querySelector(
+              'tosi-select'
+            ) as TosiSelect | null
+            if (tosiSelectEl) {
+              values.push(tosiSelectEl.value)
             } else {
               const inputEl = item.querySelector(
                 'input'
@@ -117,10 +117,10 @@ export class SchemaEditor extends Component<SchemaEditorParts> {
   }
 
   getFieldValue = (el: HTMLElement): any => {
-    // Check for xinSelect first
-    const xinSelectEl = el.querySelector('xin-select') as XinSelect | null
-    if (xinSelectEl) {
-      return xinSelectEl.value
+    // Check for tosiSelect first
+    const tosiSelectEl = el.querySelector('tosi-select') as TosiSelect | null
+    if (tosiSelectEl) {
+      return tosiSelectEl.value
     }
 
     const inputEl = el.querySelector('input') as HTMLInputElement | null
@@ -190,14 +190,14 @@ export class SchemaEditor extends Component<SchemaEditorParts> {
       )
     }
 
-    // Handle enum as xinSelect
+    // Handle enum as tosiSelect
     if (schema.enum) {
       return div(
         { class: 'field', 'data-key': key },
         label(
           span(labelText, isRequired ? span({ class: 'required' }, ' *') : {})
         ),
-        xinSelect({
+        tosiSelect({
           options: schema.enum,
           value: value ?? schema.default ?? '',
           placeholder: schema.description || '-- Select --',
@@ -424,7 +424,7 @@ export class SchemaEditor extends Component<SchemaEditorParts> {
     } else if (itemSchema.type === 'object' && itemSchema.properties) {
       content = this.buildObjectField(`${key}[${index}]`, itemSchema, value)
     } else if (itemSchema.enum) {
-      content = xinSelect({
+      content = tosiSelect({
         options: itemSchema.enum,
         value: value ?? '',
         placeholder: itemSchema.description || '-- Select --',
@@ -539,7 +539,7 @@ export const schemaEditor = SchemaEditor.elementCreator({
       whiteSpace: 'nowrap',
       fontSize: '0.9em',
     },
-    ':host .field input, :host .field select, :host .field xin-select': {
+    ':host .field input, :host .field select, :host .field tosi-select': {
       padding: vars.spacing25,
       borderRadius: vars.roundedRadius,
       border: `1px solid ${vars.borderColor}`,

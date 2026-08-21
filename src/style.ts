@@ -385,39 +385,39 @@ const rules: XinStyleSheet = {
     boxShadow: 'none',
     borderRadius: vars.roundedRadius50,
   },
-  // xin-tabs
-  'xin-tabs::part(tabs)': {
+  // tosi-tabs
+  'tosi-tabs::part(tabs)': {
     overflowX: 'auto',
   },
-  // xin-float, xin-menu
-  'xin-float, .xin-menu': {
+  // tosi-float, tosi-menu
+  'tosi-float, .tosi-menu': {
     boxShadow: vars.zShadow,
     borderRadius: vars.roundedRadius200,
     overflow: 'hidden',
   },
-  '.xin-menu-item:disabled': {
+  '.tosi-menu-item:disabled': {
     pointerEvents: 'none',
     opacity: '0.5',
   },
-  '.xin-menu-item-checked': {
+  '.tosi-menu-item-checked': {
     background: vars.hoverBg,
   },
-  'xin-example': {
+  'tosi-example': {
     margin: `${vars.spacing} 0`,
   },
-  'xin-blog xin-example [part="exampleWidgets"]': {
+  'xin-blog tosi-example [part="exampleWidgets"]': {
     _widgetBg: vars.buttonBg,
     _widgetColor: vars.brandColor,
     opacity: 0.75,
   },
-  'xin-blog xin-example [part="exampleWidgets"]:hover': {
+  'xin-blog tosi-example [part="exampleWidgets"]:hover': {
     opacity: 1,
   },
-  'xin-blog xin-carousel': {
+  'xin-blog tosi-carousel': {
     _carouselButtonColor: vars.scrollBarColor,
     _carouselDotCurrentColor: vars.scrollThumbColor,
   },
-  'xin-example .preview.preview': {
+  'tosi-example .preview.preview': {
     background: vars.codeColor,
   },
   'button *': {

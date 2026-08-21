@@ -330,7 +330,14 @@ export const doc = onRequest({}, async (req, res) => {
   )
 
   if (!access) {
-    res.status(403).send('forbidden')
+    // Opaque denial: non-privileged callers get 404 so a protected resource is
+    // indistinguishable from a missing one (matches getDoc/opaqueError). Only
+    // admin/developer/owner see the real 403.
+    if (hasPrivilegedRole(userRoles)) {
+      res.status(403).send('forbidden')
+    } else {
+      res.status(404).send('not found')
+    }
     return
   }
 

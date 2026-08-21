@@ -331,3 +331,175 @@ describe('ROLES constants', () => {
     expect(ROLES.owner).toBe('owner')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Characterization of dispatch dimensions the TODO flags as untested:
+// multi-role precedence, sub-collection paths, write-side field maps, and the
+// (known-broken) filterFields argument. Oracle for the tjs-lang port.
+// ---------------------------------------------------------------------------
+
+describe('getMethodAccess — multi-role precedence', () => {
+  const collections: CollectionMap = {
+    // Roles listed in increasing privilege, per the access.ts contract.
+    articles: {
+      access: {
+        [ROLES.public]: { read: ALL, list: ALL },
+        [ROLES.author]: { write: { title: ALL, body: ALL } },
+        [ROLES.editor]: { write: ALL },
+      },
+    },
+    // `admin` defines write but omits read; `public` defines read.
+    mixed: {
+      access: {
+        [ROLES.public]: { read: ALL },
+        [ROLES.admin]: { write: ALL },
+      },
+    },
+  }
+
+  test('last matching role in config order wins (editor ALL overrides author field-map)', () => {
+    const user = createUserRoles([ROLES.author, ROLES.editor])
+    expect(getMethodAccess(collections, 'articles', 'POST', user)).toBe(ALL)
+  })
+
+  test('result is independent of the order of the user roles array', () => {
+    const a = createUserRoles([ROLES.author, ROLES.editor])
+    const b = createUserRoles([ROLES.editor, ROLES.author])
+    expect(getMethodAccess(collections, 'articles', 'POST', a)).toBe(
+      getMethodAccess(collections, 'articles', 'POST', b)
+    )
+  })
+
+  test('author-only write yields a field-limited filter function, not ALL', async () => {
+    const user = createUserRoles([ROLES.author])
+    const access = getMethodAccess(collections, 'articles', 'POST', user)
+    expect(typeof access).toBe('function')
+    if (typeof access === 'function') {
+      const filtered = await access(
+        { _path: 'articles/1', title: 'T', body: 'B', secret: 'x' },
+        user
+      )
+      expect(filtered).toEqual({ _path: 'articles/1', title: 'T', body: 'B' })
+    }
+  })
+
+  test('a matching role that omits the access type does not clear inherited public access', () => {
+    // admin block has no `read`; the public read=ALL must still apply to an admin.
+    const user = createUserRoles([ROLES.admin])
+    expect(getMethodAccess(collections, 'mixed', 'GET', user)).toBe(ALL)
+  })
+
+  test('public access type applies even to a user with no matching role block', () => {
+    const user = createUserRoles([ROLES.author]) // author is not listed in `mixed`
+    expect(getMethodAccess(collections, 'mixed', 'GET', user)).toBe(ALL)
+    // ...but there is no write for author in `mixed`, so writes are denied.
+    expect(getMethodAccess(collections, 'mixed', 'POST', user)).toBeUndefined()
+  })
+})
+
+describe('getMethodAccess — sub-collections', () => {
+  const collections: CollectionMap = {
+    post: { access: { [ROLES.public]: { read: ALL } } },
+    'post/comment': {
+      access: {
+        [ROLES.public]: { read: ALL, list: ALL },
+        [ROLES.author]: { write: ALL },
+      },
+    },
+  }
+
+  test('collectionPath collapses doc ids to the sub-collection key', () => {
+    expect(collectionPath('post/123/comment/456')).toBe('post/comment')
+  })
+
+  test('resolves access for a configured sub-collection', () => {
+    expect(
+      getMethodAccess(collections, 'post/comment', 'GET', publicUser)
+    ).toBe(ALL)
+    expect(
+      getMethodAccess(collections, 'post/comment', 'POST', authorUser)
+    ).toBe(ALL)
+  })
+
+  test('unconfigured sub-collection denies by default even if the parent is readable', () => {
+    expect(
+      getMethodAccess(collections, 'post/like', 'GET', publicUser)
+    ).toBeUndefined()
+  })
+})
+
+describe('getMethodAccess — write-side field maps', () => {
+  const collections: CollectionMap = {
+    posts: {
+      access: {
+        [ROLES.author]: { write: { title: ALL, body: ALL } },
+        [ROLES.admin]: { write: ALL },
+      },
+    },
+  }
+
+  test('a write FieldAccessMap strips fields outside the map', async () => {
+    const access = getMethodAccess(collections, 'posts', 'PATCH', authorUser)
+    expect(typeof access).toBe('function')
+    if (typeof access === 'function') {
+      const filtered = await access(
+        { _path: 'posts/1', title: 'T', body: 'B', ownerId: 'evil' },
+        authorUser
+      )
+      // ownerId is dropped; only whitelisted fields (plus _path) survive.
+      expect(filtered).toEqual({ _path: 'posts/1', title: 'T', body: 'B' })
+    }
+  })
+
+  test('admin write ALL bypasses the field map', () => {
+    expect(getMethodAccess(collections, 'posts', 'PATCH', adminUser)).toBe(ALL)
+  })
+})
+
+describe('getMethodAccess — filterFields argument (see TODO.md: known bug)', () => {
+  const collections: CollectionMap = {
+    profiles: {
+      access: {
+        [ROLES.public]: { read: { name: ALL, email: ALL } },
+        [ROLES.admin]: { read: ALL },
+      },
+    },
+  }
+
+  test('ALL access narrowed to requested fields (this branch works)', async () => {
+    const access = getMethodAccess(collections, 'profiles', 'GET', adminUser, [
+      'name',
+    ])
+    expect(typeof access).toBe('function')
+    if (typeof access === 'function') {
+      const filtered = await access(
+        { _path: 'profiles/1', name: 'A', email: 'a@b.c' },
+        adminUser
+      )
+      expect(filtered).toEqual({ _path: 'profiles/1', name: 'A' })
+    }
+  })
+
+  test('an existing FieldAccessMap is intersected with filterFields', async () => {
+    // public read map is {name, email}; requesting ['name'] must drop email.
+    const access = getMethodAccess(collections, 'profiles', 'GET', publicUser, [
+      'name',
+    ])
+    expect(typeof access).toBe('function')
+    if (typeof access === 'function') {
+      const filtered = await access(
+        { _path: 'profiles/1', name: 'A', email: 'a@b.c' },
+        publicUser
+      )
+      expect(filtered).toEqual({ _path: 'profiles/1', name: 'A' })
+    }
+  })
+
+  test('intersection does not mutate the shared COLLECTIONS config', () => {
+    // A field-filtered call must not strip keys from the config's own map, or a
+    // later un-filtered call would wrongly inherit the narrower field set.
+    getMethodAccess(collections, 'profiles', 'GET', publicUser, ['name'])
+    const publicRead = collections.profiles.access?.[ROLES.public]?.read
+    expect(publicRead).toEqual({ name: ALL, email: ALL })
+  })
+})
