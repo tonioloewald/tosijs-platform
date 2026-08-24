@@ -27,6 +27,12 @@ stored ajs. Its own hosting is just a standard tosijs-ui build deployed to Fires
 `/prefetch` as cached SSR HTML. Because all its unique code is backend, it becomes trivially
 testable.*
 
+**The end goal:** spin up a new project, hand it a **Firebase project name** (ultimately other
+providers too), and it **deploys a complete backend as-is** — no per-site server code. Everything
+else is **client-side configuration**: the universal endpoint serves any collection, and
+security/validation are **schemas + ajs stored as data**. A new site = a backend deploy + client
+config; nothing bespoke ever ships to the server.
+
 Name stays **`tosijs-platform`**, repo stays put — the ambiguity that briefly motivated a separate
 `tosijs-edge` project isn't real.
 
@@ -121,6 +127,15 @@ Why the ajs backend earns its keep even though tosijs-ui owns page generation. A
 
 A "component" stops being *client code you ship + server code you deploy*; it's **one artifact, both
 halves data**. That's the README's "PHP/LAMP simplicity" thesis finally reaching the server tier.
+
+## Dev loop — the Firebase emulators become obsolete
+
+Storing an ajs endpoint is **faster than deploying a Firebase function** (or any lambda) will ever
+be — a proc is *data you write*, not code you deploy. So the emulators lose their reason to exist:
+the backend-logic edit/test loop becomes **store-ajs-and-run**, and unit testing is **pure and
+deterministic** (mock the capabilities) — no emulator, no `functions.config()` tooling gotchas, no
+rebuild-and-restart. (Until the port lands, CLAUDE.md's current emulator workflow still applies —
+this is the target, not today.)
 
 ## What moves where
 
