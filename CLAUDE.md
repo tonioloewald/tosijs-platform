@@ -20,22 +20,27 @@ This is **tosijs-platform**, a full-stack web application platform built on Fire
 
 ## Direction (read before large changes)
 
-The platform is pivoting — see **[ROADMAP.md](ROADMAP.md)**. Target: a **universal endpoint +
-ajs (tjs-lang) stored procedures** model, where collections, access rules, and validators live in
-Firestore as *data* and the Cloud Functions layer is a generic interpreter. Consequences for any
-work here:
+The platform is pivoting — see **[ROADMAP.md](ROADMAP.md)** (direction settled 2026-08-24).
+**This repo consolidates into the pure backend** — `/doc` + `/docs` + one universal stored-ajs
+endpoint, with everything else expressed as collection config or stored ajs — while all client code
+moves *out* (upstream to tosijs-ui, or into small projects **`tosijs-blog`** and **`tosijs-assets`**).
+Its own hosting becomes a standard **tosijs-ui build deployed to Firestore**, served via `/prefetch`
+as cached SSR HTML. Consequences for any work here:
 
-- **`blog.ts`, `page.ts`, `sitemap.ts`, `prefetch.ts`, and the bespoke blog/page/schema editors
-  are slated for removal (Phase 2).** Don't extend or refactor them for their own sake — they
-  become records + schemas + ajs procs.
-- **The security model survives and generalizes.** `doc.ts`/`docs.ts` (the universal document
-  atom), the auth atom (`user.ts`), and hardened `gen`/`stored` are the trusted core (TCB).
-- **Before touching `access.ts` or the write/validate path**, read the *Design invariants* in
-  ROADMAP.md — decisions about buffered/transactional capabilities, system-owned provenance
-  stamps, authority-in-the-cache-key, typed-union write outcomes, and schema-vs-ajs boundaries
-  were reasoned through and shouldn't be relitigated.
-- **First concrete task is test backfill:** the `validate`/write/`unique`/provenance path is
-  essentially untested (dispatch logic is covered). See TODO.md.
+- **Client code is leaving — don't invest in it.** `blog.ts` (+ the blog/page/schema editors) →
+  `tosijs-blog`; `asset-manager.ts` → `tosijs-assets`; generic bits → upstream to tosijs-ui.
+  `page.ts` and `sitemap.ts` are removed; `prefetch.ts`'s SSR-*data-injection* role is removed and
+  re-cast as a cached-HTML page server.
+- **The backend is where value concentrates.** `doc.ts`/`docs.ts` (the universal document atom),
+  the auth atom (`user.ts`), and hardened `gen`/`stored` are the trusted core (TCB); the backend
+  half of tjs-lang's reference universal endpoint consolidates *here*.
+- **The ajs/security design is NOT frozen.** It is grounded on **tjs-lang 0.13.1** (released; shape
+  settled, patches possible) and is *provisional* — re-validate against 0.13.1's primitives (re-run
+  the VM spike) before building backend internals. The old "design invariants — don't relitigate"
+  framing is **retired**; see ROADMAP.md.
+- **Testability falls out of the split:** once unique code is all backend and ajs is deterministic
+  (mock the capabilities), the write-path oracle (`validate.test.ts`, `access.test.ts`,
+  `write-path.integration.test.ts`) runs without emulators.
 
 ## Development Commands
 

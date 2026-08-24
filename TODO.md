@@ -2,9 +2,15 @@
 
 ## Strategic direction
 
-See **[ROADMAP.md](ROADMAP.md)** — the platform is pivoting to a **universal endpoint + ajs
-stored procedures** model. Several items below are affected: the bespoke blog/page/prefetch
-system is slated for *removal* (Phase 2), not extension, so don't invest in it.
+See **[ROADMAP.md](ROADMAP.md)** (rewritten 2026-08-24) — the platform **consolidates into the pure
+backend** (`/doc` + `/docs` + a universal stored-ajs endpoint); client code moves out to tosijs-ui /
+`tosijs-blog` / `tosijs-assets`, and this hosting becomes a tosijs-ui build deployed to Firestore.
+The bespoke blog/page/prefetch system is slated for *removal/extraction*, not extension — don't
+invest in it. The ajs/security design is grounded on **tjs-lang 0.13.1** and is *provisional*
+(re-run the VM spike before building internals).
+
+> The phase numbering in the subsections below **predates the roadmap rewrite** — trust
+> [ROADMAP.md](ROADMAP.md)'s phases for ordering; the task detail here is still useful.
 
 ### Near-term (Phase 1 — port rules to tjs-lang)
 

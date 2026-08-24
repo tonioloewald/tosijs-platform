@@ -1,199 +1,184 @@
-# tosijs-platform Roadmap — the ajs / universal-endpoint direction
+# tosijs-platform Roadmap — backend consolidation
 
-> Strategic direction distilled from design discussion (2026-06/07). This supersedes
-> the SSR/prefetch-centric architecture. See [TODO.md](TODO.md) for near-term tasks.
+> Rewritten 2026-08-24. **Supersedes** the prior "ajs / universal-endpoint" roadmap (whose
+> center of gravity — a server-side interpreter that *rebuilds* the content system as data —
+> predated the **tosijs-ui build/dev/doc-site system**, which now owns page generation). See
+> [TODO.md](TODO.md) for near-term tasks.
 
-## The thesis
+## The thesis (settled)
 
-Today the platform has a split personality:
+The platform's old split personality — *client behavior is data* (`/esm` modules), *server
+security is code* (deploy-gated `validate`/access) — resolves not by building one big server-side
+interpreter, but by **splitting the repo cleanly along the client/server line and consolidating
+each half where it belongs**:
 
-- **Client behavior is data** — modules live in Firestore, served via `/esm`, hot-swappable, no deploy.
-- **Server security/validation is code** — every collection's `validate`/access logic is
-  trusted TypeScript that must be `deploy`-ed.
+- **tosijs-ui owns the front.** Its build emits one pre-rendered `/<slug>/index.html` per known
+  path (no-JS-readable, then hydrated into a client SPA), with full SEO/OG/JSON-LD/sitemap/robots
+  and an **in-browser edit-source UI**. Purely build-time/client-side today.
+- **This repo becomes pure backend.** All server logic consolidates here — including the backend
+  half of tjs-lang's reference universal endpoint — while every client artifact moves out. The two
+  repos already point at each other: tosijs-ui's `doc-system-roadmap.md` designs a pluggable
+  **`DocStore`** seam (`RestStore`/`DbStore`, unbuilt) and says the hosted auth/versioning "is
+  already worked out … in **loewald-dot-com** — we adopt it wholesale."
 
-**tjs-lang / ajs** closes that gap. ajs is a Turing-complete, deeply-async, type-safe,
-sandboxed, **gas-limited and time-boxed** language with **no ambient authority** — it can
-only call capabilities you explicitly hand it. That makes validation and access logic into
-**safe stored procedures**: data in Firestore, versioned, evaluated server-side without the
-arbitrary-code-execution catastrophe that a naive `eval` would be.
+**End state:** *`tosijs-platform` (this repo) = the secured backend / universal endpoint — `/doc`,
+`/docs`, and one stored-ajs endpoint — with everything else expressed as collection config or
+stored ajs. Its own hosting is just a standard tosijs-ui build deployed to Firestore, served via
+`/prefetch` as cached SSR HTML. Because all its unique code is backend, it becomes trivially
+testable.*
 
-The prize is bigger than "store rules as data." Because the `/doc` and `/docs` endpoints
-already solve fine-grained security, ajs just *calls that solved problem*. The Cloud
-Functions layer becomes a **universal endpoint** — a generic interpreter — and every site
-becomes pure data: schemas + access rules + validators + modules. **Deploy the platform
-once; everything else is content.** That's the README's "PHP/LAMP simplicity" thesis finally
-reaching the server tier.
+Name stays **`tosijs-platform`**, repo stays put — the ambiguity that briefly motivated a separate
+`tosijs-edge` project isn't real.
 
-End state: **one substrate — versioned documents, some of which are executable, behind a
-secured universal endpoint.** "Blog / IDE / word-processor / literate-programming platform"
-are four views of that one substrate, not four products.
+## Repo topology (decided)
 
-## Design invariants (decisions already settled — do not relitigate)
+1. **tjs-lang's actual backend stuff moves here or is eliminated.** tjs-lang stays *language + VM +
+   generic batteries*; its reference `functions/` universal-endpoint layer (`store.tjs`/`rbac.tjs`/
+   `schema.tjs`/`routing.tjs`) consolidates into this repo, reconciled with loewald's stronger RBAC
+   (field-level access + role hierarchy + provenance + typed outcomes), or is dropped.
+2. **Client-side code here moves out** — to small projects or upstream into tosijs-ui. The obvious
+   breakdown: **`tosijs-blog`** and **`tosijs-assets`** (the asset manager). Generic doc/site
+   behavior is already tosijs-ui's.
+3. **This hosting becomes a standard tosijs-ui build, deployed to Firestore**, so `/prefetch` grabs
+   the server-side-rendered / cached HTML (for SEO + load time). All unique code left in this
+   project is backend → **super easy to test**.
+4. **The service layer reduces to `/doc` + `/docs` + one universal (stored-ajs) endpoint.**
+   Everything else — the goal is to *demonstrate* this — becomes a **collection configuration or a
+   stored ajs call**.
 
-These were reasoned through and are the load-bearing constraints. Violating one reintroduces
-a class of bug we already designed out.
+## Division of labor
 
-1. **The VM is amoral.** ajs knows nothing of roles/fields/tokens. Security lives entirely at
-   the capability (atom) boundary. A proc runs *as the caller* (`SECURITY INVOKER` by default) —
-   it can only do what the caller could already do by hand. Least privilege is the default.
+| Concern | Owner |
+|---|---|
+| Static page-per-path, SEO/OG/sitemap, hydration + SPA, in-browser edit UI | **tosijs-ui build** |
+| Blog UI + editor | **`tosijs-blog`** (extracted from here) |
+| Asset-manager UI | **`tosijs-assets`** (extracted from here) |
+| `/doc` + `/docs` + universal stored-ajs endpoint; RBAC; ajs procs; batteries | **this repo** |
+| Language + VM + generic batteries | **tjs-lang** (backend endpoint layer moves here) |
+| The `DocStore` **contract** | tosijs-ui defines it; **this repo conforms** (decision 5) |
+| Hosting HTML | a **tosijs-ui build deployed to Firestore**, served via `/prefetch` |
 
-2. **Guarantees are confinement, termination, type-soundness — NOT correctness.** Correctness
-   is undecidable (Rice) and we don't claim it. "Provable security" = provable *confinement*
-   (can't escape the atoms) + *termination* (gas/time enforce halting by construction) +
-   *type-soundness* (ask for a `T`, get a `T` or a clean error). It bounds the blast radius; it
-   does not verify intent. Keep the marketing honest about this.
+## Decisions taken (2026-08-24)
 
-3. **TCB = the atom set + the VM + the auth atom.** Procs are *untrusted-but-safe*, so you
-   never audit a proc. You audit the finite menu of atoms (trusted code) and the VM. This is the
-   whole security payoff: audit surface collapses from "all the logic" to "the doors the logic
-   may open."
+1. **Keep it `tosijs-platform`, in this repo.** No separate backend project, no `tosijs-edge`.
+2. **Consolidate backend in; move client out** (`tosijs-blog`, `tosijs-assets`, or upstream to
+   tosijs-ui) — see [Repo topology](#repo-topology-decided).
+3. **This hosting = a standard tosijs-ui build deployed to Firestore**, with `/prefetch` serving
+   cached SSR HTML. The site stops being bespoke; it eats its own backend.
+4. **Service surface reduces to `/doc` + `/docs` + a universal stored-ajs endpoint**; prove that
+   everything else is a collection config or a stored ajs call.
+5. **Adopt tosijs-ui's `DocStore` interface as the contract.** Implement `RestStore`/`DbStore` to
+   satisfy their seam (`readSource`/`writeSource`/`createDoc`) so it plugs in wholesale.
+6. **Ground the ajs/security design on tjs-lang 0.13.1 — don't re-freeze it.** 0.13.1 is released,
+   shape settled (patches possible). The prior "14 settled invariants, do not relitigate" framing
+   is retired — carry that reasoning as *design intent to re-validate against 0.13.1's primitives*,
+   and re-run the VM spike against 0.13.1 before building backend internals.
 
-4. **Gas prices I/O, not just CPU.** Every capability invocation draws gas at a host-set
-   per-atom price. Metering only interpreter steps is theater — a proc doing 10k cheap-looking
-   `getDoc`s is a DoS. Gas is *local*; **amplification is global**.
+## Serving model
 
-5. **Outside-world atoms do NOT dissolve like doc atoms do.** `gen` (LLM) and `stored`
-   (storage) reach external, token-bearing endpoints — the reflection/DoS surface. They stay
-   bespoke, narrowly typed, and rate-limited; procs reach them through a deliberately stingy
-   interface, or not at all. The blog reduction is clean *only because* its atoms are confined
-   doc ops. Do not wave the same wand at `gen`.
+Uniform and cache-first — the same shape whether a page is precomputed or built on demand:
 
-6. **One write callback → a typed discriminated-union outcome.** Not staged
-   guard/shape/post callbacks. The callback returns `Allowed{data} | Denied{reason} |
-   Invalid{path,msg} | Conflict{…} | Failed{cause}`; the VM maps tags to HTTP semantics
-   (403/422/409/500/200). Type-soundness forces the proc to say *which* kind of outcome it is,
-   giving staging's clarity from the *protocol* instead of the *call structure*.
-   **Keep `Invalid` (fix your payload) and `Denied` (you can't, don't retry) distinct forever** —
-   collapsing them costs a debugging afternoon.
+1. A request that looks like a page — `hostname/foo` — returns **cache-friendly static HTML**, from
+   one of two sources:
+   - **Directly** — a stored `foo/index.html` (the tosijs-ui build output, deployed to Firestore).
+   - **Virtually** — `/prefetch` looks in storage for the cached page and returns it, or **builds
+     it, caches it, and returns it**. This is where *dynamically-generated* pages live: first hit
+     pays for the build, the rest are cache reads. (This is `/prefetch`'s catch-all reborn as a
+     page-cache builder, **not** an SSR-data injector — the exact class of bug that took the site
+     down on 2026-08-21.)
+2. The returned HTML always carries **hydration stubs** — exactly how tosijs-ui pages work — so it
+   reads with no JS, then hydrates into functionality in place.
+3. Hydration pulls **`docs.json`** (also cache-friendly) — the corpus that drives SPA nav.
+4. **Freshness via delta, not invalidation.** `docs.json` carries a **timestamp**. After loading it
+   (preferably from cache), the client asks for *updates since that timestamp* and gets **nothing**,
+   a **delta**, or a **whole fresh `docs.json`**. Freshness rides an incremental query, not a
+   rebuild-or-purge hook.
 
-7. **Capabilities are buffered / transactional.** The write cap stages mutations into a buffer;
-   the host commits only on `Allowed`. This makes the callback **pure-until-commit**: free-form
-   execution order, no partial effects, and "a denied write has no effect" is recovered at
-   *commit time* rather than by structural staging. It's what makes "guard by trying" cheaper
-   than "guard by simulating" — attempting a transformation and discovering a missing transitive
-   privilege costs nothing because nothing committed.
+## The bridge (`DocStore`)
 
-8. **Provenance stamps are system-owned.** Fields a policy reads to decide (`_lastWriteRole`,
-   `_modifiedBy`, revision trails) are maintained by the write atom and **never** appear in any
-   role's writable field set. Rule: *never let the subject write the fields your policy reads*,
-   or the lock is forgeable. (This is what makes "author can't edit after an editor touched it"
-   safe.)
+Your "edit files against the service layer, then ingest on the dev side," generalized from
+tosijs-ui's existing *local-FS* loop to *our service*:
 
-9. **The render/read cache key must include authority.** Key = `(proc-version, doc-version,
-   effective-access)`. Caching a read/HTML result without the authority dimension is a
-   field-level access bypass through the cache (serve the editor's view to the public).
+- **Edit-time write-through.** tosijs-ui's in-browser "edit source" today reads/writes the repo via
+  a dev-only `/__docstore/source` endpoint (chokidar then rebuilds — the build *is* the preview).
+  `RestStore` redirects those reads/writes at **our** service, so authoring writes records.
+- **Build-time ingest.** `config.prebuild()` (their sanctioned pre-extraction hook) pulls records
+  from our service into the corpus (`docPaths`), or `extractDocs` is extended to accept a non-FS
+  source. Caveat: a `prebuild` that writes into a *watched* path rebuilds forever (documented in
+  their `dev.ts`).
+- **Versioning & auth are ours** — records-as-source with our existing versioning + role model
+  (`doc.ts`/`docs.ts` + `user.ts`). That's the piece tosijs-ui's roadmap wants to adopt wholesale.
 
-10. **Determinism from capabilities.** No `Date.now`, no `Math.random`, no I/O except through
-    atoms. A proc is a pure function of `(inputs, capability-responses)` → replayable,
-    cacheable, and **unit-testable without emulators** (mock the cap responses). This dissolves
-    the current skip-guarded integration-test problem.
+## The payoff: zero-deploy full-stack components
 
-11. **Schema = intra-document; ajs = inter-value.** A sub-schema can only see the one value it
-    strains, so it covers shape + field whitelist completely. The moment a rule depends on
-    *another value* (existing state, another doc, transitive privileges) it's relational → ajs.
-    Clean, predictable dividing line for "which tool does this rule need."
+Why the ajs backend earns its keep even though tosijs-ui owns page generation. A component becomes
+**deployable-as-data, end to end, with no `deploy` step**:
 
-12. **Schema is both guard and strainer** (same engine). `read?: Schema | AjsProc`. Straining
-    is type-sound: output type = the projection schema, so the read side gets typed output for
-    free (nice for the renderer/cache downstream).
+- **Front-end code ships via `/esm`** — modules in Firestore, served as `content-type:
+  text/javascript`, hot-swappable today.
+- **The server-side portion of that component is written in ajs** and brought on board the same way
+  — a stored proc evaluated behind the secured endpoint, no Cloud Functions redeploy.
 
-13. **Schema-first matters (vs zod's types-first).** tosijs-schema's schema is a serializable
-    *source* artifact, so the schema itself can be **stored data** (change shape without
-    redeploy) and can drive server + client + ajs strainer + the atom ABI from one source.
-    Crucially, **both halves of validation/access stay serializable** — shape is a schema,
-    condition is ajs — so there is no un-serializable escape hatch (zod's `.refine(closure)` is
-    exactly such a hatch). The entire guard-and-shape surface is data, end to end.
+A "component" stops being *client code you ship + server code you deploy*; it's **one artifact, both
+halves data**. That's the README's "PHP/LAMP simplicity" thesis finally reaching the server tier.
 
-14. **Unify versioning.** Modules, procs, and schemas *all* need version semantics. Don't solve
-    it three times — one mechanism (the `name@version` subcollection pattern already sketched in
-    `functions/src/esm.ts`'s TODO) covers code-as-data, logic-as-data, and shape-as-data.
+## What moves where
 
-## SEO surrender (housekeeping, but do it deliberately)
+- **Out of this repo → `tosijs-blog` / `tosijs-assets` / tosijs-ui:** `blog.ts` + the blog/page/
+  schema editors → `tosijs-blog`; the asset-manager → `tosijs-assets`; anything generic → upstream
+  into tosijs-ui.
+- **Into this repo (from tjs-lang) or eliminated:** the reference universal-endpoint / batteries
+  layer, reconciled with loewald's stronger RBAC.
+- **Dies:** `/prefetch`'s SSR-data-injection role (becomes a cached-HTML server); `sitemap.ts`
+  (tosijs-ui emits `sitemap.xml`).
+- **Stays as the backend core:** `/doc`/`/docs` (the substrate), the auth atom (`user.ts`), the VM
+  host, hardened `gen`/`stored`, collection configs, and stored ajs.
 
-AI agents curling pages collapsed SEO back to "just serve the bytes," so SSR-on-demand
-(prefetch) is no longer earning its complexity. tosijs-ui's doc system + aggressive-cache
-rendering replaces it. Before deleting prefetch, close two loose ends or the surrender is lossy:
+## The ajs / security design — grounded on tjs-lang 0.13.1 (not re-frozen)
 
-- **Per-URL `<meta>` / OpenGraph tags** — many agents and all social cards read head tags, not
-  body. Confirm the doc system emits correct per-page head tags.
-- **Freshness / invalidation-on-publish** — prefetch was live; static/cached rendering trades
-  freshness for simplicity and needs a rebuild-or-invalidate hook on write. The instinct already
-  exists (`clearBlogCache()` on save).
+Not a frozen invariant list. The prior reasoning (amoral VM + capability boundary; gas prices I/O
+not just CPU; determinism → emulator-free testability; schema = intra-document vs ajs = inter-value;
+provenance fields the subject can't write; authority in the read/cache key; typed
+discriminated-union write outcomes; buffered/transactional capabilities) captured real design
+pressure and much will likely persist **in some form** — but 0.13.1 (released; shape settled,
+patches possible) reworks the VM/capability/typing model, so treat it as **design intent to
+re-validate against 0.13.1's primitives**.
+
+**Action:** re-read 0.13.1's model, then re-run the VM spike (the `module.validate` oracle against
+the characterization tests) on 0.13.1 to re-derive the backend contract before committing internals.
 
 ## Phased plan
 
-### Phase 1 — port `/doc`, `/docs`, and rules to tjs-lang (behavior-preserving)
+- **Phase 0 — baseline on tjs-lang 0.13.1.** Released; shape settled. Re-run the VM spike against
+  0.13.1; reconcile the carried-over security design with its model. Blocks Phase 1 internals.
+- **Phase 1 — consolidate the backend.** Bring tjs-lang's reference universal-endpoint / batteries
+  here (or eliminate), unify with loewald's stronger RBAC, and collapse the service surface toward
+  `/doc` + `/docs` + one universal stored-ajs endpoint. Everything else re-expressed as collection
+  config or stored ajs — *demonstrated*, not asserted.
+- **Phase 2 — extract the client.** Split out `tosijs-blog` and `tosijs-assets`; upstream generic
+  bits into tosijs-ui. This repo's client shrinks to nothing unique.
+- **Phase 3 — hosting eats its own backend.** Make this site a standard tosijs-ui build deployed to
+  Firestore; wire `/prefetch` to serve the cached SSR HTML ([Serving model](#serving-model)).
+- **Testability falls out of Phases 1–2:** once unique code is all backend and ajs is deterministic
+  (mock the capabilities), the write-path oracle already here (`validate.test.ts`, `access.test.ts`,
+  `write-path.integration.test.ts`) becomes the core suite — runnable **without emulators**.
 
-The good kind of scary: the current TypeScript **is the spec**, so correctness is checkable.
+## SEO (mostly resolved by delegation)
 
-- **First, backfill the oracle.** The existing tests cover *dispatch* (`getMethodAccess`,
-  role-walk, read/list field-strain) well — but the **`validate` / write / `unique` / provenance
-  path has essentially no coverage**, and that's exactly the part being ported. Write
-  characterization tests against the current TS `validate` path *before* porting, or you're
-  porting the high-risk slice blind. (See [Test coverage reality](#test-coverage-reality).)
-- **The real deliverable is the engine-vs-data split.** Decide which lines of
-  `functions/src/collections/access.ts` stay compiled TCB (the role-precedence walk, the
-  field-filter mechanic) vs. which become ajs procs (the per-collection predicates). That line
-  *is* the frozen **atom ABI** everything downstream inherits — describe it as schema artifacts.
-- **Run in shadow mode.** tjs-lang `/doc` computes answers alongside the TS one on real traffic,
-  commits nothing, until the diff is clean. Then cut over.
-- **Fix while you're in there:** the `filterFields` branch in `getMethodAccess` is untested and
-  looks broken (`delete access.key` deletes a literal `.key`; `for (const key in Object.keys(...))`
-  iterates indices). Dead/wrong code in the exact slice being ported.
+The old "SEO surrender loose ends" are largely **closed by tosijs-ui's build** — per-page
+`<title>`/description/OpenGraph/Twitter/JSON-LD, plus `sitemap.xml` + `robots.txt` from the corpus,
+and optional Playwright-rendered OG images. **Freshness** is handled by the `docs.json` timestamp +
+updates-since-timestamp delta ([Serving model](#serving-model)), not a purge hook. Serving the build
+from Firestore via `/prefetch` keeps first-paint fast and crawler-friendly.
 
-### Phase 1.5 — authoring & bootstrap (dependency of Phase 2, easy to forget)
+## Open questions worth pinning
 
-- **Proc/schema authoring + test loop.** Phase 1's engine *consumes* procs (Phase 1 can run on
-  hand-seeded ones), but Phase 2 needs an ergonomic way to write, version, and test procs/schemas
-  as data. That loop is, recursively, the IDE end-state.
-- **Bootstrap seed (irreducible, stays hand-written).** Something defines the first owner, the
-  atom registry, and *which* procs are allowed to be access-rules (privileged authoring tier).
-  Order: hand-author the seed → build enough authoring UI → author the rest in-platform.
-
-### Phase 2 — eliminate the bespoke content system
-
-No behavioral oracle here — this is a *product* judgment, so the method differs.
-
-- **Delete candidates:** `blog.ts`, `page.ts`, `sitemap.ts`, `prefetch.ts`, and the bespoke
-  blog/page/schema editors. Blog becomes: records + a schema + an ajs validator + an ajs→html
-  renderer that caches aggressively. Sitemap becomes an ajs renderer over a query. `esm.ts` mostly
-  dissolves into "a doc rendered with `content-type: text/javascript`."
-- **Method: enumerate-then-map.** The current blog *is* the spec — `blog.ts` + the editors
-  enumerate exactly what must be replaced. Map every feature to one of: **web component**, or
-  **rules + stored procedure**. The two-category constraint is a **tripwire**: anything that fits
-  neither is either a genuine missing tosijs-ui primitive (build it) or the reduction leaking
-  (a real finding). **No silent third bucket** ("…and this one special server thing").
-- **Likely first gaps** (build into tosijs-ui): the **blog index as a query-shaped view**
-  (renderer-over-query, like sitemap, not single-doc render); an **authoring surface** (does the
-  doc system *edit*, or only render?); **per-post OG/meta** (the SEO loose end above).
-
-### Survives as trusted code (the whole TCB, roughly)
-
-`doc.ts` / `docs.ts` (the universal document atom — the substrate), the ajs VM + host (gas,
-time, cache store), the auth atom (`user.ts`, request-credential → `userRoles`), and a hardened
-`gen` / `stored`. Everything else moves into Firestore as schemas + ajs + cache policy.
-
-## Test coverage reality
-
-- **Well covered:** `getMethodAccess` dispatch — role-walk, inheritance, deny-by-default,
-  method→access mapping, and read/list field-strain (`access.test.ts`).
-- **Essentially untested:** `validate(data, userRoles, existing)` (zero coverage — and `existing`,
-  the provenance input, isn't exercised anywhere), `unique`, `schema` validation, write-side field
-  maps, sub-collection (`post/comment`) access, multi-role precedence (`multiRoleUser` is a
-  commented-out "reserved for future tests").
-- **Integration tests are skip-guarded** — they `expect(true).toBe(true)` when emulators aren't
-  up (pass vacuously in CI) and assert coarse HTTP status (forced to accept `[403, 404]` because
-  the opacity layer blurs what actually happened).
-- **The new stuff is far easier to test** — procs are pure/deterministic/caps-only, so you feed
-  `(data, existing, userRoles, cap-responses)` and assert a *tagged* outcome, no emulator needed.
-  The thing that forced integration tests (live Firestore) becomes a mockable capability.
-
-## Open questions worth pinning before/while building
-
-- Exact capability set the VM exposes (pure over `(data, userRoles, existing)` vs. a sandboxed,
-  role-checked `getDoc`/`queryDocs` handle — and the gas price of each).
-- Re-entrancy story if an atom can transitively trigger another proc (this is the EVM problem
-  space; async + caps + Turing-complete). Probably fine because atoms are transactional Firestore
-  ops, but it's a *composition* property, not a *confinement* one — convince yourself explicitly.
-- Schema evolution / migration: doc written under v1, strained by v2 — who migrates? (Folds into
-  the unified versioning mechanism, invariant 14.)
+- **What exactly is the universal (stored-ajs) endpoint** — its call shape, how a stored proc is
+  named/versioned/authorized, its gas price — and which current endpoints (`/gen`, `/stored`,
+  `/cachedQuery`, `/state`, `/sitemap`) collapse into it vs. stay bespoke.
+- **How tjs-lang 0.13.1's** capability/typing model shapes the backend internals — now *checkable*;
+  re-run the VM spike.
+- **The tjs-lang backend-move seam** — absorb its reference `functions/` wholesale, or re-derive
+  from loewald's stronger RBAC?
+- **Which client bits go standalone (`tosijs-blog`/`tosijs-assets`) vs. upstream into tosijs-ui.**
+- **Unified versioning** across modules / procs / schemas / docs-as-source — still one mechanism.
