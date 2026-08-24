@@ -318,6 +318,14 @@ const rules: XinStyleSheet = {
     overflowX: 'auto',
     borderRadius: vars.spacing25,
   },
+  // CodeMirror 6 (<tosi-code>, since tosijs-ui 1.7) takes its text colour from
+  // --text-color, not --code-color — so on the dark --code-bg the page's dark
+  // --text-color renders dark-on-dark (the editor looks blank/broken in light
+  // mode). Pin the editor's text to the light code colour so it reads as
+  // light-on-dark, matching our code blocks.
+  'tosi-code': {
+    _textColor: vars.codeColor,
+  },
   '.post-summary > .row': {
     gap: vars.pad,
   },

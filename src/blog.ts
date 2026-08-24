@@ -1025,13 +1025,15 @@ export class XinPostEditor extends Component<PostEditorParts> {
           codeEditor({
             part: 'source',
             value: blog.editorPost.content.valueOf(),
+            // posts are markdown; `mode` is part of the surviving 1.7 contract
+            mode: 'markdown',
             style: {
               flex: '1 1 auto',
               resize: 'none',
             },
-            options: {
-              wrap: true,
-            },
+            // NOTE: the ACE-era `options: { wrap: true }` was removed in tosijs-ui
+            // 1.7 (CodeMirror 6) — it had been a warn-once no-op, so line wrapping
+            // was already off. Configure CM6 via `.editor` (EditorView) if wanted.
           })
         ),
         div(
