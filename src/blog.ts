@@ -782,6 +782,10 @@ interface PostEditorParts extends PartsMap {
 }
 
 export class XinPostEditor extends Component<PostEditorParts> {
+  // The resolved doc path, remembered across re-saves within this editor session
+  // (a generated `_path` cannot be written back onto the editorPost proxy).
+  #path = ''
+
   updateContent = () => {
     const { source, preview } = this.parts
 
@@ -816,24 +820,30 @@ export class XinPostEditor extends Component<PostEditorParts> {
   savePost = async () => {
     const { source } = this.parts
     blog.editorPost.content.value = source.value
+    this.updateContent()
 
+    // Deep-unwrap to a plain object with PRIMITIVE leaves. `tosiValue()` is
+    // deprecated in tosijs 1.7 and leaves scalars boxed — a boxed `_path` is a
+    // truthy object, so `!editorPost._path` was always false and a new post's
+    // path was never generated, sending `p: undefined` → 400 "missing path".
+    // `.tosi.value` unwraps to primitives (undefined for a missing key), so the
+    // resolve-or-generate below works and `p` is a real string.
+    const data = (blog.editorPost as any).tosi.value as any
     let method: ServiceRequestType = 'put'
-    if (!blog.editorPost._path) {
-      // @ts-ignore-error
-      blog.editorPost._path = `post/${randomID()}`
+    let path = (data._path as string) || this.#path
+    if (!path) {
+      path = `post/${randomID()}`
       method = 'post'
     }
-    this.updateContent()
+    this.#path = path
+    data._path = path
+
     const closeNotification = postNotification({
-      message: `saving ${blog.editorPost.title}`,
+      message: `saving ${data.title}`,
       type: 'progress',
     })
-    localStorage.setItem(
-      'xin-blog-editor-post',
-      JSON.stringify(blog.editorPost.valueOf())
-    )
-    const data = tosiValue(blog.editorPost)
-    const result = await service.doc[method]({ p: data._path, data })
+    localStorage.setItem('xin-blog-editor-post', JSON.stringify(data))
+    const result = await service.doc[method]({ p: path, data })
     closeNotification()
     if (result instanceof Error) {
       postNotification({
@@ -842,15 +852,9 @@ export class XinPostEditor extends Component<PostEditorParts> {
       })
     } else {
       localStorage.removeItem('xin-blog-editor-post')
-      // Reflect the save in the underlying open post. We can't use
-      // loadPost() here: `data._path` is a plain string (the old
-      // `data._path!.value` evaluated to undefined, so nothing reloaded), and
-      // getPrefetchedDoc() would hand back the pre-save prefetched copy. Drop
-      // any stale prefetch entries, fetch the canonical doc fresh, and update
-      // currentPost so the open post re-renders.
-      // tosiValue() has unwrapped this to a plain object at runtime, but TS
-      // still sees the boxed-scalar type, so cast through unknown.
-      const path = data._path as unknown as string
+      // Reflect the save in the underlying open post: drop any stale prefetch
+      // entries, fetch the canonical doc fresh, and update currentPost so the
+      // open post re-renders.
       if (window.prefetched) {
         delete window.prefetched[path]
         if (data.path) {
