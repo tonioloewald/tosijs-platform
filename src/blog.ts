@@ -822,13 +822,14 @@ export class XinPostEditor extends Component<PostEditorParts> {
     blog.editorPost.content.value = source.value
     this.updateContent()
 
-    // Deep-unwrap to a plain object with PRIMITIVE leaves. `tosiValue()` is
-    // deprecated in tosijs 1.7 and leaves scalars boxed — a boxed `_path` is a
-    // truthy object, so `!editorPost._path` was always false and a new post's
-    // path was never generated, sending `p: undefined` → 400 "missing path".
-    // `.tosi.value` unwraps to primitives (undefined for a missing key), so the
-    // resolve-or-generate below works and `p` is a real string.
-    const data = (blog.editorPost as any).tosi.value as any
+    // Resolve the path from the UNWRAPPED post. The bug was the old guard
+    // `if (!blog.editorPost._path)`: read straight off the live proxy, `_path`
+    // is a *boxed* value (an object → always truthy), so the guard never fired,
+    // a new post's path was never generated, and `p` went out empty → 400
+    // "missing path". tosiValue() gives a clean plain object with primitive
+    // leaves (undefined for a missing key), so resolve/generate the path from
+    // that, remember it on the component for re-saves, and pass it explicitly.
+    const data = tosiValue(blog.editorPost) as any
     let method: ServiceRequestType = 'put'
     let path = (data._path as string) || this.#path
     if (!path) {
