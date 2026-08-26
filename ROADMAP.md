@@ -151,6 +151,14 @@ this is the target, not today.)
 
 ## The ajs / security design — grounded on tjs-lang 0.13.1 (not re-frozen)
 
+**The concrete spec now lives in [UNIVERSAL-ENDPOINT.md](UNIVERSAL-ENDPOINT.md)** (doc / docs /
+procedures; the `beforeWrite` transform + boolean `isWriteAllowed` write pipeline; body-vs-envelope;
+pull-only versioned deltas; Postgres-reference query semantics). That design **supersedes** the
+single "typed discriminated-union write outcome" idea below with a two-stage split
+(`beforeWrite` rewrites the body with caller caps; `isWriteAllowed` is a boolean rule with
+privileged read and no write) — so read the invariant list below as the *pressures* that shaped it,
+not the shipping contract.
+
 Not a frozen invariant list. The prior reasoning (amoral VM + capability boundary; gas prices I/O
 not just CPU; determinism → emulator-free testability; schema = intra-document vs ajs = inter-value;
 provenance fields the subject can't write; authority in the read/cache key; typed
@@ -169,7 +177,9 @@ the characterization tests) on 0.13.1 to re-derive the backend contract before c
 - **Phase 1 — consolidate the backend.** Bring tjs-lang's reference universal-endpoint / batteries
   here (or eliminate), unify with loewald's stronger RBAC, and collapse the service surface toward
   `/doc` + `/docs` + one universal stored-ajs endpoint. Everything else re-expressed as collection
-  config or stored ajs — *demonstrated*, not asserted.
+  config or stored ajs — *demonstrated*, not asserted. **Build to the
+  [UNIVERSAL-ENDPOINT.md](UNIVERSAL-ENDPOINT.md) spec** (`beforeWrite` + `isWriteAllowed` pipeline,
+  body-vs-envelope, versioned deltas); each of its §9 invariants is a test.
 - **Phase 2 — extract the client.** Split out `tosijs-blog` and `tosijs-assets`; upstream generic
   bits into tosijs-ui. This repo's client shrinks to nothing unique.
 - **Phase 3 — hosting eats its own backend.** Make this site a standard tosijs-ui build deployed to
