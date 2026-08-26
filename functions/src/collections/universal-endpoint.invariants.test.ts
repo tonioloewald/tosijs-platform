@@ -29,8 +29,9 @@ describe('§9 universal-endpoint invariants (Phase-1 acceptance)', () => {
     // 1. A procedure cannot acquire any capability the caller does not hold.
     //    Build a principal with cap set C; run a procedure that reaches for a
     //    cap ∉ C; assert the VM denies it (no amplification). Vary C.
-    //    FIXTURE: use the "toy capability" (§2.6) — present ⇒ usable, absent ⇒
-    //    VM-denied — to exercise the gate before any real capability exists.
+    //    FIXTURE: the toy capability (toy-capability.ts / toy-capability.test.ts,
+    //    §2.6) — present ⇒ usable, absent ⇒ VM-denied — exercises the gate and the
+    //    tiers (unauth⇒denied, non-admin⇒inert, admin⇒active) before any real cap.
     //    Baseline (no-cap) enforcement is token pass-through: a procedure's
     //    store cap is bound to the caller's token, so sub-requests re-enter the
     //    same getUserRoles + getMethodAccess check as the direct /doc path.
