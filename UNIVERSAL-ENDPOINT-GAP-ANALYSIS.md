@@ -52,7 +52,7 @@
 | §4.2 `isWriteAllowed` (boolean, whole-txn, privileged read, no write) | `validate()` (gate half) + `unique` | **Replace** | Fuel-exhaust/throw/non-bool ⇒ `false`. |
 | §4.3 procedures (versioned, logged, schema-pinned) | — | **New** | Old versions retained; every invocation logged (§9.11). |
 | §5 body vs envelope | `_created`/`_modified`/`_id`/`_collection` mixed into data | **Replace** | Envelope unreachable from ajs; migration for existing docs. |
-| §6 idempotence-as-infrastructure (property test, no-op, migration discovery, replay) | tjs implicit/property tests exist as a mechanism | **New** | Wire the fixed-point generator per path with a `beforeWrite`. |
+| §6 idempotence-as-infrastructure (property test, no-op, migration discovery, replay) | tjs implicit/property tests exist as a mechanism | **New** | Wire the fixed-point generator per path with a `beforeWrite`. **Tested, not runtime-enforced** — a violation is an author bug, surfaced (failing test + health check), not prevented. |
 | §7 query semantics owned by endpoint, **Postgres-reference** | `docs.ts`: single `orderBy`, `limit`, `.select(fields)`, `tagField=` array-contains | **Expand** | Add offset, multiple inequalities, ordered listing to Postgres semantics; Firestore emulates in-endpoint. |
 | §7 gas-metered queries + schema-declared queryable fields | `tagFields` (seed); no enforcement | **New/Expand** | Resolved: scans are gas-metered (exhaust gas at scale; never a special "no index" error). Schema declares queryable; generate `firestore.indexes.json`. |
 | §7.1 `docref` + built-in inner join | — (no references/join) | **New** | New tosijs-schema keyword; `docs(path,{join})`; delete-restrict; invalidation edge. |

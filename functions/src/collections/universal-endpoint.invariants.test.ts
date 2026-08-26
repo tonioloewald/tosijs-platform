@@ -67,8 +67,12 @@ describe('§9 universal-endpoint invariants (Phase-1 acceptance)', () => {
 
     // 7. beforeWrite is idempotent over schema-valid input (§6.1 generated
     //    test): for schema-valid x, beforeWrite(beforeWrite(x)) == beforeWrite(x).
-    //    Drive from the schema's value generator.
-    test.todo('9.7 beforeWrite is idempotent (generated over schema-valid input)')
+    //    Drive from the schema's value generator. UNLIKE 9.1–9.6/9.10, this tests
+    //    AUTHOR code and may legitimately fail — a finding about someone's
+    //    beforeWrite, not a runtime guarantee. The runtime does not enforce
+    //    idempotence (§4.1); this generated test + the §6.3 fixed-point health
+    //    check are the only feedback.
+    test.todo('9.7 beforeWrite is idempotent (generated; author-code property, not enforced)')
 
     // 8. A write whose NORMALIZED body equals the stored body is a no-op: no
     //    commit, no stamp. Requires the canonical normalization (Decision #… in

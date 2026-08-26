@@ -74,7 +74,7 @@ Ordering is a security property: `isWriteAllowed` sees what will actually land, 
 - Output: the body to store.
 - Sees nothing the caller could not see. No privileged read. No write capability. It cannot touch other documents.
 - Pure and deterministic given its inputs. `Date.now()` and other ambient state are not available; time comes from the injected clock.
-- **Idempotent**: `beforeWrite(beforeWrite(x)) == beforeWrite(x)` for every schema-valid `x`.
+- **Idempotent — expected and tested, not enforced.** `beforeWrite(beforeWrite(x)) == beforeWrite(x)` for every schema-valid `x` is a property the generated test (§6.1) checks per path. The runtime does **not** police it and does not "protect `beforeWrite` from itself" (no frozen inputs, no re-run-to-verify, no rejection of non-idempotent transforms). A non-idempotent transform is an author bug — made visible by that test and the §6.3 fixed-point health check, and bounded in cost (redundant writes) — not something the system prevents.
 - Does not generate timestamps. It may normalize caller-asserted timestamps (coerce format, clamp to injected now, reject the future) because those are caller data.
 - Does not receive envelope fields and therefore cannot write them.
 
@@ -116,6 +116,8 @@ Idempotence of `beforeWrite` is not just retry safety. It makes stored data a fi
 2. **No-op write detection.** Re-submitting a stored record is free and stamps nothing.
 3. **Data-health / migration discovery.** Running `beforeWrite` over stored documents and reporting those that are not fixed points finds every record that predates the current rule. A rule change becomes a discoverable migration instead of a silent one.
 4. **Replay determinism.** Sequenced-replica and optimistic-concurrency paths re-run the transform and get the same transaction.
+
+Idempotence is a **tested expectation, never a runtime guard.** We do not freeze inputs, re-run to verify, or reject a non-idempotent transform — the generated test (1) and the health check (3) make a violation *visible*, its cost is bounded (redundant writes), so runtime enforcement would buy nothing.
 
 ## 7. Query semantics
 
