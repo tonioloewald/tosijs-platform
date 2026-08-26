@@ -29,6 +29,11 @@ describe('§9 universal-endpoint invariants (Phase-1 acceptance)', () => {
     // 1. A procedure cannot acquire any capability the caller does not hold.
     //    Build a principal with cap set C; run a procedure that reaches for a
     //    cap ∉ C; assert the VM denies it (no amplification). Vary C.
+    //    FIXTURE: use the "toy capability" (§2.6) — present ⇒ usable, absent ⇒
+    //    VM-denied — to exercise the gate before any real capability exists.
+    //    Baseline (no-cap) enforcement is token pass-through: a procedure's
+    //    store cap is bound to the caller's token, so sub-requests re-enter the
+    //    same getUserRoles + getMethodAccess check as the direct /doc path.
     test.todo('9.1 procedure cannot exceed the caller’s capability set')
 
     // 2. isWriteAllowed cannot write — attempting to obtain a write capability
@@ -43,8 +48,13 @@ describe('§9 universal-endpoint invariants (Phase-1 acceptance)', () => {
 
     // 10. Rule installation requires a capability that procedures and transforms
     //     can never hold. Assert a procedure/beforeWrite cannot install or modify
-    //     an isWriteAllowed rule.
-    test.todo('9.10 installing rules needs a capability procs/transforms can’t hold')
+    //     an isWriteAllowed rule. Same for the OTHER crown jewel — auth-affecting
+    //     caps (changing a principal's roles/identity). Plus the layering (§2.6):
+    //     because auth/rule records are documents, an op on them must pass BOTH
+    //     the hardwired capability gate AND the collection's /doc RBAC (AND) —
+    //     assert e.g. a users-collection read projection still hides another
+    //     user's personal fields even when the caller holds an auth capability.
+    test.todo('9.10 crown-jewel caps (rules + auth) need an unholdable cap; /doc RBAC composes on top')
   })
 
   // ── Write pipeline (§3, §4) ────────────────────────────────────────────

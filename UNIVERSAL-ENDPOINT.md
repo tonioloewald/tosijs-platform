@@ -34,15 +34,16 @@ Application logic lives in three places, all in ajs, all evaluated by the same V
 | beforeWrite | path     | caller's capabilities            | rewritten document body  |
 | isWriteAllowed | path     | privileged read, **no write**    | `true` / `false` only    |
 
-Firestore security rules are not used. Authorization is defined by path and the artifacts above, identically for every backend and every entry point (doc, docs, procedure).
+Firestore security rules are not used. Authorization is defined by path and the artifacts above, identically for every backend and every entry point (doc, docs, procedure) — because all three carry the **same caller token** into the **same RBAC check** (§2.1).
 
 ## 2. Trust model
 
-1. **No amplification in procedures.** A procedure runs with exactly the caller's capabilities. It is cached, pre-validated, nameable request-as-code and nothing more.
-2. **Amplification exists in one place: `isWriteAllowed`.** It holds privileged read so it can check invariants over documents the caller cannot read. It holds no write capability and can return only a boolean. Enforce this in the capability set handed to the evaluator, not by convention.
+1. **No amplification in procedures — enforced by token pass-through.** A procedure runs with exactly the caller's capabilities because the store capability it is handed is bound to the **caller's request token**: every doc/docs read or write it performs re-enters the same RBAC check under the caller's identity, exactly as if the caller had made the request directly. The direct `/doc` path and the universal/procedure path are the same enforcement on the same token — there is no elevated credential to amplify with. A procedure is cached, pre-validated, nameable request-as-code and nothing more.
+2. **Amplification exists in one place: `isWriteAllowed`.** It holds privileged read so it can check invariants over documents the caller cannot read. It holds no write capability and can return only a boolean. This privileged read is the one credential that is **not** the caller's token — system-provided to system-owned rule code, which is exactly why it is boolean-only and write-less. Enforce this in the capability set handed to the evaluator, not by convention.
 3. **Split by what a stage may do:** anything that sees privileged data cannot write; anything that writes cannot see privileged data.
 4. **Fuel exhaustion in `isWriteAllowed` is a deny.** Any question the rule cannot finish answering is answered NO.
 5. **Installing `isWriteAllowed` rules is the most privileged write in the system.** Procedures and `beforeWrite` transforms cannot install or modify rules.
+6. **Beyond the caller's token, power comes only from injected capabilities** (LLM, storage, …), each enforced by its presence/absence in the evaluator's cap set. Two classes are the crown jewels and must be enforced **directly** — never reachable by caller code, a procedure, or `beforeWrite`: **auth-affecting** capabilities (anything that changes a principal's identity or roles — i.e. can redefine who the RBAC check sees) and **rule-changing** capabilities (installing/modifying rules, schemas, access config — §2.5). Both can rewrite the authorization system itself, so holding either *is* the true privileged boundary. Because auth records and rules are themselves **documents in collections**, they are governed by **both** their hardwired capability gate **and** the ordinary `/doc` collection RBAC layered on top — **AND-composed, both must pass**. The outer layer can only *further restrict*: e.g. a read projection on the users collection stops one class of user from reading another user's personal fields, independent of any auth capability. A **toy capability** (a trivial injectable op) is the first test fixture: it lets the §9 gate tests (present ⇒ usable, absent ⇒ VM-denied) run before any real capability exists.
 
 ## 3. Write pipeline
 

@@ -100,6 +100,26 @@
    write or a batch pass, rather than a silent one. Idempotence is what constrains *what can change
    and where*.
 
+## Capabilities & enforcement (resolved 2026-08)
+
+- **Baseline enforcement is token pass-through — and it ports directly.** Today `getUserRoles(req)`
+  resolves the caller's roles from the request token, and `getMethodAccess` applies RBAC, in both
+  `doc.ts` and `docs.ts`. The universal/procedure path reuses *exactly this*: a procedure's store
+  capability is bound to the **caller's token**, so its sub-requests re-enter the same
+  `getUserRoles` + `getMethodAccess` check. **The only new work is propagating the caller's token
+  into procedure sub-requests** — the enforcement code itself is a port.
+- **Everything beyond the caller's rights is an injected capability** (LLM, storage, …), gated by
+  presence/absence in the evaluator's cap set.
+- **Crown jewels — enforce directly, never reachable by caller / procedure / `beforeWrite`:**
+  **auth-affecting** caps (change a principal's identity/roles) and **rule-changing** caps (install/
+  modify rules, schemas, access config). Both can rewrite the authorization system itself. Because
+  auth/rule records are documents, they are governed by **both** their hardwired capability gate
+  **and** the ordinary `/doc` collection RBAC on top (AND-composed) — the outer layer can only
+  further-restrict, e.g. a users-collection read projection that hides other users' personal fields.
+- **First build/test step: a toy capability.** A trivial injectable op is the fixture for the
+  capability-gate invariants (§9.1/§9.2/§9.10) — proves present ⇒ usable, absent ⇒ VM-denied —
+  before any real capability (or the crown jewels) exists.
+
 ## Ports cleanly (low risk)
 
 tosijs-schema validation · `getUserRoles`/auth · path parsing (`getRef`, `collectionPath`) · the
