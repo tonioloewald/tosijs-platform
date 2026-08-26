@@ -182,6 +182,8 @@ the characterization tests) on 0.13.1 to re-derive the backend contract before c
   body-vs-envelope, versioned deltas). Port worklist:
   [UNIVERSAL-ENDPOINT-GAP-ANALYSIS.md](UNIVERSAL-ENDPOINT-GAP-ANALYSIS.md); the §9 invariants are
   scaffolded as acceptance tests in `functions/src/collections/universal-endpoint.invariants.test.ts`.
+  **Acceptance ladder** (gap analysis): drop-in `doc`/`docs` parity → prefetch as a stored procedure
+  → storage capability + asset-manager → *add a module editor / the blog with no function deploy*.
 - **Phase 2 — extract the client.** Split out `tosijs-blog` and `tosijs-assets`; upstream generic
   bits into tosijs-ui. This repo's client shrinks to nothing unique.
 - **Phase 3 — hosting eats its own backend.** Make this site a standard tosijs-ui build deployed to

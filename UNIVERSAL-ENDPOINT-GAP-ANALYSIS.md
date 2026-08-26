@@ -31,6 +31,26 @@
    today. The spec adds a monotonic per-collection sequence + tombstones + `docs(path,{since})`,
    feeding both the client replica and SSR invalidation.
 
+## Milestones — the acceptance ladder ("no function deployment")
+
+The universal endpoint is *done* when a **vanilla server** (this backend, deployed once) can host
+features added purely as **data** — stored procedures + collection configs + client code — with
+**zero function deploys**. That is the acceptance test, and it comes in independently-shippable
+rungs, each shrinking the bespoke function surface:
+
+1. **Drop-in endpoint parity.** The universal `doc`/`docs` behaviourally replace the existing
+   loewald.com endpoints. Run in shadow mode (compute alongside the current TS, commit nothing)
+   until the diff is clean, then cut over.
+2. **Prefetch becomes a stored procedure.** The work `prefetch.ts` does — assemble prefetch data /
+   render-and-cache the page HTML (the [Serving model](UNIVERSAL-ENDPOINT.md) virtual page) — moves
+   into a stored ajs procedure. Retire `prefetch.ts` the *function*.
+3. **Storage capability → asset manager.** Add the `storage` battery (a capability, gated by the
+   caller's token like any other); the asset-manager runs against it (upload/list/delete), folding
+   in today's bespoke `/stored`.
+4. **Add a feature with no deploy — the proof.** On a vanilla server, stand up a **module editor**,
+   the **blog system**, and so on as stored procedures + configs + client code, with **no function
+   deployment**. This is the README's "PHP/LAMP simplicity, now on the server" made literal.
+
 ## Mapping table
 
 | Spec | Today (file · concept) | Disposition | Notes |
