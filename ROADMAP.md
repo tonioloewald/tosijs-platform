@@ -179,7 +179,9 @@ the characterization tests) on 0.13.1 to re-derive the backend contract before c
   `/doc` + `/docs` + one universal stored-ajs endpoint. Everything else re-expressed as collection
   config or stored ajs — *demonstrated*, not asserted. **Build to the
   [UNIVERSAL-ENDPOINT.md](UNIVERSAL-ENDPOINT.md) spec** (`beforeWrite` + `isWriteAllowed` pipeline,
-  body-vs-envelope, versioned deltas); each of its §9 invariants is a test.
+  body-vs-envelope, versioned deltas). Port worklist:
+  [UNIVERSAL-ENDPOINT-GAP-ANALYSIS.md](UNIVERSAL-ENDPOINT-GAP-ANALYSIS.md); the §9 invariants are
+  scaffolded as acceptance tests in `functions/src/collections/universal-endpoint.invariants.test.ts`.
 - **Phase 2 — extract the client.** Split out `tosijs-blog` and `tosijs-assets`; upstream generic
   bits into tosijs-ui. This repo's client shrinks to nothing unique.
 - **Phase 3 — hosting eats its own backend.** Make this site a standard tosijs-ui build deployed to
