@@ -107,7 +107,9 @@
   `doc.ts` and `docs.ts`. The universal/procedure path reuses *exactly this*: a procedure's store
   capability is bound to the **caller's token**, so its sub-requests re-enter the same
   `getUserRoles` + `getMethodAccess` check. **The only new work is propagating the caller's token
-  into procedure sub-requests** — the enforcement code itself is a port.
+  into procedure sub-requests** — the enforcement code itself is a port. *Runnable reference:*
+  `store-capability.ts` (+ tests) binds a capability to a principal and shows a procedure reads
+  *identically* to a direct call over the real `getMethodAccess`.
 - **Everything beyond the caller's rights is an injected capability** (LLM, storage, …), gated by
   presence/absence in the evaluator's cap set.
 - **Crown jewels — enforce directly, never reachable by caller / procedure / `beforeWrite`:**
