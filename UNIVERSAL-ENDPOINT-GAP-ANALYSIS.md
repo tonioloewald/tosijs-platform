@@ -54,41 +54,51 @@
 | §5 body vs envelope | `_created`/`_modified`/`_id`/`_collection` mixed into data | **Replace** | Envelope unreachable from ajs; migration for existing docs. |
 | §6 idempotence-as-infrastructure (property test, no-op, migration discovery, replay) | tjs implicit/property tests exist as a mechanism | **New** | Wire the fixed-point generator per path with a `beforeWrite`. |
 | §7 query semantics owned by endpoint, **Postgres-reference** | `docs.ts`: single `orderBy`, `limit`, `.select(fields)`, `tagField=` array-contains | **Expand** | Add offset, multiple inequalities, ordered listing to Postgres semantics; Firestore emulates in-endpoint. |
-| §7 unindexed-queries-fail + schema-declared queryable fields | `tagFields` (seed); no enforcement | **New/Expand** | Schema declares queryable; generate `firestore.indexes.json`; reject unindexed. |
+| §7 gas-metered queries + schema-declared queryable fields | `tagFields` (seed); no enforcement | **New/Expand** | Resolved: scans are gas-metered (exhaust gas at scale; never a special "no index" error). Schema declares queryable; generate `firestore.indexes.json`. |
 | §7.1 `docref` + built-in inner join | — (no references/join) | **New** | New tosijs-schema keyword; `docs(path,{join})`; delete-restrict; invalidation edge. |
-| §7.2 versioned delta (`seq`, tombstones, `since`) | — (full refetch); DELETE hard-deletes | **New** | Monotonic per-collection seq; tombstones; `docs(path,{since})`. |
+| §7.2 versioned delta (`seq`, tombstones, `since`) | — (full refetch); DELETE hard-deletes | **New** | Monotonic per-collection seq; tombstones (may be *virtual* — a per-collection dead-id list); `docs(path,{since})`. |
 | §7.2 session-keyed encrypted client cache | `firebase.ts` plain in-memory `getRecords` cache | **Replace** | Client-side; key derives from session so it dies on auth change. |
 | §10 `isReadAllowed` (boolean row rule) | `access.read`/`list` AccessFilterFunc returning `Error` to mask | **Port** | Row-level masking already exists; port to a boolean rule. |
-| §10 field-level **read projection** | `FieldAccessMap` + `getMethodAccess` field-strain + `docs.ts` `.select(f)` | **Gap — decide** | The spec has *no* field-level read; today does. See Decisions. |
+| §10 field-level **read projection** | `FieldAccessMap` + `getMethodAccess` field-strain + `docs.ts` `.select(f)` | **Port→schema** | Resolved: read permission *is* a (sub)schema; endpoint strains each visible doc through it (schema = guard + strainer). |
 | field-level **write** restriction | `FieldAccessMap` on `write` | **Replace→`beforeWrite`** | `beforeWrite` strips/rejects fields the caller may not set; moves declarative → ajs. |
 | role hierarchy + precedence walk | `roles.ts` 6-level; `getMethodAccess` last-matching-role-wins | **Port** | Becomes the principal/auth capability; precedence semantics preserved. |
 | `getUserRoles` / auth | `utilities.ts` (token → roles, custom-claims sync) | **Port** | The auth capability / principal resolution. |
 | `getRef` / path parsing / `collectionPath` | `doc.ts` / `access.ts` | **Port** | Path→store-ref stays. |
-| `unique` constraint | `access.ts` config + `isUnique` (doc.ts) | **Port→invariant** | Becomes an `isWriteAllowed` cross-doc invariant *or* an indexed uniqueness constraint (decide). |
+| `unique` constraint | `access.ts` config + `isUnique` (doc.ts) | **Port→invariant** | `isWriteAllowed` reject-only (privileged read finds collision → `false`; cannot mint); `beforeWrite` may mint the value. Index-backed constraint is the fast path. |
 | `cacheLatencySeconds` read cache | `access.ts` config | **Reconsider** | Overlaps §7.2 delta + SSR cache; may fold in. |
 | `/gen`, `/stored` | endpoints | **Port→capabilities** | Become batteries reached through a stingy interface (ROADMAP invariant: they don't dissolve). |
 | `/sitemap` | `sitemap.ts` | **Delete** | tosijs-ui build emits `sitemap.xml`. |
 | Firestore security rules | `firestore.rules` (deny-all) | **Keep (N/A)** | Already deny-all; all access is through the endpoint. |
 
-## Decisions needed (blockers or forks)
+## Decisions (resolved 2026-08)
 
-1. **Field-level read projection.** The spec's `isReadAllowed` is a row boolean; today a role can be
-   shown a *subset of fields* (`FieldAccessMap`, list `.select`). Options: (a) schema-declared
-   per-role read projections (declarative, stays serializable, matches "schema = intra-document");
-   (b) a `beforeRead`/projection ajs stage; (c) drop field-level read (coarser than today —
-   probably unacceptable for the public-sees-published-summary case). **Recommend (a).**
-2. **`unique` → invariant vs. constraint.** As an `isWriteAllowed` cross-doc check it's uniform but
-   costs a privileged read per write; as an indexed uniqueness constraint it's cheaper but backend-
-   specific. Decide per the Postgres-reference stance.
-3. **Unindexed-queries-fail** (spec §7, "decision pending"). Adopt as universal, or "runs slowly +
-   mandatory observability." Adopting is the behavior change that makes "scale without thinking"
-   real, but it will start erroring some existing loose Firestore queries.
-4. **Hard-delete → tombstones.** `doc.ts` DELETE currently hard-deletes; §7.2 deltas need tombstones
-   and a sequence. This is a store-schema change (and interacts with the client's existing
-   `deleted` collection convention).
-5. **Envelope migration.** Existing docs carry `_created`/`_modified`/`_id`/`_collection` in-band.
-   Moving to an envelope needs a one-time migration (a natural first customer for §6.3 fixed-point
-   migration tooling).
+1. **Field-level read projection → a schema.** A role's read permission *is* a (sub)schema; the
+   endpoint strains each visible document through it. This is the schema-first payoff — schema is
+   guard *and* strainer, type-sound (output type = the projection schema). Row visibility stays a
+   boolean `isReadAllowed`; field-level *write* restriction is the mirror (`beforeWrite` strips
+   fields the caller may not set). *"Super easy" — no separate projection ajs.*
+2. **`unique` → `isWriteAllowed` reject-only + optional `beforeWrite` mint.** Because
+   `isWriteAllowed` cannot mutate, it can only *reject* a missing/duplicate unique value (privileged
+   read detects the collision → `false`); it cannot fix one. Deriving/minting a unique value (where
+   RBAC permits) is `beforeWrite`'s job. Concurrency soundness rides the transactional commit; an
+   index-backed constraint is the fast path where a backend offers it.
+3. **Unindexed queries are gas-metered, not specially failed.** A scan burns gas fast, so it
+   succeeds on a small collection and *exhausts gas* on a large one — the failure mode is always gas
+   exhaustion, never a bespoke "no index" error (it must not "just fail"). Indexing is the
+   optimization that keeps a query under gas; the missing index is recovered from the cost log.
+   *(This resolves the spec's §7 "decision pending" — reject the hard "unindexed fails" rule.)*
+4. **Hard-delete → tombstones, possibly virtual.** `doc.ts` DELETE currently hard-deletes; §7.2
+   deltas need tombstones + a sequence. Tombstones need not be physical per-doc records — a compact
+   per-collection list of dead ids ("virtual tombstones") that the `since` query consults works and
+   can be compacted/retired as replicas pass the watermark. Interacts with the client's existing
+   `deleted`-collection convention.
+5. **Envelope migration falls out of idempotence.** Existing docs carry
+   `_created`/`_modified`/`_id`/`_collection` *in the body*; the new model owns them in a
+   server-only envelope. Since `beforeWrite` is body-only and idempotent (§6), running it over
+   stored docs surfaces every record that isn't a fixed point (§6.3) — the reshape (lift legacy
+   provenance out of the body into the envelope) becomes a *discoverable* migration, lazy on next
+   write or a batch pass, rather than a silent one. Idempotence is what constrains *what can change
+   and where*.
 
 ## Ports cleanly (low risk)
 

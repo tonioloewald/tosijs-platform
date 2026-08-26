@@ -86,6 +86,7 @@ Ordering is a security property: `isWriteAllowed` sees what will actually land, 
 - Fuel exhaustion, thrown error, or non-boolean return all evaluate as `false`.
 - Must see the whole write set, not one document at a time. This is what makes cross-document invariants ("debit equals credit", "message appended to another user's inbox") expressible as short rules rather than escape hatches. Per-document evaluation is explicitly rejected.
 - Does not run per-document in a loop; it is invoked once per transaction with the full set.
+- **Uniqueness lives here.** The rule uses its privileged read to detect a collision and returns `false`. Because it cannot mutate, it can only *reject* a missing or duplicate unique value — it cannot mint one; minting/deriving a unique value (where RBAC permits) is `beforeWrite`'s job. Soundness under concurrency relies on the transactional commit (§3); an index-backed uniqueness constraint is the fast path where the backend offers one.
 
 ### 4.3 Procedures
 
@@ -121,7 +122,7 @@ Idempotence of `beforeWrite` is not just retry safety. It makes stored data a fi
 - The doc/docs endpoint owns query semantics. The backing store is an oracle that is fast or slow; it does not define what a query means. The abstraction is non-leaky by construction.
 - **Postgres is the reference semantics**, not Firestore. Ordered listing, offset, multiple inequality predicates, and the join in §7.1 are part of the contract; Firestore emulates them in the endpoint at whatever cost it costs. Designing to Firestore's limits would encode them into the abstraction permanently.
 - On Postgres, schema-declared queryable fields become generated columns with indexes; everything else is JSONB. A field that is not a generated column cannot appear in a predicate, which makes the unindexed-query rule structural.
-- Recommended universal rule, applied on every backend including Postgres: **unindexed queries fail.** This is the one lowest-common-denominator that makes "scale without thinking" true, and the schema already knows which fields are queryable. (Decision pending; if rejected, the alternative is "runs slowly" with mandatory observability.)
+- **Resolved (2026-08): queries are gas-metered; an unindexed query is not a special failure.** A full scan simply burns gas fast, so it succeeds on a small collection and *exhausts gas* on a large one — "scale without thinking" falls out of the gas limiter, not a hard index rule. The failure mode is always gas exhaustion, never a bespoke "no index" error (it should not "just fail"). The endpoint *may* be stricter and pre-fail a query it can see will scan, but still attributed to gas. Indexing is the optimization that keeps a query under gas; the real cause (missing index) is recovered from the query cost log below.
 - Every query shape is logged with cost, so slowness is discovered from logs and not from a bill.
 - Index definitions are derived from schema declarations. On backends where indexes are a deploy artifact (Firestore `firestore.indexes.json`), that artifact is generated, not authored.
 
@@ -138,7 +139,7 @@ Idempotence of `beforeWrite` is not just retry safety. It makes stored data a fi
 ### 7.2 Change propagation: pull only, versioned delta
 
 - No subscriptions or listeners in the general case. Ambient listeners are the root of Firestore's characteristic perf collapse; the fix is to not make them free.
-- Envelope carries a **monotonic per-collection sequence** (not wall-clock; two writes in one millisecond must not lose a delta) and **tombstones** for deletes.
+- Envelope carries a **monotonic per-collection sequence** (not wall-clock; two writes in one millisecond must not lose a delta) and **tombstones** for deletes. Tombstones need not be physical per-doc records — a compact per-collection list of dead ids that the `since` query consults ("virtual tombstones") works, and can be compacted/retired over time as replicas pass the watermark.
 - `docs(path, { since: seq })` returns the delta. This is the client cache's replica watermark and the SSR cache's invalidation query; one primitive, two consumers.
 - Client-side cache (IndexedDB, encrypted) keys should derive from the session so cached data becomes unreadable when the principal's authorization changes.
 - If subscriptions are ever added, they are an explicit budgeted capability held by the endpoint (one server-side listener per distinct query shape, fanned out, `isReadAllowed` applied as a stream filter), never a client-held listener.
@@ -171,7 +172,7 @@ Idempotence of `beforeWrite` is not just retry safety. It makes stored data a fi
 
 ## 10. Open questions
 
-- **Read authorization.** `isWriteAllowed` names the write side only. Reads and queries need the same pure, boolean, privileged-read rule (`isReadAllowed`); for queries it must be applied per result row or, better, pushed into the query as a filter so unauthorized rows never leave the store. Same contract as §4.2.
+- **Read authorization — resolved (2026-08).** Two independent parts. (1) **Row visibility:** `isReadAllowed`, the pure boolean privileged-read rule (same contract as §4.2), applied per result row or — better — pushed into the query as a filter so unauthorized rows never leave the store. (2) **Field-level projection = a schema.** A role's read permission is simply a (sub)schema; the endpoint strains each visible document through it. This is the whole payoff of a schema-first stack — schema is guard *and* strainer, and it is type-sound (output type = the projection schema), so no separate projection ajs is needed. Field-level *write* restriction is the mirror image: `beforeWrite` strips/rejects fields the caller may not set.
 - **Offline write queue.** Delta pull covers reads. Offline *writes* (queue locally, replay through §3 on reconnect, surface conflicts by sequence) are not designed here.
 - **Schema versioning for procedures:** pinning mechanism and failure mode.
 - **Migration tooling** built on the fixed-point check (§6.3): report-only vs. auto-apply.
