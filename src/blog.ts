@@ -9,7 +9,7 @@ import {
   tosiValue,
   PartsMap,
 } from 'tosijs'
-import { setDiagnostics, type Diagnostic } from '@codemirror/lint'
+import { tosiDiff } from 'tosijs-ui/diff'
 import {
   markdownViewer,
   sideNav,
@@ -873,54 +873,105 @@ export class XinPostEditor extends Component<PostEditorParts> {
   }
 
   proofread = async () => {
-    const title = this.parts.title.value
-    const content = this.parts.source.value
-      .split('\n')
-      .map((line, number) => `${number}: ${line}`)
-      .join('\n')
+    const { source } = this.parts
+    const md = this.fullPostMarkdown()
     const close = postNotification({
-      message: 'Proofreading…',
+      message: 'Proofreading & fact-checking…',
       type: 'progress',
     })
-    const { text } = await service.gen.post({
-      prompt: `Please proofread the following blog post, titled "${title}" (it is in markdown format, it contains some code blocks with type annotations):\n\n ${content}\n\nProvide the feedback as a list of line numbers (starting at 0) followed by a space and a description of the issue (one line per issue, e.g. 12 here is a problem\\n32 "teh" should be "the"). Please do not include a preamble to simplify parsing.`,
-    })
-    close()
+    let revised = ''
     try {
-      const editor = this.parts.source.editor
-      if (!editor) return
-      // The model reports 0-based line numbers; CodeMirror wants character
-      // offsets, and its `doc.line()` is 1-based.
-      const { doc } = editor.state
-      const issues: Diagnostic[] = text
-        .split('\n')
-        .map((line: string) => {
-          const [, rowNumber, content] = line.match(/^(\d+)\s(.*)$/) || []
-          const row = Number(rowNumber)
-          if (!content || isNaN(row) || row < 0 || row >= doc.lines) {
-            return []
-          }
-          const { from, to } = doc.line(row + 1)
-          return [
-            {
-              from,
-              to,
-              severity: 'warning' as const,
-              message: content,
-            },
-          ]
-        })
-        .flat()
-      console.log(issues)
-      editor.dispatch(setDiagnostics(editor.state, issues))
+      const res = await service.gen.post({
+        modelId: 'gemini-3-pro',
+        prompt:
+          'You are a meticulous copy editor and fact-checker. Below is a blog post in ' +
+          'Markdown; the title is the H1 at the top (given for context).\n\n' +
+          'Return a corrected and improved version of the post BODY only — do NOT include ' +
+          'the H1 title line. Fix spelling, grammar, punctuation and clarity; tighten weak ' +
+          'phrasing; verify factual claims and any URLs and correct anything that is wrong; ' +
+          "preserve the author's voice, meaning and ALL Markdown formatting including code " +
+          'blocks (never alter code). Output ONLY the revised body Markdown — no preamble, ' +
+          'no commentary, and do not wrap the whole thing in a code fence.\n\n' +
+          md,
+      })
+      close()
+      if (res instanceof Error) throw res
+      revised = String(res?.text ?? '')
+        .trim()
+        // drop a stray leading title heading if the model echoed one
+        .replace(/^#[^\n]*\n+/, '')
+        .trim()
     } catch (e) {
-      console.error(e)
-      console.log(text)
+      close()
+      console.error('proofread failed', e)
       postNotification({
         type: 'error',
-        message: 'bad response / error—see console for details',
+        message: 'Proofreading failed — see console',
+      })
+      return
+    }
+    if (!revised || revised === source.value.trim()) {
+      postNotification({
+        type: 'success',
+        message: 'No changes suggested',
+        duration: 3,
+      })
+      return
+    }
+    this.showProofreadDiff(source.value, revised)
+  }
+
+  // Show the proofreader's revision as a resolvable diff: the user accepts or
+  // rejects each change, and Apply writes the resolved text back into the editor.
+  showProofreadDiff = (original: string, revised: string) => {
+    const diff = tosiDiff({
+      original,
+      modified: revised,
+      resolvable: true,
+      originalLabel: 'Keep mine',
+      modifiedLabel: 'Accept edit',
+      style: { flex: '1 1 auto', overflow: 'auto' },
+    })
+    const apply = () => {
+      const result = diff.value
+      this.parts.source.value = result
+      blog.editorPost.content.value = result
+      overlay.remove()
+      postNotification({
+        type: 'success',
+        message: 'Proofreading edits applied',
+        duration: 2,
       })
     }
+    const overlay = div(
+      {
+        style: {
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 10,
+          background: vars.xinBlogBodyBg,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: vars.xinBlogPad50,
+        },
+      },
+      div(
+        {
+          class: 'row',
+          style: { alignItems: 'center', padding: vars.xinBlogPad, gap: vars.pad50 },
+        },
+        h3({ style: { flex: '1 1 auto', margin: 0 } }, 'Proofreading suggestions'),
+        button('Reject all', { onClick: () => diff.rejectAll() }),
+        button('Accept all', { onClick: () => diff.acceptAll() }),
+        button('Cancel', { onClick: () => overlay.remove() }),
+        button('Apply', { onClick: apply }),
+      ),
+      diff
+    )
+    document.body.append(overlay)
   }
 
   summarize = async () => {
