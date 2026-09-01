@@ -100,6 +100,11 @@ const cssVars = {
 const brandColors = {
   _brandColor: BRAND_COLOR.html,
   _brandTextColor: SHADE_COLOR.html,
+  // tosijs-ui components (e.g. <tosi-diff>'s selected choice button) theme off
+  // --tosi-accent / --tosi-accent-text; map them to our brand so they aren't
+  // unset (which rendered the "Accept edit" button transparent → white-on-white).
+  _tosiAccent: BRAND_COLOR.html,
+  _tosiAccentText: SHADE_COLOR.html,
 }
 
 const codeVars = {

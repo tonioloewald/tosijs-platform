@@ -1138,7 +1138,10 @@ export class XinPostEditor extends Component<PostEditorParts> {
           right: 0,
           bottom: 0,
           zIndex: 100,
-          background: vars.xinBlogBodyBg,
+          // vars.xinBlogBodyBg is only defined on the xin-blog* elements; this
+          // overlay lives on document.body where it resolves transparent (the
+          // editor showed through). vars.bodyBg is a global, opaque theme colour.
+          background: vars.bodyBg,
           display: 'flex',
           flexDirection: 'column',
         },
