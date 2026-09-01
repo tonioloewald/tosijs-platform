@@ -352,11 +352,33 @@ const {
   xinSlot,
 } = elements
 
+// A post's `date` can arrive as a boxed proxy scalar (an object — truthy even
+// when the underlying string is empty) or a raw string. Coerce to a primitive,
+// then only format a genuinely valid date; anything else is "Not Published"
+// (never "Invalid Date").
+function formatBlogDate(value: unknown): string {
+  const s = String(value ?? '').trim()
+  if (!s) return 'Not Published'
+  const t = new Date(s)
+  return isNaN(t.valueOf()) ? 'Not Published' : t.toLocaleDateString()
+}
+
+// Turn a title (or a typed slug) into a URL-safe slug, matching existing posts.
+function slugify(text: string): string {
+  return (
+    String(text ?? '')
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '') // strip diacritics
+      .replace(/[^a-z0-9]+/g, '-') // non-alphanumeric → hyphen
+      .replace(/^-+|-+$/g, '') // trim leading/trailing hyphens
+      .slice(0, 80) || 'untitled'
+  )
+}
+
 bindings.date = {
   toDOM(element, dateString) {
-    element.textContent = dateString
-      ? new Date(dateString).toLocaleDateString()
-      : 'Not Published'
+    element.textContent = formatBlogDate(dateString)
   },
 }
 
@@ -465,9 +487,7 @@ export class XinBlogPost extends Component<PostParts> {
       title.textContent = this.post.title
       html.value = this.post.content
       author.textContent = this.post.author
-      date.textContent = this.post.date
-        ? new Date(this.post.date).toLocaleDateString()
-        : 'Not Published'
+      date.textContent = formatBlogDate(this.post.date)
     }
   }
 }
@@ -963,14 +983,24 @@ export class XinPostEditor extends Component<PostEditorParts> {
     // leaves (undefined for a missing key), so resolve/generate the path from
     // that, remember it on the component for re-saves, and pass it explicitly.
     const data = tosiValue(blog.editorPost) as any
-    let method: ServiceRequestType = 'put'
+
+    // Resolve the doc path: an existing post's `_path`, one we created earlier
+    // this session, else a fresh id for a brand-new post. (Scalars read off the
+    // live proxy are boxed/always-truthy — hence tosiValue and this.#path.)
     let path = (data._path as string) || this.#path
+    const method: ServiceRequestType = path ? 'put' : 'post'
     if (!path) {
       path = `post/${randomID()}`
-      method = 'post'
     }
-    this.#path = path
     data._path = path
+
+    // Ensure a URL slug. A new post has an empty `path`; without one the permalink
+    // becomes /undefined and the post can't be found by its slug. Generate from the
+    // title when empty; normalise whatever the author typed either way.
+    const typedSlug = String(data.path ?? '').trim()
+    data.path = typedSlug ? slugify(typedSlug) : slugify(String(data.title ?? ''))
+    // reflect the resolved slug in the Metadata field
+    ;(blog.editorPost.path as any).value = data.path
 
     const closeNotification = postNotification({
       message: `saving ${data.title}`,
@@ -980,24 +1010,43 @@ export class XinPostEditor extends Component<PostEditorParts> {
     const result = await service.doc[method]({ p: path, data })
     closeNotification()
     if (result instanceof Error) {
+      // The server enforces unique title/path — surface that clearly instead of
+      // the raw message.
+      const msg = result.toString()
       postNotification({
-        message: result.toString(),
         type: 'error',
+        message: /unique/i.test(msg)
+          ? /"title"/.test(msg)
+            ? 'Another post already has this title — change it and save again.'
+            : `The slug "${data.path}" is already taken — change it and save again.`
+          : msg,
       })
-    } else {
-      localStorage.removeItem('xin-blog-editor-post')
-      // Reflect the save in the underlying open post: drop any stale prefetch
-      // entries, fetch the canonical doc fresh, and update currentPost so the
-      // open post re-renders.
-      if (window.prefetched) {
-        delete window.prefetched[path]
-        if (data.path) {
-          delete window.prefetched[`post/path=${data.path}`]
-        }
+      return
+    }
+    // remember the path only on SUCCESS, so a failed create isn't retried as a PUT
+    this.#path = path
+    localStorage.removeItem('xin-blog-editor-post')
+    // Reflect the save in the underlying open post: drop stale prefetch entries,
+    // fetch the canonical doc fresh, update currentPost, and set the address bar.
+    if (window.prefetched) {
+      delete window.prefetched[path]
+      if (data.path) {
+        delete window.prefetched[`post/path=${data.path}`]
       }
-      const fresh = await service.doc.get({ p: path })
-      // @ts-ignore-error currentPost accepts a plain post object
-      blog.currentPost = fresh instanceof Error || !fresh ? data : fresh
+    }
+    const fresh = await service.doc.get({ p: path })
+    const savedPost = fresh instanceof Error || !fresh ? data : fresh
+    // @ts-ignore-error currentPost accepts a plain post object
+    blog.currentPost = savedPost
+    // savedPost is a plain object, so linkFromRef reads primitive path/date — no
+    // /undefined. Guard against a draft with no date producing NaN in the URL.
+    try {
+      const link = blog.linkFromRef(savedPost as unknown as BlogRef)
+      if (link && !link.includes('/undefined') && !link.includes('NaN')) {
+        window.history.pushState({ path: link }, '', link)
+      }
+    } catch (e) {
+      console.error('failed to set post url', e)
     }
   }
 
