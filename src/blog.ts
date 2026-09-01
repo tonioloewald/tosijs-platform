@@ -10,7 +10,7 @@ import {
   PartsMap,
 } from 'tosijs'
 import { tosiDiff, diffLines, diffBlocks } from 'tosijs-ui/diff'
-import { EditorView, GutterMarker, gutter } from '@codemirror/view'
+import { GutterMarker, gutter } from '@codemirror/view'
 import {
   StateField,
   StateEffect,
@@ -902,17 +902,6 @@ function computeProofNotes(
   return notes
 }
 
-// tosijs-ui doesn't colour the CM6 caret, so it defaults to (dark) — invisible on
-// our dark editor background. A CM6 theme is applied via the editor's own
-// StyleModule (proper specificity), unlike a shadow-root <style> which lost the
-// cascade. --text-color is the light code colour we already set on <tosi-code>.
-const caretTheme = EditorView.theme({
-  '.cm-cursor, .cm-cursor-primary': {
-    borderLeftColor: 'var(--text-color, #fbfbfb)',
-    borderLeftWidth: '2px',
-  },
-})
-
 export class XinPostEditor extends Component<PostEditorParts> {
   // The resolved doc path, remembered across re-saves within this editor session
   // (a generated `_path` cannot be written back onto the editorPost proxy).
@@ -924,19 +913,27 @@ export class XinPostEditor extends Component<PostEditorParts> {
 
   connectedCallback() {
     super.connectedCallback()
-    // The CM6 view loads lazily; once it exists, install the visible-caret theme.
-    this.#extendEditor()
+    this.#installCaret()
   }
 
-  #extendEditor = (tries = 0) => {
-    const view = this.parts.source && this.parts.source.editor
-    if (!view) {
-      if (tries < 40) setTimeout(() => this.#extendEditor(tries + 1), 75)
+  // tosijs-ui doesn't colour the CM6 caret, so it defaults to dark — invisible on
+  // our dark editor bg. Inject a shadow-root style with `!important` (beats CM6's
+  // own StyleModule) + an explicit light colour. The rule applies whenever the
+  // cursor renders, so it doesn't depend on the (lazy) editor being loaded yet —
+  // we only need the <tosi-code> shadow root to exist.
+  #installCaret = (tries = 0) => {
+    const source = this.parts.source
+    const sr = source && source.shadowRoot
+    if (!sr) {
+      if (tries < 40) setTimeout(() => this.#installCaret(tries + 1), 75)
       return
     }
     if (this.#editorExtended) return
     this.#editorExtended = true
-    view.dispatch({ effects: StateEffect.appendConfig.of(caretTheme) })
+    const st = document.createElement('style')
+    st.textContent =
+      '.cm-cursor, .cm-cursor-primary { border-left-color: var(--text-color, #fbfbfb) !important; border-left-width: 2px !important; }'
+    sr.appendChild(st)
   }
 
   updateContent = () => {
