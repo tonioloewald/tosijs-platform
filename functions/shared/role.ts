@@ -9,7 +9,7 @@ export const EmailContactSchema = s.object({
 export const PhoneContactSchema = s.object({
   type: s.const('phone'),
   value: s.string
-    .pattern(/^\+?[\d\s\-\(\)\.]{7,}$/)
+    .pattern(/^\+?[\d\s\-().]{7,}$/)
     .title('Phone')
     .describe('Phone number (e.g. +1 555-123-4567)'),
 })
