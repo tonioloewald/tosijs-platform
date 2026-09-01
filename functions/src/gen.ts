@@ -237,7 +237,8 @@ export const gen = onRequest(
       }
     } catch (e) {
       functions.logger.error('Generation failed:', e)
-      res.status(500).send('Generation failed')
+      const detail = e instanceof Error ? e.message : String(e)
+      res.status(500).send(`Generation failed: ${detail}`)
     }
   }
 )
