@@ -1061,7 +1061,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
     let revised = ''
     try {
       const res = await service.gen.post({
-        modelId: 'gemini-3-pro',
+        modelId: 'gemini-2.5-pro',
         prompt:
           'You are a meticulous copy editor and fact-checker. Below is a blog post in ' +
           'Markdown; the title is the H1 at the top (given for context).\n\n' +

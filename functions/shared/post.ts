@@ -6,9 +6,11 @@ export const PostSchema = s.object({
   path: s.string.optional.title('URL Path').describe('URL-friendly path (auto-generated from title if not provided)'),
   date: s.string.optional.title('Publish Date').describe('ISO date string when published'),
   summary: s.string.optional.title('Summary').describe('Short summary for previews'),
-  keywords: s.string.optional.title('Keywords').describe('SEO keywords'),
+  keywords: s.array(s.string).optional.title('Keywords').describe('SEO keywords'),
   imageUrl: s.string.optional.title('Image URL').describe('Featured image URL'),
   author: s.string.optional.title('Author').describe('Author name'),
+  // authoring format the editor round-trips (markdown|html)
+  format: s.string.optional.title('Format').describe('markdown or html'),
   _created: s.string.optional,
   _modified: s.string.optional,
 })

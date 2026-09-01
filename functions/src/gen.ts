@@ -170,7 +170,7 @@ export const gen = onRequest(
     const { query, body } = req
     const source: GenParams = req.method === 'GET' ? query : body
     const { modelId, prompt, schema } = Object.assign(
-      { modelId: 'gemini-3-pro' },
+      { modelId: 'gemini-2.5-pro' },
       source
     )
 

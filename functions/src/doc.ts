@@ -403,6 +403,14 @@ export const doc = onRequest({}, async (req, res) => {
             ? { ...existing, ...req.body.data, _created, _modified }
             : { ...req.body.data, _created, _modified }
 
+        // Envelope fields are managed by the endpoint (id from the ref, collection
+        // from the path), not part of the content schema — strip them before
+        // validation so a strict schema doesn't reject them, and don't store them
+        // back as content. `_path` is the request path, also stripped before save.
+        delete (data as Record<string, unknown>)._id
+        delete (data as Record<string, unknown>)._collection
+        delete (data as Record<string, unknown>)._path
+
         // Schema validation (runs first if schema is defined)
         if (config.schema) {
           const { valid, errors } = validateWithSchema(data, config.schema)
