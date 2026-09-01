@@ -945,6 +945,31 @@ export class XinPostEditor extends Component<PostEditorParts> {
     blog.editorPost.date!.value = new Date().toISOString()
   }
 
+  // The whole post as markdown, with the title as an H1 on top. Shared by the
+  // "Copy as Markdown" action and (soon) the proofreader.
+  fullPostMarkdown = (): string => {
+    const title = this.parts.title.value.trim()
+    const body = this.parts.source.value
+    return title ? `# ${title}\n\n${body}` : body
+  }
+
+  copyAsMarkdown = async () => {
+    try {
+      await navigator.clipboard.writeText(this.fullPostMarkdown())
+      postNotification({
+        type: 'success',
+        message: 'Post copied as Markdown',
+        duration: 2,
+      })
+    } catch (e) {
+      console.error('clipboard write failed', e)
+      postNotification({
+        type: 'error',
+        message: 'Copy failed — clipboard unavailable',
+      })
+    }
+  }
+
   showEditorMenu = () => {
     popMenu({
       target: this.parts.menuTrigger as HTMLElement,
@@ -954,6 +979,11 @@ export class XinPostEditor extends Component<PostEditorParts> {
           caption: 'Proofread',
           icon: 'checkCircle',
           action: this.proofread,
+        },
+        {
+          caption: 'Copy as Markdown',
+          icon: 'copy',
+          action: this.copyAsMarkdown,
         },
         {
           caption: 'Save',
