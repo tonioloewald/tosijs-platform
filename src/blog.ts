@@ -9,7 +9,14 @@ import {
   tosiValue,
   PartsMap,
 } from 'tosijs'
-import { tosiDiff } from 'tosijs-ui/diff'
+import { tosiDiff, diffLines, diffBlocks } from 'tosijs-ui/diff'
+import { GutterMarker, gutter } from '@codemirror/view'
+import {
+  StateField,
+  StateEffect,
+  RangeSet,
+  RangeSetBuilder,
+} from '@codemirror/state'
 import {
   markdownViewer,
   sideNav,
@@ -781,10 +788,126 @@ interface PostEditorParts extends PartsMap {
   tabSelector: TabSelector
 }
 
+// ── Proofreader margin notes ────────────────────────────────────────────────
+// After a proofread diff is resolved, each change (accepted or rejected) becomes
+// a gutter note so it can be revisited (session-scoped — not persisted). Built on
+// the raw CodeMirror 6 view (`tosi-code.editor`); @codemirror/* is a shared dep,
+// so these are the same module instances the editor itself uses.
+
+interface ProofNote {
+  fromLine: number // 0-based line in the resolved text
+  removed: string
+  added: string
+  accepted: boolean
+}
+
+const setProofNotes = StateEffect.define<ProofNote[]>()
+
+class ProofNoteMarker extends GutterMarker {
+  constructor(readonly note: ProofNote) {
+    super()
+  }
+  toDOM() {
+    const el = document.createElement('span')
+    el.textContent = this.note.accepted ? '✓' : '✎'
+    el.style.cursor = 'help'
+    el.style.color = this.note.accepted ? '#8bc34a' : '#ffb300'
+    el.title =
+      (this.note.accepted
+        ? 'Proofreader edit — accepted'
+        : 'Proofreader edit — kept original') +
+      (this.note.removed ? `\n\nwas:\n${this.note.removed}` : '') +
+      (this.note.added ? `\n\nsuggested:\n${this.note.added}` : '')
+    return el
+  }
+}
+
+const proofNotesField = StateField.define<RangeSet<ProofNoteMarker>>({
+  create() {
+    return RangeSet.empty
+  },
+  update(set, tr) {
+    set = set.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (effect.is(setProofNotes)) {
+        const builder = new RangeSetBuilder<ProofNoteMarker>()
+        const doc = tr.state.doc
+        let lastPos = -1
+        for (const note of effect.value) {
+          const lineNo = Math.min(Math.max(note.fromLine + 1, 1), doc.lines)
+          const pos = doc.line(lineNo).from
+          if (pos <= lastPos) continue // one marker per line, keep ascending
+          lastPos = pos
+          builder.add(pos, pos, new ProofNoteMarker(note))
+        }
+        set = builder.finish()
+      }
+    }
+    return set
+  },
+})
+
+const proofNotesGutter = gutter({
+  class: 'cm-proof-gutter',
+  markers: (view) => view.state.field(proofNotesField, false) ?? RangeSet.empty,
+})
+
+// Walk the diff of original→revised under the reviewer's resolutions
+// ('original' = rejected, 'modified' = accepted) and locate each change in the
+// FINAL (resolved) text so it can be pinned to a gutter line.
+function computeProofNotes(
+  original: string,
+  revised: string,
+  resolutions: Array<'original' | 'modified'>
+): ProofNote[] {
+  const blocks = diffBlocks(diffLines(original, revised))
+  const notes: ProofNote[] = []
+  let line = 0 // 0-based line in the resolved text
+  let changeIdx = 0
+  for (const block of blocks) {
+    if (block.kind === 'context') {
+      line += block.lines.length
+    } else {
+      const choice = resolutions[changeIdx++] ?? 'modified'
+      const kept = choice === 'modified' ? block.added : block.removed
+      notes.push({
+        fromLine: line,
+        removed: block.removed.join('\n'),
+        added: block.added.join('\n'),
+        accepted: choice === 'modified',
+      })
+      line += kept.length
+    }
+  }
+  return notes
+}
+
 export class XinPostEditor extends Component<PostEditorParts> {
   // The resolved doc path, remembered across re-saves within this editor session
   // (a generated `_path` cannot be written back onto the editorPost proxy).
   #path = ''
+
+  // one-time install of the proof-notes gutter into the live editor
+  #proofGutterInstalled = false
+
+  connectedCallback() {
+    super.connectedCallback()
+    // tosijs-ui doesn't colour the CodeMirror caret, so it falls back to CM6's
+    // default (dark) — invisible on our dark editor background. Inject a visible
+    // caret (the light --text-color we already set) into the editor's open
+    // shadow root, once, after the part exists.
+    requestAnimationFrame(() => {
+      const source = this.parts.source
+      const sr = source && source.shadowRoot
+      if (sr && !sr.querySelector('style[data-caret-fix]')) {
+        const st = document.createElement('style')
+        st.setAttribute('data-caret-fix', '')
+        st.textContent =
+          '.cm-cursor, .cm-cursor-primary { border-left-color: var(--text-color); border-left-width: 2px; }'
+        sr.appendChild(st)
+      }
+    })
+  }
 
   updateContent = () => {
     const { source, preview } = this.parts
@@ -934,9 +1057,16 @@ export class XinPostEditor extends Component<PostEditorParts> {
     })
     const apply = () => {
       const result = diff.value
+      const resolutions = diff.resolutions
       this.parts.source.value = result
       blog.editorPost.content.value = result
       overlay.remove()
+      // record each change (accepted or rejected) as a revisit-able gutter note
+      try {
+        this.applyProofNotes(computeProofNotes(original, revised, resolutions))
+      } catch (e) {
+        console.error('proof notes failed', e)
+      }
       postNotification({
         type: 'success',
         message: 'Proofreading edits applied',
@@ -972,6 +1102,20 @@ export class XinPostEditor extends Component<PostEditorParts> {
       diff
     )
     document.body.append(overlay)
+  }
+
+  // Install the proof-notes gutter into the live CM6 view (once) and set the
+  // current notes. Uses the editor's own @codemirror modules (shared dep).
+  applyProofNotes = (notes: ProofNote[]) => {
+    const view = this.parts.source.editor
+    if (!view) return
+    if (!this.#proofGutterInstalled) {
+      view.dispatch({
+        effects: StateEffect.appendConfig.of([proofNotesField, proofNotesGutter]),
+      })
+      this.#proofGutterInstalled = true
+    }
+    view.dispatch({ effects: setProofNotes.of(notes) })
   }
 
   summarize = async () => {
