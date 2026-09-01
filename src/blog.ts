@@ -10,7 +10,7 @@ import {
   PartsMap,
 } from 'tosijs'
 import { tosiDiff, diffLines, diffBlocks } from 'tosijs-ui/diff'
-import { GutterMarker, gutter } from '@codemirror/view'
+import { EditorView, GutterMarker, gutter } from '@codemirror/view'
 import {
   StateField,
   StateEffect,
@@ -882,6 +882,17 @@ function computeProofNotes(
   return notes
 }
 
+// tosijs-ui doesn't colour the CM6 caret, so it defaults to (dark) — invisible on
+// our dark editor background. A CM6 theme is applied via the editor's own
+// StyleModule (proper specificity), unlike a shadow-root <style> which lost the
+// cascade. --text-color is the light code colour we already set on <tosi-code>.
+const caretTheme = EditorView.theme({
+  '.cm-cursor, .cm-cursor-primary': {
+    borderLeftColor: 'var(--text-color, #fbfbfb)',
+    borderLeftWidth: '2px',
+  },
+})
+
 export class XinPostEditor extends Component<PostEditorParts> {
   // The resolved doc path, remembered across re-saves within this editor session
   // (a generated `_path` cannot be written back onto the editorPost proxy).
@@ -889,24 +900,23 @@ export class XinPostEditor extends Component<PostEditorParts> {
 
   // one-time install of the proof-notes gutter into the live editor
   #proofGutterInstalled = false
+  #editorExtended = false
 
   connectedCallback() {
     super.connectedCallback()
-    // tosijs-ui doesn't colour the CodeMirror caret, so it falls back to CM6's
-    // default (dark) — invisible on our dark editor background. Inject a visible
-    // caret (the light --text-color we already set) into the editor's open
-    // shadow root, once, after the part exists.
-    requestAnimationFrame(() => {
-      const source = this.parts.source
-      const sr = source && source.shadowRoot
-      if (sr && !sr.querySelector('style[data-caret-fix]')) {
-        const st = document.createElement('style')
-        st.setAttribute('data-caret-fix', '')
-        st.textContent =
-          '.cm-cursor, .cm-cursor-primary { border-left-color: var(--text-color); border-left-width: 2px; }'
-        sr.appendChild(st)
-      }
-    })
+    // The CM6 view loads lazily; once it exists, install the visible-caret theme.
+    this.#extendEditor()
+  }
+
+  #extendEditor = (tries = 0) => {
+    const view = this.parts.source && this.parts.source.editor
+    if (!view) {
+      if (tries < 40) setTimeout(() => this.#extendEditor(tries + 1), 75)
+      return
+    }
+    if (this.#editorExtended) return
+    this.#editorExtended = true
+    view.dispatch({ effects: StateEffect.appendConfig.of(caretTheme) })
   }
 
   updateContent = () => {
