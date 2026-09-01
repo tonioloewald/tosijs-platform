@@ -1109,7 +1109,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
       resolvable: true,
       originalLabel: 'Keep mine',
       modifiedLabel: 'Accept edit',
-      style: { flex: '1 1 auto', overflow: 'auto' },
+      style: { display: 'block' },
     })
     const apply = () => {
       const result = diff.value
@@ -1137,25 +1137,44 @@ export class XinPostEditor extends Component<PostEditorParts> {
           left: 0,
           right: 0,
           bottom: 0,
-          zIndex: 10,
+          zIndex: 100,
           background: vars.xinBlogBodyBg,
           display: 'flex',
           flexDirection: 'column',
-          gap: vars.xinBlogPad50,
         },
       },
       div(
         {
           class: 'row',
-          style: { alignItems: 'center', padding: vars.xinBlogPad, gap: vars.pad50 },
+          style: {
+            flex: '0 0 auto',
+            alignItems: 'center',
+            padding: vars.xinBlogPad,
+            gap: vars.pad50,
+            borderBottom: '1px solid rgba(128,128,128,0.3)',
+          },
         },
         h3({ style: { flex: '1 1 auto', margin: 0 } }, 'Proofreading suggestions'),
         button('Reject all', { onClick: () => diff.rejectAll() }),
         button('Accept all', { onClick: () => diff.acceptAll() }),
         button('Cancel', { onClick: () => overlay.remove() }),
-        button('Apply', { onClick: apply }),
+        button('Apply', { onClick: apply })
       ),
-      diff
+      // Scroll container: `min-height: 0` lets this flex child shrink and scroll
+      // instead of growing to the diff's full height and overflowing the modal
+      // (which was covering the header / top bar). `overflow: auto` handles both
+      // long diffs (vertical) and long lines (horizontal).
+      div(
+        {
+          style: {
+            flex: '1 1 auto',
+            minHeight: 0,
+            overflow: 'auto',
+            padding: vars.xinBlogPad,
+          },
+        },
+        diff
+      )
     )
     document.body.append(overlay)
   }
