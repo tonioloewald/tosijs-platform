@@ -49,9 +49,9 @@
     "marked": "^16.4.2",
     "prettier": "^2.8.8",
     "tjs-lang": "^0.12.0",
-    "tosijs": "^1.7.5",
-    "tosijs-schema": "^1.4.0",
-    "tosijs-ui": "^1.7.1",
+    "tosijs": "^1.8.1",
+    "tosijs-schema": "^1.8.1",
+    "tosijs-ui": "^1.12.7",
     "typescript": "^5.9.3"
   },
   "dependencies": {
