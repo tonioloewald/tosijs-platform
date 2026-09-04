@@ -9,14 +9,7 @@ import {
   tosiValue,
   PartsMap,
 } from 'tosijs'
-import { tosiDiff, diffLines, diffBlocks } from 'tosijs-ui/diff'
-import { GutterMarker, gutter } from '@codemirror/view'
-import {
-  StateField,
-  StateEffect,
-  RangeSet,
-  RangeSetBuilder,
-} from '@codemirror/state'
+import { diffLines, diffBlocks } from 'tosijs-ui/diff'
 import {
   markdownViewer,
   sideNav,
@@ -806,13 +799,25 @@ interface PostEditorParts extends PartsMap {
   source: CodeEditor
   preview: MarkdownViewer
   tabSelector: TabSelector
+  proofBar: HTMLDivElement
 }
 
-// ── Proofreader margin notes ────────────────────────────────────────────────
-// After a proofread diff is resolved, each change (accepted or rejected) becomes
-// a gutter note so it can be revisited (session-scoped — not persisted). Built on
-// the raw CodeMirror 6 view (`tosi-code.editor`); @codemirror/* is a shared dep,
-// so these are the same module instances the editor itself uses.
+// The live CodeMirror EditorView, as exposed by <tosi-code>.editor — derived from
+// the element's own type so we never import @codemirror (which would load a second
+// instance; see tosijs-ui#131).
+type CmView = NonNullable<CodeEditor['editor']>
+
+// ── Proofreader margin notes ─────────────────────────────────────────────────
+// After a proofread diff resolves, each edit that LANDED (diffing the pre-proofread
+// text against the result) becomes a margin annotation over that line in the editor.
+// Rendered as a DOM overlay via the EditorView's own geometry (see
+// `addLineAnnotation`) rather than a CodeMirror gutter: a gutter would require
+// importing @codemirror/{view,state} into THIS app, loading a SECOND @codemirror
+// instance alongside tosijs-ui's editor copy and breaking editor creation
+// ("Unrecognized extension value… multiple instances of @codemirror/state", because
+// facets/StateFields are identity-keyed). The overlay imports nothing from
+// @codemirror, so it sidesteps that entirely. (tosijs-ui#131 tracks making
+// @codemirror a peer dependency, which would also unblock the gutter route.)
 
 interface ProofNote {
   fromLine: number // 0-based line in the resolved text
@@ -821,60 +826,9 @@ interface ProofNote {
   accepted: boolean
 }
 
-const setProofNotes = StateEffect.define<ProofNote[]>()
-
-class ProofNoteMarker extends GutterMarker {
-  constructor(readonly note: ProofNote) {
-    super()
-  }
-  toDOM() {
-    const el = document.createElement('span')
-    el.textContent = this.note.accepted ? '✓' : '✎'
-    el.style.cursor = 'help'
-    el.style.color = this.note.accepted ? '#8bc34a' : '#ffb300'
-    el.title =
-      (this.note.accepted
-        ? 'Proofreader edit — accepted'
-        : 'Proofreader edit — kept original') +
-      (this.note.removed ? `\n\nwas:\n${this.note.removed}` : '') +
-      (this.note.added ? `\n\nsuggested:\n${this.note.added}` : '')
-    return el
-  }
-}
-
-const proofNotesField = StateField.define<RangeSet<ProofNoteMarker>>({
-  create() {
-    return RangeSet.empty
-  },
-  update(set, tr) {
-    set = set.map(tr.changes)
-    for (const effect of tr.effects) {
-      if (effect.is(setProofNotes)) {
-        const builder = new RangeSetBuilder<ProofNoteMarker>()
-        const doc = tr.state.doc
-        let lastPos = -1
-        for (const note of effect.value) {
-          const lineNo = Math.min(Math.max(note.fromLine + 1, 1), doc.lines)
-          const pos = doc.line(lineNo).from
-          if (pos <= lastPos) continue // one marker per line, keep ascending
-          lastPos = pos
-          builder.add(pos, pos, new ProofNoteMarker(note))
-        }
-        set = builder.finish()
-      }
-    }
-    return set
-  },
-})
-
-const proofNotesGutter = gutter({
-  class: 'cm-proof-gutter',
-  markers: (view) => view.state.field(proofNotesField, false) ?? RangeSet.empty,
-})
-
 // Walk the diff of original→revised under the reviewer's resolutions
 // ('original' = rejected, 'modified' = accepted) and locate each change in the
-// FINAL (resolved) text so it can be pinned to a gutter line.
+// FINAL (resolved) text so it can be pinned to a margin-annotation line.
 function computeProofNotes(
   original: string,
   revised: string,
@@ -902,18 +856,167 @@ function computeProofNotes(
   return notes
 }
 
+// The native diff overlay doesn't expose the reviewer's per-hunk choices, so infer
+// them: `resolved` is exactly the concatenation of each hunk's chosen side with the
+// shared context, so walk the before→revised blocks against `resolved` line-by-line
+// and record which side won ('modified' = accepted the suggestion, 'original' =
+// kept theirs). Defaults to 'modified' when a hunk is ambiguous (both sides match)
+// or unmatched — the overlay's own default for untouched hunks.
+function inferResolutions(
+  before: string,
+  revised: string,
+  resolved: string
+): Array<'original' | 'modified'> {
+  const blocks = diffBlocks(diffLines(before, revised))
+  const out: Array<'original' | 'modified'> = []
+  const lines = resolved.split('\n')
+  let i = 0
+  const fits = (arr: string[]) =>
+    arr.length > 0 &&
+    i + arr.length <= lines.length &&
+    arr.every((l, k) => lines[i + k] === l)
+  for (const block of blocks) {
+    if (block.kind === 'context') {
+      i += block.lines.length
+      continue
+    }
+    const addFits = fits(block.added)
+    const remFits = fits(block.removed)
+    if (addFits && !remFits) {
+      out.push('modified')
+      i += block.added.length
+    } else if (remFits && !addFits) {
+      out.push('original')
+      i += block.removed.length
+    } else if (block.added.length === 0) {
+      // pure deletion suggestion: rejecting it keeps the removed lines
+      if (remFits) {
+        out.push('original')
+        i += block.removed.length
+      } else {
+        out.push('modified')
+      }
+    } else if (block.removed.length === 0) {
+      // pure insertion suggestion: accepting it inserts the added lines
+      if (addFits) {
+        out.push('modified')
+        i += block.added.length
+      } else {
+        out.push('original')
+      }
+    } else {
+      out.push('modified')
+      i += block.added.length
+    }
+  }
+  return out
+}
+
 export class XinPostEditor extends Component<PostEditorParts> {
   // The resolved doc path, remembered across re-saves within this editor session
   // (a generated `_path` cannot be written back onto the editorPost proxy).
   #path = ''
 
-  // one-time install of the proof-notes gutter into the live editor
-  #proofGutterInstalled = false
   #editorExtended = false
+  // editor text captured when a proofread diff opens: the pre-proofread text (so
+  // Cancel can restore it) and the full proofread revision (so Apply can infer,
+  // from before + revised + resolved, which side of each hunk the reviewer chose).
+  #proofBefore = ''
+  #proofRevised = ''
 
   connectedCallback() {
     super.connectedCallback()
     this.#installCaret()
+  }
+
+  // ── Margin annotations (no @codemirror import) ───────────────────────────
+  // Plain DOM markers positioned over the editor via the live EditorView's OWN
+  // geometry (`coordsAtPos`) and DOM (`.dom` / `.scrollDOM`). A CM gutter would
+  // need `gutter()` from @codemirror/view *in this app*, which loads a second
+  // module instance and crashes the editor (see tosijs-ui#131). This reads only
+  // the EditorView the editor already exposes, so it imports nothing and can't
+  // collide. Markers track their line: repositioned on scroll/resize, hidden
+  // when the line scrolls out of the rendered viewport.
+  #annoLayer: HTMLDivElement | null = null
+  #annos: Array<{ line: number; el: HTMLElement }> = []
+
+  #ensureAnnoLayer = (view: CmView): HTMLDivElement => {
+    if (this.#annoLayer && this.#annoLayer.isConnected) return this.#annoLayer
+    const layer = document.createElement('div')
+    Object.assign(layer.style, {
+      position: 'absolute',
+      inset: '0',
+      pointerEvents: 'none',
+      overflow: 'hidden',
+    })
+    // .cm-editor is position:relative, so an absolute child anchors to it.
+    view.dom.appendChild(layer)
+    this.#annoLayer = layer
+    const reposition = () => this.#repositionAnnos(view)
+    view.scrollDOM.addEventListener('scroll', reposition, { passive: true })
+    // editing shifts line positions; contentDOM 'input' bubbles typing/paste
+    view.contentDOM.addEventListener('input', reposition)
+    new ResizeObserver(reposition).observe(view.dom)
+    return layer
+  }
+
+  #clearAnnotations = () => {
+    for (const a of this.#annos) a.el.remove()
+    this.#annos = []
+  }
+
+  #repositionAnnos = (view: CmView) => {
+    const editorRect = view.dom.getBoundingClientRect()
+    for (const a of this.#annos) {
+      const lineNo = Math.min(Math.max(a.line, 1), view.state.doc.lines)
+      const coords = view.coordsAtPos(view.state.doc.line(lineNo).from)
+      if (!coords) {
+        a.el.style.display = 'none'
+        continue
+      }
+      a.el.style.display = ''
+      a.el.style.top = `${coords.top - editorRect.top}px`
+    }
+  }
+
+  addLineAnnotation = (
+    line: number,
+    opts: { icon: Element; title: string; color?: string; bg?: string },
+    tries = 0
+  ) => {
+    const view = this.parts.source.editor
+    if (!view) {
+      if (tries < 40) {
+        setTimeout(() => this.addLineAnnotation(line, opts, tries + 1), 75)
+      }
+      return
+    }
+    const layer = this.#ensureAnnoLayer(view)
+    const el = document.createElement('div')
+    el.title = opts.title
+    // tosijs-ui icons stroke with currentColor; size explicitly (raw icon SVGs may
+    // carry their own width/height attributes, which CSS width/height overrides)
+    const icon = opts.icon as SVGElement
+    icon.style.setProperty('--tosi-icon-size', '15px')
+    icon.style.width = '15px'
+    icon.style.height = '15px'
+    icon.style.display = 'block'
+    el.appendChild(icon)
+    Object.assign(el.style, {
+      position: 'absolute',
+      right: '6px',
+      display: 'flex',
+      alignItems: 'center',
+      padding: '2px',
+      borderRadius: '3px',
+      background: opts.bg ?? 'rgba(255,179,0,0.18)',
+      color: opts.color ?? '#ffb300',
+      pointerEvents: 'auto',
+      cursor: 'help',
+    })
+    layer.appendChild(el)
+    this.#annos.push({ line, el })
+    this.#repositionAnnos(view)
   }
 
   // tosijs-ui doesn't colour the CM6 caret, so it defaults to dark — invisible on
@@ -1097,103 +1200,91 @@ export class XinPostEditor extends Component<PostEditorParts> {
       })
       return
     }
-    this.showProofreadDiff(source.value, revised)
+    this.openProofreadDiff(revised)
   }
 
-  // Show the proofreader's revision as a resolvable diff: the user accepts or
-  // rejects each change, and Apply writes the resolved text back into the editor.
-  showProofreadDiff = (original: string, revised: string) => {
-    const diff = tosiDiff({
-      original,
-      modified: revised,
-      resolvable: true,
-      originalLabel: 'Keep mine',
-      modifiedLabel: 'Accept edit',
-      style: { display: 'block' },
-    })
-    const apply = () => {
-      const result = diff.value
-      const resolutions = diff.resolutions
-      this.parts.source.value = result
-      blog.editorPost.content.value = result
-      overlay.remove()
-      // record each change (accepted or rejected) as a revisit-able gutter note
-      try {
-        this.applyProofNotes(computeProofNotes(original, revised, resolutions))
-      } catch (e) {
-        console.error('proof notes failed', e)
-      }
-      postNotification({
-        type: 'success',
-        message: 'Proofreading edits applied',
-        duration: 2,
-      })
-    }
-    const overlay = div(
-      {
-        style: {
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 100,
-          // vars.xinBlogBodyBg is only defined on the xin-blog* elements; this
-          // overlay lives on document.body where it resolves transparent (the
-          // editor showed through). vars.bodyBg is a global, opaque theme colour.
-          background: vars.bodyBg,
-          display: 'flex',
-          flexDirection: 'column',
-        },
-      },
-      div(
-        {
-          class: 'row',
-          style: {
-            flex: '0 0 auto',
-            alignItems: 'center',
-            padding: vars.xinBlogPad,
-            gap: vars.pad50,
-            borderBottom: '1px solid rgba(128,128,128,0.3)',
-          },
-        },
-        h3({ style: { flex: '1 1 auto', margin: 0 } }, 'Proofreading suggestions'),
-        button('Reject all', { onClick: () => diff.rejectAll() }),
-        button('Accept all', { onClick: () => diff.acceptAll() }),
-        button('Cancel', { onClick: () => overlay.remove() }),
-        button('Apply', { onClick: apply })
-      ),
-      // Scroll container: `min-height: 0` lets this flex child shrink and scroll
-      // instead of growing to the diff's full height and overflowing the modal
-      // (which was covering the header / top bar). `overflow: auto` handles both
-      // long diffs (vertical) and long lines (horizontal).
-      div(
-        {
-          style: {
-            flex: '1 1 auto',
-            minHeight: 0,
-            overflow: 'auto',
-            padding: vars.xinBlogPad,
-          },
-        },
-        diff
+  // Show the proofreader's revision as a resolvable diff, rendered IN PLACE by the
+  // editor's own diff overlay (tosi-code 1.12.8: click a side of any change to pick
+  // it, with word-level highlighting). The overlay compares `source.original` vs
+  // `source.value`; on `showDiff(false)` the resolved text lands back in
+  // `source.value`. We put the reviewer's own text on the `original` side and the
+  // revision on the `value` side, so unresolved hunks default to accepting the
+  // suggestion and the reviewer reverts the ones they'd rather keep.
+  openProofreadDiff = (revised: string) => {
+    const source = this.parts.source
+    this.#proofBefore = source.value
+    this.#proofRevised = revised
+    source.original = this.#proofBefore
+    source.diffResolvable = true
+    source.diffOriginalLabel = 'Yours'
+    source.diffModifiedLabel = 'Proofread'
+    source.value = revised
+    source.showDiff(true)
+    this.parts.proofBar.style.display = 'flex'
+  }
+
+  // Commit the reviewer's resolutions: close the overlay (which writes the resolved
+  // text into `source.value`), persist it, and annotate every hunk — green check for
+  // an accepted suggestion, red x for one the reviewer rejected. We infer each
+  // hunk's choice from before + revised + the resolved result (the overlay doesn't
+  // report them), then pin a note to its line in the resolved text.
+  applyProofread = () => {
+    const source = this.parts.source
+    source.showDiff(false)
+    this.parts.proofBar.style.display = 'none'
+    const after = source.value
+    blog.editorPost.content.value = after
+    try {
+      const resolutions = inferResolutions(
+        this.#proofBefore,
+        this.#proofRevised,
+        after
       )
-    )
-    document.body.append(overlay)
+      this.applyProofNotes(
+        computeProofNotes(this.#proofBefore, this.#proofRevised, resolutions)
+      )
+    } catch (e) {
+      console.error('proof notes failed', e)
+    }
+    postNotification({
+      type: 'success',
+      message: 'Proofreading edits applied',
+      duration: 2,
+    })
   }
 
-  // Install the proof-notes gutter into the live CM6 view (once) and set the
-  // current notes. Uses the editor's own @codemirror modules (shared dep).
+  // Discard the suggestions. `showDiff(false)` always applies the overlay's current
+  // resolution to `source.value`, so restore the captured pre-proofread text after.
+  cancelProofread = () => {
+    const source = this.parts.source
+    source.showDiff(false)
+    source.value = this.#proofBefore
+    blog.editorPost.content.value = this.#proofBefore
+    this.parts.proofBar.style.display = 'none'
+  }
+
+  // Render each landed proofreading edit as a margin annotation over the editor
+  // (DOM overlay via addLineAnnotation — no @codemirror import). Session-scoped:
+  // cleared and re-rendered on each Apply, not persisted.
   applyProofNotes = (notes: ProofNote[]) => {
-    const view = this.parts.source.editor
-    if (!view) return
-    if (!this.#proofGutterInstalled) {
-      view.dispatch({
-        effects: StateEffect.appendConfig.of([proofNotesField, proofNotesGutter]),
+    this.#clearAnnotations()
+    for (const note of notes) {
+      const accepted = note.accepted
+      const title = accepted
+        ? 'Proofreader edit — accepted' +
+          (note.removed ? `\n\nwas:\n${note.removed}` : '') +
+          (note.added ? `\n\nnow:\n${note.added}` : '')
+        : 'Proofreader suggestion — rejected' +
+          (note.removed ? `\n\nkept:\n${note.removed}` : '') +
+          (note.added ? `\n\ndeclined:\n${note.added}` : '')
+      this.addLineAnnotation(note.fromLine + 1, {
+        icon: accepted ? icons.check() : icons.x(),
+        title,
+        color: accepted ? '#22c55e' : '#ef4444',
+        bg: accepted ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)',
       })
-      this.#proofGutterInstalled = true
     }
-    view.dispatch({ effects: setProofNotes.of(notes) })
+    console.info(`[proofread] ${notes.length} margin note(s) rendered`)
   }
 
   summarize = async () => {
@@ -1330,6 +1421,30 @@ export class XinPostEditor extends Component<PostEditorParts> {
               marginTop: vars.xinBlogPad50,
             },
           }),
+          // Shown only while a proofread diff is open in the editor below. The diff
+          // overlay covers the editor (its own shadow), not this bar, so Apply/Cancel
+          // stay reachable above it.
+          // Hidden via inline `display:none` (not `hidden`): the `.row` class sets
+          // `display:flex`, which beats the UA `[hidden]{display:none}` rule, so
+          // `hidden` alone wouldn't hide it. Toggled by open/apply/cancel below.
+          div(
+            {
+              part: 'proofBar',
+              class: 'row',
+              style: {
+                display: 'none',
+                flex: '0 0 auto',
+                alignItems: 'center',
+                gap: vars.pad50,
+              },
+            },
+            span(
+              { class: 'elastic', style: { opacity: '0.8' } },
+              'Reviewing proofreading suggestions — click a side of any change to pick it'
+            ),
+            button('Cancel', { onClick: this.cancelProofread }),
+            button('Apply edits', { onClick: this.applyProofread })
+          ),
           codeEditor({
             part: 'source',
             value: blog.editorPost.content.valueOf(),

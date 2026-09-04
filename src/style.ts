@@ -330,6 +330,15 @@ const rules: XinStyleSheet = {
   // light-on-dark, matching our code blocks.
   'tosi-code': {
     _textColor: vars.codeColor,
+    // The diff overlay (<tosi-diff> inside the editor's shadow) defaults its
+    // background to --tosi-diff-bg || --background (→ #fff) and text to
+    // --tosi-diff-color || --text-color. Inside <tosi-code>, --text-color is the
+    // LIGHT code colour, so on the white fallback bg the unchanged/context lines
+    // were near-white-on-white. Pin both to the editor's own dark palette so the
+    // diff matches the editor and stays readable; the add/remove green/red tints
+    // are translucent and sit fine on top.
+    _tosiDiffBg: vars.codeBg,
+    _tosiDiffColor: vars.codeColor,
   },
   '.post-summary > .row': {
     gap: vars.pad,
