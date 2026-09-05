@@ -29,6 +29,7 @@
     "seed": "bun scripts/seed-emulators.js",
     "seed-clear": "bun scripts/seed-emulators.js --clear",
     "seed-production": "bun scripts/seed-production.js",
+    "backup": "bun scripts/backup-firestore.js",
     "build": "bun build ./src/index.ts --outdir ./dist --sourcemap=linked --minify --splitting && cp -a public/. dist/ && rm dist/index.html",
     "format": "bun prettier --write src functions/src",
     "latest": "bun upgrade && bun install && cd functions && npm install && cd ..",
