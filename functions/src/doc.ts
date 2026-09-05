@@ -442,6 +442,18 @@ export const doc = onRequest({}, async (req, res) => {
         try {
           delete data._path
           await ref.set(data)
+          // Post-commit side effects (cache invalidation, etc). Deliberately
+          // after the write — see CollectionConfig.afterWrite. Failures are
+          // logged, never surfaced: the write already succeeded, and turning a
+          // saved document into an error response would be a worse lie than a
+          // stale cache.
+          if (config.afterWrite) {
+            try {
+              await config.afterWrite(data, userRoles)
+            } catch (e) {
+              functions.logger.warn(`afterWrite failed for ${path}:`, e)
+            }
+          }
           res
             .status(200)
             .send(`${req.method === 'POST' ? 'created' : 'updated'} ${path}`)

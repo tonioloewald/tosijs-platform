@@ -163,6 +163,21 @@ export interface CollectionConfig {
     userRoles: UserRoles,
     existing: any
   ) => Promise<Error | any>
+  /**
+   * Side effects that must happen only once a write has actually landed —
+   * cache invalidation, notifications, index maintenance.
+   *
+   * Separate from `validate` on purpose. `validate` is the write pipeline's
+   * transform (UNIVERSAL-ENDPOINT.md §4.1: pure, deterministic, no I/O), and a
+   * side effect there fires *before* the commit — so a concurrent reader can
+   * observe pre-write state and repopulate a cache that then outlives the write.
+   * That is exactly the bug this hook was added to fix (blog cache cleared in
+   * `validate`, stale for up to 24h if a read landed in the window).
+   *
+   * Failures are logged and swallowed: the write has already succeeded, so an
+   * afterWrite error must not turn a successful save into a client-visible error.
+   */
+  afterWrite?: (data: any, userRoles: UserRoles) => Promise<void>
   access?: { [key: string]: AccessConfig | undefined }
   cacheLatencySeconds?: number // TTL cache for reads; cached data may be stale up to this many seconds
 }

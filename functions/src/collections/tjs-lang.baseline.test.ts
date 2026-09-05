@@ -18,6 +18,7 @@
  *
  * Run: cd functions && bun test src/collections/tjs-lang.baseline.test.ts
  */
+/* eslint-disable new-cap -- `Eval` is tjs-lang's exported API name; we don't own the casing. */
 import { describe, test, expect } from 'bun:test'
 import { Eval } from 'tjs-lang/eval'
 
@@ -68,7 +69,7 @@ describe('relied-on: sandbox guarantees', () => {
       timeoutMs: 2000,
     })
     expect(r.error).toBeDefined()
-    expect(r.error!.message).toMatch(/fuel/i)
+    expect(r.error?.message ?? '').toMatch(/fuel/i)
   })
 
   test('a zero-capability rule cannot reach I/O', async () => {
@@ -88,7 +89,7 @@ describe('relied-on: sandbox guarantees', () => {
     const big = 'const x = 1\n'.repeat(6000) + 'return x' // ~72KB > 64KB default
     const r = await Eval({ code: big, fuel: 100, timeoutMs: 500 })
     expect(r.error).toBeDefined()
-    expect(r.error!.message).toMatch(/byte|limit|maxSourceBytes/i)
+    expect(r.error?.message ?? '').toMatch(/byte|limit|maxSourceBytes/i)
   })
 })
 

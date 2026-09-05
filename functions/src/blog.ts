@@ -166,10 +166,19 @@ COLLECTIONS.post = {
       data.path = data.title.toLocaleLowerCase().replace(/[^\w]+/g, '-')
     }
 
-    // Clear the blog cache so changes are visible immediately
-    await clearBlogCache()
-
     return data
+  },
+  // Cache invalidation runs AFTER the commit, not inside validate.
+  //
+  // It used to be the last thing `validate` did, which put it *before* the write
+  // (doc.ts validates, then checks uniqueness, then calls ref.set). Any read in
+  // that window — and the racing reader is `onPrefetch`, i.e. essentially every
+  // page request — would miss the cache, rebuild it from the PRE-write data, and
+  // stamp it fresh. The blog then served stale content for up to the cache
+  // duration (24h by default), which is the "I saved but the site still shows the
+  // old post" failure. Clearing after the write closes the window.
+  async afterWrite(): Promise<void> {
+    await clearBlogCache()
   },
   access: {
     [ROLES.public]: {
