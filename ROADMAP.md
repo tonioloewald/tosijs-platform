@@ -263,6 +263,49 @@ capability is installed and versioned; and whether capability grants compose wit
 (ROADMAP's earlier note that auth/rules "would be governed both by their own hardwired rules AND
 have the `/doc` collection rules applied on top" is the same intuition).
 
+### Third-party APIs as capabilities — what 0.13.11 already gives us
+
+*"Add a third-party API via ajs rules and glue → new capability, no deployment."* Checked against
+0.13.11's actual runtime (`vm/runtime.d.ts`), and most of the substrate is already there:
+
+- **Our bespoke endpoints map almost 1:1 onto existing core ops.** `EFFECTFUL_CORE_OPS` ships
+  `httpFetch`, `storeGet`/`storeSet`/`storeQuery`/`storeQueryWhere`/`storeVectorSearch`,
+  `llmPredict`, `cache`, `memoize`, `storeProcedure`/`releaseProcedure`. That is `/stored`, `/doc`,
+  `/docs`, `/gen`, and `/cachedQuery` respectively — **strong evidence for collapsing them into
+  capabilities rather than porting them as endpoints**.
+- **`defineAtom(op, inputSchema, outputSchema, fn)`** is the "installed beside it" seam, described
+  in-tree as existing "to bring HOST data *in*". Since 0.13.6 it defaults to `effects: 'io'` so the
+  membrane is on by default — it previously defaulted `'pure'` and *silently* disabled sanitisation
+  for exactly the third-party-shaped atoms that needed it (tjs-lang#38). Another entry for the
+  fail-loudly ledger, and a caution: our capability wrappers must be audited for effect tagging.
+- **Per-atom call quotas are the cost control, not fuel.** Fuel meters work *inside* the VM and is
+  "blind to what an atom summons outside it: an `llmPredict` costing 50 fuel might cost real money,
+  and a `httpFetch` costing 10 might hammer someone else's service." So a third-party capability
+  needs a **quota**, not just a gas price. **Caveat to carry:** a quota counts calls within one
+  `vm.run`; a capability that re-enters the VM gets a fresh counter, so re-entrancy multiplies the
+  allowance. Any capability we expose must not offer a re-entry path, or the quota is decorative.
+
+**The credential is the part that isn't free.** An ajs proc is *stored data* — anyone who can read
+the proc can read a key pasted into it, so "glue" cannot hold credentials. Two shapes, and the
+difference decides whether "no deployment" actually holds:
+
+1. **Bound atom** — `defineAtom('weatherGet', …)` closes over the credential host-side; the proc
+   calls `weatherGet(city)` and never sees the key. Clean ocap, but installing it is *host code*, so
+   it costs one deploy per integration. "No deployment" does **not** hold.
+2. **Secret handle resolved host-side** — the proc references a credential by name
+   (`httpFetch({ url, auth: secretRef('weather') })`) and the host substitutes the real value at
+   call time, refusing to return it into VM scope. Genuinely no-deploy, and the credential still
+   never enters ajs. **This is the shape worth designing**, and it is where RBAC-over-functions does
+   real work: the grant says *which roles may spend which secret against which hosts*.
+
+**Security consequence, and it is the whole design:** raw `httpFetch` must almost certainly **not**
+be grantable to a stored proc. Unrestricted egress in a procedure that also holds a privileged read
+is an exfiltration channel (and an SSRF one), which is precisely the amplification §2.2 exists to
+prevent. The grantable unit should be a **narrowed** capability — allowlisted host(s), bound or
+referenced credential, quota — with raw `httpFetch` reserved for the TCB. That narrowing *is* the
+"permitted arguments" half of the capability map above, which makes it the concrete first thing to
+design rather than a later refinement.
+
 ## Open questions worth pinning
 
 - **What exactly is the universal (stored-ajs) endpoint** — its call shape, how a stored proc is
