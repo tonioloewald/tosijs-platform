@@ -30,6 +30,10 @@ import {
 } from './collections/access'
 import { COLLECTIONS } from './collections'
 import { ROLES, UserRoles } from './collections/roles'
+import {
+  shadowEnabled,
+  shadowCompareWrite,
+} from './collections/shadow-compare'
 import { validate as schemaValidate } from 'tosijs-schema'
 
 interface SchemaError {
@@ -396,6 +400,11 @@ export const doc = onRequest({}, async (req, res) => {
           string,
           unknown
         >
+        // Keep the caller's body as sent, so shadow mode can re-derive the write
+        // from the same inputs this handler started from (it is mutated below).
+        const shadowBody = shadowEnabled()
+          ? ({ ...req.body.data } as Record<string, unknown>)
+          : undefined
         const _modified = new Date().toJSON()
         const _created = (existing._created as string) || _modified
         let data =
@@ -457,6 +466,23 @@ export const doc = onRequest({}, async (req, res) => {
           res
             .status(200)
             .send(`${req.method === 'POST' ? 'created' : 'updated'} ${path}`)
+
+          // Shadow mode (ROADMAP Phase 1 rung 1): re-derive this write through the
+          // extracted pipeline and log any divergence. Runs AFTER the response is
+          // sent and commits nothing, so it can neither slow nor alter the request.
+          // Off unless SHADOW_WRITE_PIPELINE=1.
+          if (shadowBody !== undefined) {
+            await shadowCompareWrite({
+              path,
+              method: req.method as 'POST' | 'PUT' | 'PATCH',
+              body: shadowBody,
+              existing,
+              config,
+              userRoles,
+              actual: data,
+              now: _modified,
+            })
+          }
         } catch (e) {
           functions.logger.error(`Error saving ${path}:`, e)
           res.status(500).send('Save failed')
