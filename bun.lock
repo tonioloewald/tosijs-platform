@@ -19,7 +19,7 @@
         "http-server": "^14.1.1",
         "marked": "^16.4.2",
         "prettier": "^2.8.8",
-        "tjs-lang": "^0.12.0",
+        "tjs-lang": "^0.13.11",
         "tosijs": "^1.8.2",
         "tosijs-schema": "^1.8.1",
         "tosijs-ui": "^1.12.8",
@@ -358,7 +358,7 @@
 
     "supports-color": ["supports-color@7.2.0", "", { "dependencies": { "has-flag": "^4.0.0" } }, "sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw=="],
 
-    "tjs-lang": ["tjs-lang@0.12.0", "", { "dependencies": { "acorn": "^8.15.0", "acorn-loose": "^8.5.2", "acorn-walk": "^8.3.4", "tosijs-schema": "^1.4.0" }, "peerDependencies": { "@codemirror/autocomplete": "^6.0.0", "@codemirror/lang-javascript": "^6.0.0", "@codemirror/language": "^6.0.0", "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0" }, "optionalPeers": ["@codemirror/autocomplete", "@codemirror/lang-javascript", "@codemirror/language", "@codemirror/state", "@codemirror/view"], "bin": { "tjs": "src/cli/tjs.ts", "tjsx": "src/cli/tjsx.ts", "create-tjs-app": "src/cli/create-app.ts", "tjs-playground": "src/cli/playground.ts", "ajs-install-cursor": "bin/install-cursor.sh", "ajs-install-vscode": "bin/install-vscode.sh" } }, "sha512-aZFwHRfeh4EuNEj/3Hky/H98fM7IXHbE7Rw71TNLvCtkom/I9aw/4iRGDNl66nc3huUA9A95DydGEP1yqHvvSQ=="],
+    "tjs-lang": ["tjs-lang@0.13.11", "", { "dependencies": { "acorn": "^8.15.0", "acorn-loose": "^8.5.2", "acorn-walk": "^8.3.4", "tosijs-schema": "^1.5.1" }, "peerDependencies": { "@codemirror/autocomplete": "^6.0.0", "@codemirror/lang-javascript": "^6.0.0", "@codemirror/language": "^6.0.0", "@codemirror/state": "^6.0.0", "@codemirror/view": "^6.0.0" }, "optionalPeers": ["@codemirror/autocomplete", "@codemirror/lang-javascript", "@codemirror/language", "@codemirror/state", "@codemirror/view"], "bin": { "tjs": "src/cli/tjs.ts", "tjsx": "src/cli/tjsx.ts", "tjs-playground": "src/cli/playground.ts", "create-tjs-app": "src/cli/create-app.ts", "ajs-install-vscode": "bin/install-vscode.sh", "ajs-install-cursor": "bin/install-cursor.sh" } }, "sha512-Va2WdD97iKmQc893vJSAeEbhhvrT8jgtAePQsDS+HSF2AYJuFm0dUsds1Zt0VC+llb7OZWYLlBfNlUr85MCQOQ=="],
 
     "to-regex-range": ["to-regex-range@5.0.1", "", { "dependencies": { "is-number": "^7.0.0" } }, "sha512-65P7iz6X5yEr1cwcgvQxbbIw7Uk3gOy5dIdtZ4rDveLqhrdJP+Li/Hx6tyK0NEb+2GCyneCMJiGqrADCSNk8sQ=="],
 

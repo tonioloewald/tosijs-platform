@@ -48,7 +48,7 @@
     "http-server": "^14.1.1",
     "marked": "^16.4.2",
     "prettier": "^2.8.8",
-    "tjs-lang": "^0.12.0",
+    "tjs-lang": "^0.13.11",
     "tosijs": "^1.8.2",
     "tosijs-schema": "^1.8.1",
     "tosijs-ui": "^1.12.8",

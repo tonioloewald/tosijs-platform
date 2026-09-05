@@ -29,8 +29,28 @@ invest in it. The ajs/security design is grounded on **tjs-lang 0.13.1** and is 
 - [ ] **Engine-vs-data split of `functions/src/collections/access.ts`** — decide which lines stay
   compiled TCB (role-precedence walk, field-filter mechanic) vs. become ajs procs. This defines
   the frozen atom ABI.
-  - **VM spike done** (2026-08, `scratchpad/spike.mjs`, 10/10 pass against the oracle). Findings
-    that constrain the split:
+  - **DECIDED (2026-09-05): option (a).** The 0.13.11 re-run settles the fork in finding 4 below —
+    transform / field-strain / provenance / unique stay **compiled TCB**; ajs rules stay **pure
+    predicates**. Option (b) (rules return transformed `newData`) is the exact shape
+    [tjs-lang#52](https://github.com/tonioloewald/tjs-lang/issues/52) corrupts *silently*, so it is
+    gated on that fix plus a reason better than convenience. See ROADMAP Phase 0.
+  - **VM spike re-run** (2026-09-05, tjs-lang **0.13.11**) — now a test, not a scratchpad script:
+    `functions/src/collections/tjs-lang.baseline.test.ts` (12 pass). It asserts both the properties
+    the port *relies on* and **tripwires that fail when tjs-lang#52 is fixed** (at which point the
+    workarounds below can be deleted). Deltas from the 0.12 spike:
+    - **Still true:** fuel halts a runaway rule; zero-capability rules can't reach I/O; member
+      assignment still forbidden; pure boolean predicates correct. Finding 5's context-binding
+      wrinkle is **gone** — `Eval` binds `context` fine on the node/dist path, and `SafeFunction`
+      works with the documented `{ params, body }` signature.
+    - **New:** `maxSourceBytes` refuses oversized source *before* transpilation (transpiling isn't
+      fuel-metered) — a denial-of-wallet guard we should adopt for any hosted stored-proc endpoint.
+    - **New, and it invalidates finding 2's remedy:** finding 2 said "rewrite validators
+      functionally with spread". **Spread is silently a no-op on 0.13.11** — `{...d, c:3}` → `{c:3}`,
+      `[...a]` → `[null]` — and returning a context dot-path yields the path *string*
+      (`return doc.owner` → `"doc.owner"`). No error in either case. Use `Object.assign({}, data,
+      {…})` + bracket access instead; both are asserted in the baseline test.
+  - **VM spike, original run** (2026-08, `scratchpad/spike.mjs` — lost with the scratchpad, which is
+    why the re-run is a committed test). Findings that constrain the split:
     1. **The VM runs our logic correctly** — `module.validate`'s revision provenance ported to AJS
        matches all 5 oracle cases; fuel metering halts a runaway rule ("Out of Fuel").
     2. **AJS forbids member assignment** (`data.revisions = 0` → TranspileError "Only simple

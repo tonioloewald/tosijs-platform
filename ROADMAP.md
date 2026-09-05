@@ -167,13 +167,36 @@ pressure and much will likely persist **in some form** — but 0.13.1 (released;
 patches possible) reworks the VM/capability/typing model, so treat it as **design intent to
 re-validate against 0.13.1's primitives**.
 
-**Action:** re-read 0.13.1's model, then re-run the VM spike (the `module.validate` oracle against
-the characterization tests) on 0.13.1 to re-derive the backend contract before committing internals.
+**Action:** ~~re-read 0.13.1's model, then re-run the VM spike~~ — **done 2026-09-05 on 0.13.11**
+(see Phase 0 below). The `module.validate` oracle ports cleanly *using the #52 workarounds*, and the
+rule/transform split is decided in favour of pure-predicate rules with the transform in compiled TCB.
+Remaining before internals: reconcile the capability/typing model (gas pricing, buffered
+capabilities) against 0.13.11's `SafeCapabilities` + `maxSourceBytes`.
 
 ## Phased plan
 
-- **Phase 0 — baseline on tjs-lang 0.13.1.** Released; shape settled. Re-run the VM spike against
-  0.13.1; reconcile the carried-over security design with its model. Blocks Phase 1 internals.
+- **Phase 0 — baseline on tjs-lang 0.13.x. ✅ Re-run 2026-09-05 against 0.13.11.** The spike now
+  lives as a test (`functions/src/collections/tjs-lang.baseline.test.ts`, 12 pass) instead of a
+  scratchpad script, so the next re-validation is `bun test`. Results:
+  - **Holds:** fuel metering halts a runaway rule; a zero-capability rule cannot reach I/O (fails
+    closed); **pure boolean predicates evaluate correctly** — so the reference rbac rule model is
+    sound on 0.13.11. New in 0.13.x: a `maxSourceBytes` cap refusing oversized source *before*
+    transpilation (transpiling isn't fuel-metered — a real denial-of-wallet guard for any hosted
+    stored-proc endpoint).
+  - **Broken upstream ([tjs-lang#52](https://github.com/tonioloewald/tjs-lang/issues/52)), silently:**
+    object/array **spread is a no-op** (`{...d, c:3}` → `{c:3}`; `[...a]` → `[null]`) and
+    **returning a context dot-path yields the path string** (`return doc.owner` → `"doc.owner"`).
+    No error either way. Values are correct *inside* the VM (`doc.owner === user.id` → `true`);
+    only the returned/derived object is wrong. Workarounds — `Object.assign({}, data, {…})` and
+    bracket access — are asserted in the baseline test, as are tripwires that fail when upstream
+    fixes it.
+  - **This answers the §"split decision" fork** (TODO finding 4): option **(b)** "extend the rule
+    contract so a rule returns transformed `newData` + a field mask" is *exactly* the shape
+    tjs-lang#52 corrupts, and would corrupt it silently (a `beforeWrite` returning
+    `{...data, revisions}` persists `{revisions}` alone — data loss with a plausible payload).
+    Option **(a)** — transform/field-strain/provenance/unique stay compiled TCB, ajs rules stay
+    pure predicates — is entirely unaffected. **Take (a)**, and treat (b) as gated on #52 plus a
+    reason better than convenience.
 - **Phase 1 — consolidate the backend.** Bring tjs-lang's reference universal-endpoint / batteries
   here (or eliminate), unify with loewald's stronger RBAC, and collapse the service surface toward
   `/doc` + `/docs` + one universal stored-ajs endpoint. Everything else re-expressed as collection
