@@ -263,6 +263,53 @@ capability is installed and versioned; and whether capability grants compose wit
 (ROADMAP's earlier note that auth/rules "would be governed both by their own hardwired rules AND
 have the `/doc` collection rules applied on top" is the same intuition).
 
+### Self-gating endpoints: versioned, shape-enforced, shipped with their own tests
+
+The robustness argument for the whole design, and the reason it beats deployed functions on
+reliability rather than only on convenience:
+
+**Because a procedure is data, its tests are data too.** They ship together and version together —
+there is no "the tests live in CI and the code lives in prod" gap to drift through. And because
+Phase 0 established that ajs is deterministic with injectable (therefore mockable) capabilities,
+those tests are **pure and runnable server-side at install time** — no emulator, no network, no
+build step.
+
+That combination buys something a deployed function cannot have: **the server can refuse to install
+a procedure whose own tests fail.** A gate that runs inside the write path of the thing being
+installed cannot be skipped at 11pm, which is exactly the "prefer a test over a checklist" argument
+from [tosijs-coding-practices#10](https://github.com/tonioloewald/tosijs-coding-practices/issues/10)
+made structural instead of cultural. Composed with §4.3 (old versions retained, invocations logged)
+it is also a **zero-downtime activation with no deploy**: the previous version keeps serving until
+the new one passes, and a failed candidate never becomes reachable.
+
+Layered with the boundary contract, the failure modes get small:
+
+| layer | catches |
+|---|---|
+| declared input/output schemas, enforced by the endpoint (§5) | a procedure emitting a malformed shape, *regardless of what it does internally* |
+| the procedure's own suite, run at install | logic the author knew to check |
+| generated property tests (§6.1 idempotence) | transforms that aren't fixed points — including ones the author never considered |
+| fuel + per-atom quotas | runaway cost, in VM work and in real money |
+| version pinning + fail-loud on a missing schema (§4.3) | a procedure running against a shape it does not understand |
+
+Blast radius shrinks accordingly: today a bad function deploy takes the whole backend down (we did
+exactly that on 2026-08-21), whereas a bad procedure fails its own gate and never activates — and if
+it somehow does, it damages one endpoint version that can be rolled back by pointing at the previous
+one.
+
+**Caveats to design against, not around:**
+
+- **The gate proves "its own tests pass", not "it is correct."** It is a floor. Weak tests buy weak
+  assurance, so the generated property tests (§6.1) matter more than the author-written ones — they
+  are the part an author cannot make vacuous.
+- **Install-time test execution runs author-supplied code**, so it needs its own fuel and quota
+  budget, distinct from the request budget. Otherwise "install a procedure" is a denial-of-wallet
+  vector — the same hazard `maxSourceBytes` addresses for transpilation.
+- **A procedure whose behaviour depends on real I/O can only be tested against mocked
+  capabilities.** That is the right trade (it is what makes the tests runnable at all), but it means
+  the gate verifies logic, not integration — so capability mocks are part of the trusted surface and
+  should be supplied by the platform, not the procedure author.
+
 ### Third-party APIs as capabilities — what 0.13.11 already gives us
 
 *"Add a third-party API via ajs rules and glue → new capability, no deployment."* Checked against
