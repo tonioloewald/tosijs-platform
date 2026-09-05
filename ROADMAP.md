@@ -223,11 +223,52 @@ and optional Playwright-rendered OG images. **Freshness** is handled by the `doc
 updates-since-timestamp delta ([Serving model](#serving-model)), not a purge hook. Serving the build
 from Firestore via `/prefetch` keeps first-paint fast and crawler-friendly.
 
+## The backend as anchor tech — and RBAC over functions (direction, 2026-09-05)
+
+Two framings from Tonio that change what "done" means here:
+
+**1. This backend is *the* backend.** Not loewald.com's — to the extent any project in the ecosystem
+needs a backend, it deploys this one. So it becomes **foundational, rigorous, seldom-changed anchor
+tech, like `tosijs-schema`**: a small stable surface that other projects build on and rarely think
+about. Consequences: (a) it is the **TCB** — the one tier where a silent wrong value is *persisted*
+rather than merely rendered, which is why the fail-loudly discipline of
+[tosijs-ui#61](https://github.com/tonioloewald/tosijs-ui/issues/61) is load-bearing here rather than
+stylistic (Phase 0's tjs-lang#52 finding is exactly that shape: a spread bug that would have written
+`{revisions}` over a whole document); (b) "seldom changed, many consumers" is the profile that
+*earns* real versioning discipline — the opposite of this repo's cowboy answer on
+[tosijs-coding-practices#10](https://github.com/tonioloewald/tosijs-coding-practices/issues/10),
+which was argued from having exactly one consumer. Revisit that when Phase 1 lands.
+
+**2. App-specific logic is never deployed code.** It is either an **ajs stored procedure** or a
+**tjs capability installed beside** the server. Nothing bespoke ships to the server, which is the
+"no function deployment" ladder restated as an architectural rule rather than a milestone.
+
+**Where that points (not yet designed): generalize RBAC from documents to functions.** Today
+`access.ts` maps *role × collection × method → permitted fields*. A capability is the same question
+with a different object: *role × capability → permitted invocation* (and, by analogy with the field
+maps, permitted **arguments**, not just a yes/no). Under that lens:
+
+- **Storage is a function.** Rung 3's "storage capability → asset manager" stops being a special
+  case and becomes the first non-document capability expressed in the ordinary access model —
+  folding in today's bespoke `/stored`.
+- `/gen` is a capability too (an expensive, rate-limited one), which is what the current
+  role-gated-but-hand-rolled check in `gen.ts` is approximating.
+- The role hierarchy, the precedence walk, and the field-map intersection are all reusable as-is;
+  what is missing is the *object* half of the map — naming capabilities and constraining their
+  arguments.
+
+**Open:** the argument-constraint shape (is it a schema? a predicate rule? both — schema for
+structure, ajs predicate for policy, mirroring §4's `beforeWrite`/`isWriteAllowed` split?); how a
+capability is installed and versioned; and whether capability grants compose with document RBAC
+(ROADMAP's earlier note that auth/rules "would be governed both by their own hardwired rules AND
+have the `/doc` collection rules applied on top" is the same intuition).
+
 ## Open questions worth pinning
 
 - **What exactly is the universal (stored-ajs) endpoint** — its call shape, how a stored proc is
   named/versioned/authorized, its gas price — and which current endpoints (`/gen`, `/stored`,
-  `/cachedQuery`, `/state`, `/sitemap`) collapse into it vs. stay bespoke.
+  `/cachedQuery`, `/state`, `/sitemap`) collapse into it vs. stay bespoke. *(Partly answered by
+  "RBAC over functions" above: `/stored` and `/gen` look like **capabilities**, not endpoints.)*
 - **How tjs-lang 0.13.1's** capability/typing model shapes the backend internals — now *checkable*;
   re-run the VM spike.
 - **The tjs-lang backend-move seam** — absorb its reference `functions/` wholesale, or re-derive
