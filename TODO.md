@@ -119,27 +119,28 @@ From [`reviews/2026-09-06-backend-consolidation.md`](reviews/2026-09-06-backend-
 gaps, ordered by *danger*, not by lens. Upstream items are in [UPSTREAM.md](UPSTREAM.md); process
 items were written back to `tosijs-coding-practices`.
 
-**P0 — dangerous, in code we were about to schedule or already ship**
+**P0 — dangerous, in code we were about to schedule or already ship** — ✅ ALL DONE
+(`0e3213e` retention safety + permissions, `f987527` restore path, and the LaunchAgent generator)
 
-- [ ] **F15 — backup prune deletes by filename pattern with no ownership check.**
+- [x] **F15 — backup prune deletes by filename pattern with no ownership check.**
   `scripts/backup-firestore.js`. `readdirSync` → filter `/^\d{4}-\d{2}-\d{2}T/` →
   `rmSync(recursive, force)` with no `isDirectory()`, no manifest check, no project match; the
   default root is a constant, so two projects sharing it prune each other. Reproduced in the review
   deleting a foreign directory *and* a foreign PDF. Namespace the root by project id; require a
   readable `manifest.json` whose `project` matches before deleting.
-- [ ] **F17 — backups write the admin-only `role` collection world-readable.** Verified on disk:
+- [x] **F17 — backups write the admin-only `role` collection world-readable.** Verified on disk:
   `role/*.json` is `-rw-r--r--` with populated `contacts` (email/phone/address). Server-side
   encrypted-at-rest becomes laptop-local plaintext, 30 snapshots deep, Time-Machined. Use
   `{mode: 0o700}` / `{mode: 0o600}`; make `role` opt-in.
-- [ ] **F16 — `--quiet` silences the only record of deletions, in the one config that deletes.**
+- [x] **F16 — `--quiet` silences the only record of deletions, in the one config that deletes.**
   The plist runs `--quiet --keep 30`; `log()` is a no-op under `--quiet` and prune lines are the
   sole trace anywhere. Route prune output through `console.error` unconditionally; record `keep`
   and pruned names in the manifest.
-- [ ] **F19 — there is no restore path.** The backup tags Firestore natives
+- [x] **F19 — there is no restore path.** The backup tags Firestore natives
   (`timestamp`/`bytes`/`reference`/`geopoint`) and nothing decodes them. A backup never
   demonstrated to restore is not a backup. Write `scripts/restore-firestore.js` (through `/doc`,
   so validation/provenance/RBAC still apply) and a round-trip test.
-- [ ] **F18 — don't ship a personal LaunchAgent in a clone template.**
+- [x] **F18 — don't ship a personal LaunchAgent in a clone template.**
   `scripts/com.loewald.tosijs-backup.plist` hardcodes one developer's paths and claims the global
   label `com.loewald.tosijs-backup`; `create-tosijs-platform-app` clones the repo verbatim. Generate
   it (`bun run backup:install`) from `cwd`/`homedir`/`which bun`, label from the `.firebaserc`
@@ -203,14 +204,14 @@ items were written back to `tosijs-coding-practices`.
   `npm ci` in `functions/` leaves the suite unrunnable.
 - [ ] **F14 — reconcile tjs-lang version drift**: code pins `^0.13.11`, `ROADMAP.md`/`CLAUDE.md`
   still say 0.13.1.
-- [ ] **F20 — two decoders, already drifted.** REST tags `geopoint`/`reference`; the admin path
+- [x] **F20 — two decoders, already drifted.** REST tags `geopoint`/`reference`; the admin path
   handles only `toDate()`/`Buffer` — so a `GeoPoint` or `DocumentReference` backs up differently
   depending on the operator's credentials. Converge on one shape + a fixture test per scalar type.
 - [ ] **F21 — the backup's collection list is a second, silently-drifting registry.** A new content
   type drops out of backups with no signal; the empty-guard only fires at zero *total* docs.
-- [ ] **F22 — `--collection X` writes a normally-named partial snapshot** that occupies a retention
+- [x] **F22 — `--collection X` writes a normally-named partial snapshot** that occupies a retention
   slot, so debug runs can prune complete snapshots. Name partial runs distinctly.
-- [ ] **F23 — the LaunchAgent's log dir may not exist at first run**, discarding the very
+- [x] **F23 — the LaunchAgent's log dir may not exist at first run**, discarding the very
   credential error its own Notes tell you to look for. (Subsumed by F18.)
 - [ ] **F6 — coalesce proofread annotation repositioning into one rAF pass.** O(N²) forced layouts
   on Apply (~820 for 40 notes) and an unthrottled O(N) pass per keystroke thereafter. Admin-only,

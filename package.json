@@ -37,7 +37,9 @@
     "deploy-hosting": "firebase deploy --only hosting",
     "deploy-functions": "firebase deploy --only functions",
     "initial-deploy": "bun scripts/initial-deploy.js",
-    "restore": "bun scripts/restore-firestore.js"
+    "restore": "bun scripts/restore-firestore.js",
+    "backup:install": "bun scripts/backup-install.js",
+    "backup:uninstall": "bun scripts/backup-install.js --uninstall"
   },
   "devDependencies": {
     "@codemirror/lint": "^6.9.7",
