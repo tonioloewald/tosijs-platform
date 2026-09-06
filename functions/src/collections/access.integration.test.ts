@@ -177,8 +177,11 @@ describe('Access Control Integration Tests', () => {
         headers: { 'Content-Type': 'application/json' },
       })
 
-      // Role collection should NOT be publicly listable
-      expect(response.status).toBe(403)
+      // Role collection should NOT be publicly listable, and the denial must be
+      // OPAQUE: an anonymous caller gets 404, same as GET /doc?p=role/... . A 403
+      // would confirm the collection exists and undo the opacity the doc endpoint
+      // is careful about (see 'error message opacity for security' below).
+      expect(response.status).toBe(404)
     })
   })
 

@@ -186,6 +186,27 @@ export interface CollectionMap {
   [key: string]: CollectionConfig
 }
 
+/**
+ * Roles allowed to see *why* a request was denied. Everyone else gets an opaque
+ * "not found", because a 403 confirms the resource exists.
+ *
+ * Shared by `/doc` and `/docs` so the two cannot drift: `/doc` was made opaque
+ * while `/docs` still answered 403, which meant listing a protected collection
+ * disclosed the very existence that reading it was careful to hide.
+ */
+export const PRIVILEGED_ROLES: readonly string[] = [
+  ROLES.admin,
+  ROLES.developer,
+  ROLES.owner,
+]
+
+export const hasPrivilegedRole = (userRoles: UserRoles): boolean =>
+  userRoles.roles.some((role) => PRIVILEGED_ROLES.includes(role))
+
+/** The status to actually send: the real one for privileged callers, else 404. */
+export const opaqueStatus = (userRoles: UserRoles, status: number): number =>
+  hasPrivilegedRole(userRoles) ? status : 404
+
 export const accessMap = {
   GET: 'read',
   POST: 'write',

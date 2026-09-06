@@ -27,9 +27,11 @@ import {
   getMethodAccess,
   REST_METHOD,
   ALL,
+  hasPrivilegedRole,
+  opaqueStatus,
 } from './collections/access'
 import { COLLECTIONS } from './collections'
-import { ROLES, UserRoles } from './collections/roles'
+import { UserRoles } from './collections/roles'
 import {
   shadowEnabled,
   shadowCompareWrite,
@@ -84,16 +86,6 @@ export type DocResult =
   | { ok: true; data: any }
   | { ok: false; reason: string; status: number }
 
-// Roles that can see detailed error messages
-const PRIVILEGED_ROLES: readonly string[] = [
-  ROLES.admin,
-  ROLES.developer,
-  ROLES.owner,
-]
-
-const hasPrivilegedRole = (userRoles: UserRoles): boolean =>
-  userRoles.roles.some((role) => PRIVILEGED_ROLES.includes(role))
-
 const opaqueError = (
   userRoles: UserRoles,
   reason: string,
@@ -102,7 +94,7 @@ const opaqueError = (
   ok: false,
   // Only show detailed error messages to admin/developer/owner roles
   reason: hasPrivilegedRole(userRoles) ? reason : 'not found',
-  status: hasPrivilegedRole(userRoles) ? status : 404,
+  status: opaqueStatus(userRoles, status),
 })
 
 type FirestoreDocRef = FirebaseFirestore.DocumentReference

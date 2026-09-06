@@ -24,7 +24,12 @@ import {
   getUserRoles,
   AuthenticatedRequest,
 } from './utilities'
-import { collectionPath, getMethodAccess, ALL } from './collections/access'
+import {
+  collectionPath,
+  getMethodAccess,
+  ALL,
+  opaqueStatus,
+} from './collections/access'
 import { COLLECTIONS } from './collections'
 import { getRef } from './doc'
 import { Response } from 'express'
@@ -125,6 +130,10 @@ export const docs = onRequest({}, async (req, res) => {
       res.json(found.filter((r) => !(r instanceof Error)))
     })
   } else {
-    res.status(403).send()
+    // Opaque denial, matching `/doc`. A 403 here confirms the collection exists,
+    // which defeats the point of `/doc` answering 404 for the same resource:
+    // GET role/owner-role hid the collection while LIST role announced it.
+    // Privileged callers (admin/developer/owner) still get the real 403.
+    res.status(opaqueStatus(userRoles, 403)).send()
   }
 })
