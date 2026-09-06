@@ -394,10 +394,15 @@ export const doc = onRequest({}, async (req, res) => {
     case 'POST':
     case 'PUT':
     case 'PATCH':
+      // These two are reached only AFTER the access gate above, so the caller
+      // already holds write access to this collection — telling them a document
+      // exists is not a disclosure, and 404-ing them would degrade an author's
+      // error messages for no security gain (review F5). What is worth removing
+      // is the reflected path: there is never a reason to echo caller input back.
       if (doc.exists && req.method === 'POST') {
-        res.status(403).send(`document ${path} already exists`)
+        res.status(403).send('document already exists')
       } else if (!doc.exists && req.method !== 'POST') {
-        res.status(403).send(`cannot update non-existent document ${path}`)
+        res.status(403).send('cannot update non-existent document')
       } else {
         const existing = (doc.exists ? doc.data() : {}) as Record<
           string,

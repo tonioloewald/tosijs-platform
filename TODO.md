@@ -173,7 +173,7 @@ items were written back to `tosijs-coding-practices`.
   for truthiness — a field map or ownership predicate grants unrestricted write to every field.
   Latent only because all five shipped configs use `write: ALL`. Either apply the strainer, or
   reject non-`ALL` write configs at registration.
-- [ ] **F5 — three raw 403s remain in `doc.ts`** (`:333`, `:398`, `:400`) leaking existence via
+- [x] **F5 — three raw 403s remain in `doc.ts`** (`:333`, `:398`, `:400`) leaking existence via
   "document X already exists" / "cannot update non-existent document X". *(1 of 5 done — the DELETE
   branch.)* Add a table-driven test over the endpoint's denial branches, since `opacity.test.ts`
   imports only `./access` and structurally cannot notice.
