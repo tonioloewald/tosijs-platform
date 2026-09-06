@@ -168,7 +168,17 @@ items were written back to `tosijs-coding-practices`.
 - [x] **F11 — cover `src/blog.ts`'s pure logic.** `inferResolutions`, `computeProofNotes` are pure
   and untested; `inferResolutions` silently picks a side when both fit, which mis-attributes the
   author's prose. There is no `src/*.test.ts` at all — and B1 (data loss) shipped from this file.
-- [ ] **F1 — enforce or fail-closed the write-side access config.** `AccessConfig.write` is typed
+- [x] **F1 — enforce or fail-closed the write-side access config.** *(DONE, but INTERIM — the real
+  answer is write schemas.)* `UNIVERSAL-ENDPOINT.md` resolved this in 2026-08: field-level access is
+  a **schema**, not a `FieldAccessMap` — "schema is guard *and* strainer, and it is type-sound".
+  That dissolves the objection behind the interim fix: straining a write with a field map means
+  silently DROPPING fields the author submitted, but validating against a **schema** REJECTS them,
+  since tosijs-schema is strict about unexpected properties (hit three times this session:
+  `Unexpected format`, `Unexpected _created` on page, module's `revisions`). So the deny stands only
+  until write-schemas land; then `write: <schema>` is enforceable *and* loud. Union of schemas is
+  the role-combination join, type-sound where a field-map union is not. **Open:** schemas carry
+  constraints (`min`/`max`/`pattern`) as well as properties — union of properties is clean, union of
+  constraints is not obviously "most permissive" and needs a decision. *Original finding:* `AccessConfig.write` is typed
   and documented as `ALL | FieldAccessMap | AccessFilterFunc`, but the write branch only tests it
   for truthiness — a field map or ownership predicate grants unrestricted write to every field.
   Latent only because all five shipped configs use `write: ALL`. Either apply the strainer, or
