@@ -370,14 +370,25 @@ export const doc = onRequest({}, async (req, res) => {
     case 'DELETE':
       if (doc.exists && access === ALL) {
         try {
+          const deleted = doc.data() as Record<string, unknown>
           await ref.delete()
+          // A delete mutates the collection exactly as a write does, so it must
+          // invalidate the same caches. Omitting this was the original bug's twin:
+          // edits were fixed while deleting a post still served it for up to 24h.
+          if (config.afterWrite) {
+            try {
+              await config.afterWrite(deleted, userRoles)
+            } catch (e) {
+              functions.logger.warn(`afterWrite failed for ${path}:`, e)
+            }
+          }
           res.status(200).send('')
         } catch (e) {
           functions.logger.error(`Error deleting ${path}:`, e)
           res.status(500).send('Delete failed')
         }
       } else {
-        res.status(403).send(`no doc at ${path}`)
+        res.status(opaqueStatus(userRoles, 403)).send(`no doc at ${path}`)
       }
       break
     case 'POST':

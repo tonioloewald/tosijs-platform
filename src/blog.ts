@@ -923,6 +923,31 @@ export class XinPostEditor extends Component<PostEditorParts> {
   // from before + revised + resolved, which side of each hunk the reviewer chose).
   #proofBefore = ''
   #proofRevised = ''
+  /**
+   * True while the proofreading diff is open for review.
+   *
+   * This is a DATA-LOSS guard, not cosmetics. While the diff is open,
+   * `source.value` holds the model's full revision (that is what the overlay
+   * diffs against `source.original`), and the reviewer's decisions are not
+   * applied until Apply. The overlay renders inside `<tosi-code>`'s shadow root
+   * and covers only the EDITOR — the tab strip and the editor menu stay live —
+   * so every action that reads `source.value` and persists it would silently
+   * commit the un-reviewed rewrite over the author's text, with a success toast.
+   * Re-running Proofread would additionally overwrite `#proofBefore`, making the
+   * author's original unrecoverable.
+   */
+  #proofOpen = false
+
+  /** Refuse an action that would persist or destroy un-reviewed proofread text. */
+  #blockedByProofread = (what: string): boolean => {
+    if (!this.#proofOpen) return false
+    postNotification({
+      type: 'warn',
+      message: `Finish reviewing the proofreading suggestions first (Apply or Cancel) before ${what}.`,
+      duration: 4,
+    })
+    return true
+  }
 
   connectedCallback() {
     super.connectedCallback()
@@ -1060,6 +1085,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   }
 
   closeEditor = () => {
+    if (this.#blockedByProofread('closing the editor')) return
     const { source } = this.parts
     blog.editorPost.content.value = source.value
 
@@ -1071,6 +1097,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   }
 
   savePost = async () => {
+    if (this.#blockedByProofread('saving')) return
     const { source } = this.parts
     blog.editorPost.content.value = source.value
     this.updateContent()
@@ -1155,6 +1182,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   }
 
   proofread = async () => {
+    if (this.#blockedByProofread('starting another proofread')) return
     const { source } = this.parts
     const md = this.fullPostMarkdown()
     const close = postNotification({
@@ -1220,6 +1248,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
     source.diffModifiedLabel = 'Proofread'
     source.value = revised
     source.showDiff(true)
+    this.#proofOpen = true
     this.parts.proofBar.style.display = 'flex'
   }
 
@@ -1231,6 +1260,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   applyProofread = () => {
     const source = this.parts.source
     source.showDiff(false)
+    this.#proofOpen = false
     this.parts.proofBar.style.display = 'none'
     const after = source.value
     blog.editorPost.content.value = after
@@ -1260,6 +1290,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
     source.showDiff(false)
     source.value = this.#proofBefore
     blog.editorPost.content.value = this.#proofBefore
+    this.#proofOpen = false
     this.parts.proofBar.style.display = 'none'
   }
 
@@ -1288,6 +1319,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   }
 
   summarize = async () => {
+    if (this.#blockedByProofread('generating a summary')) return
     const content = this.parts.source.value
     const close = postNotification({
       message: 'Summarizing…',
@@ -1301,6 +1333,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   }
 
   convertToMarkdown = async () => {
+    if (this.#blockedByProofread('converting to markdown')) return
     this.parts.source.value = await this.parts.preview.getMarkdown()
     this.parts.tabSelector.value = 0
   }
