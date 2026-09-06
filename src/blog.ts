@@ -9,6 +9,7 @@ import {
   tosiValue,
   PartsMap,
 } from 'tosijs'
+import { isPublished, UNPUBLISHED_DATE } from '../functions/shared/post'
 import {
   formatBlogDate,
   slugify,
@@ -139,8 +140,8 @@ export const { blog } = tosi({
       }
       const visible =
         blog.indexVisible.valueOf() === 'published'
-          ? (ref: { date?: any }) => !!ref.date
-          : (ref: { date?: any }) => !ref.date
+          ? (ref: { date?: any }) => isPublished(ref)
+          : (ref: { date?: any }) => !isPublished(ref)
       if (blog.filterText) {
         const needle = blog.filterText.toLocaleLowerCase()
         blog.filtered.value = blog.index.value
@@ -1057,7 +1058,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
   }
 
   unpublish = () => {
-    blog.editorPost.date!.value = ''
+    blog.editorPost.date!.value = UNPUBLISHED_DATE
   }
 
   proofread = async () => {

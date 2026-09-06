@@ -21,3 +21,32 @@ export const emptyPost: Post = {
   title: '',
   content: '',
 }
+
+/**
+ * The single definition of "published", shared by the client and the server.
+ *
+ * A post is published iff it carries a NON-EMPTY date. This exists because the
+ * two halves disagreed and the disagreement was a live data leak: the client's
+ * `unpublish()` writes `date = ''`, while the server's list guard tested
+ * `date !== undefined` — and `'' !== undefined` is true, so every post
+ * unpublished through the UI sailed straight past the guard meant to hide it.
+ * 57 of 849 production posts were in that state.
+ *
+ * Three things mean "empty" in this codebase and code keeps picking one:
+ * `undefined` (field absent), `''` (what `unpublish()` writes), and a *boxed
+ * tosijs proxy scalar* — which is an object, and therefore truthy even when the
+ * underlying string is empty. `String(value ?? '').trim()` collapses all three,
+ * which is why the coercion is here rather than at each call site.
+ *
+ * Deliberately NOT a parseability check: a mistyped date should render oddly
+ * (see `formatBlogDate`), not silently unpublish a live post. Visibility and
+ * display are different questions.
+ */
+export const UNPUBLISHED_DATE = ''
+
+export function isPublished(
+  post: { date?: unknown } | null | undefined
+): boolean {
+  if (post === null || post === undefined) return false
+  return String(post.date ?? '').trim() !== ''
+}

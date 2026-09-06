@@ -10,7 +10,7 @@ import { Response } from 'express'
 
 import { onPrefetch, PageOptions, PrefetchData } from './prefetch'
 import { currentPage } from './page'
-import { PostSchema } from '../shared/post'
+import { PostSchema, isPublished } from '../shared/post'
 
 interface BlogConfig {
   prefix: string
@@ -183,8 +183,12 @@ COLLECTIONS.post = {
   access: {
     [ROLES.public]: {
       read: ALL,
+      // Uses the SHARED isPublished so the server's notion of "published"
+      // cannot drift from the client's `unpublish()`. It did: this guard tested
+      // `date !== undefined` while unpublish() writes `''`, so all 57
+      // unpublished posts in production were being listed to the public.
       list: (data: any) =>
-        data.date !== undefined ? data : new Error('unpublished'),
+        isPublished(data) ? data : new Error('unpublished'),
     },
     [ROLES.author]: {
       write: ALL,
