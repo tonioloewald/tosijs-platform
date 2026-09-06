@@ -112,6 +112,127 @@ invest in it. The ajs/security design is grounded on **tjs-lang 0.13.1** and is 
 - [ ] **Enumerate-then-map the blog** — inventory `blog.ts` + editors, map each feature to
   {web component | rules+proc | missing tosijs-ui primitive}. No silent third bucket.
 
+## Pre-release review follow-ups (2026-09-06)
+
+From [`reviews/2026-09-06-backend-consolidation.md`](reviews/2026-09-06-backend-consolidation.md)
+(verdict BLOCK; all 3 blockers fixed in `5583196` and deployed). 25 follow-ups + 5 completeness
+gaps, ordered by *danger*, not by lens. Upstream items are in [UPSTREAM.md](UPSTREAM.md); process
+items were written back to `tosijs-coding-practices`.
+
+**P0 — dangerous, in code we were about to schedule or already ship**
+
+- [ ] **F15 — backup prune deletes by filename pattern with no ownership check.**
+  `scripts/backup-firestore.js`. `readdirSync` → filter `/^\d{4}-\d{2}-\d{2}T/` →
+  `rmSync(recursive, force)` with no `isDirectory()`, no manifest check, no project match; the
+  default root is a constant, so two projects sharing it prune each other. Reproduced in the review
+  deleting a foreign directory *and* a foreign PDF. Namespace the root by project id; require a
+  readable `manifest.json` whose `project` matches before deleting.
+- [ ] **F17 — backups write the admin-only `role` collection world-readable.** Verified on disk:
+  `role/*.json` is `-rw-r--r--` with populated `contacts` (email/phone/address). Server-side
+  encrypted-at-rest becomes laptop-local plaintext, 30 snapshots deep, Time-Machined. Use
+  `{mode: 0o700}` / `{mode: 0o600}`; make `role` opt-in.
+- [ ] **F16 — `--quiet` silences the only record of deletions, in the one config that deletes.**
+  The plist runs `--quiet --keep 30`; `log()` is a no-op under `--quiet` and prune lines are the
+  sole trace anywhere. Route prune output through `console.error` unconditionally; record `keep`
+  and pruned names in the manifest.
+- [ ] **F19 — there is no restore path.** The backup tags Firestore natives
+  (`timestamp`/`bytes`/`reference`/`geopoint`) and nothing decodes them. A backup never
+  demonstrated to restore is not a backup. Write `scripts/restore-firestore.js` (through `/doc`,
+  so validation/provenance/RBAC still apply) and a round-trip test.
+- [ ] **F18 — don't ship a personal LaunchAgent in a clone template.**
+  `scripts/com.loewald.tosijs-backup.plist` hardcodes one developer's paths and claims the global
+  label `com.loewald.tosijs-backup`; `create-tosijs-platform-app` clones the repo verbatim. Generate
+  it (`bun run backup:install`) from `cwd`/`homedir`/`which bun`, label from the `.firebaserc`
+  project id; add `backup:uninstall`.
+
+**P1 — a shipped claim is false, and it fails open**
+
+- [ ] **F3 / U2 — "pure predicates are unaffected by tjs-lang#52" is WRONG.** Reproduced on 0.13.11:
+  `Eval({code:'return doc.published', context:{doc:{published:false}}})` returns the *string*
+  `'doc.published'` (truthy) with no error; same for `const p = doc.published; return p`. Upstream
+  `rules.tjs` ends `allowed: !!result`, so a corrupted rule **grants access**. This claim is cited
+  as the basis of a shipped decision in `ROADMAP.md`, `TODO.md` and `write-pipeline.ts`. Correct all
+  three, add a RELIED-ON case asserting a bare dot-path predicate is not silently truthy, and
+  promote the `isWriteAllowed` non-boolean→false invariant out of `test.todo`. Upstream half is U2.
+
+**P2 — tests that cannot see the thing they claim to cover**
+
+- [ ] **F2 — add tests that fail if the shipped backend changes are deleted.** Mutation testing
+  showed deleting the whole `afterWrite` block and reverting the opaque LIST status left the suite
+  byte-identically green. *(Partly done: `blockers.test.ts` now covers `afterWrite`-on-DELETE and
+  is mutation-verified. Still missing: the opaque-LIST wiring, and a real endpoint harness — no
+  test imports `./doc` or `./docs`.)*
+- [ ] **F11 — cover `src/blog.ts`'s pure logic.** `inferResolutions`, `computeProofNotes` are pure
+  and untested; `inferResolutions` silently picks a side when both fit, which mis-attributes the
+  author's prose. There is no `src/*.test.ts` at all — and B1 (data loss) shipped from this file.
+- [ ] **F1 — enforce or fail-closed the write-side access config.** `AccessConfig.write` is typed
+  and documented as `ALL | FieldAccessMap | AccessFilterFunc`, but the write branch only tests it
+  for truthiness — a field map or ownership predicate grants unrestricted write to every field.
+  Latent only because all five shipped configs use `write: ALL`. Either apply the strainer, or
+  reject non-`ALL` write configs at registration.
+- [ ] **F5 — three raw 403s remain in `doc.ts`** (`:333`, `:398`, `:400`) leaking existence via
+  "document X already exists" / "cannot update non-existent document X". *(1 of 5 done — the DELETE
+  branch.)* Add a table-driven test over the endpoint's denial branches, since `opacity.test.ts`
+  imports only `./access` and structurally cannot notice.
+
+**P3 — shadow mode / pipeline hygiene (nothing ships on it yet)**
+
+- [ ] **F7 — `SHADOW_WRITE_PIPELINE` has no operational half**: no `.env`, no `firebase.json` env,
+  no deploy flag, no docs. Meanwhile the *tested* copy is the one that doesn't ship. Document how to
+  enable it on deployed v2 functions, or record the twin as carried-unverified.
+- [ ] **F8 — the shadow pass is `await`ed after `res.send()`**, so on Cloud Run gen2 it holds a
+  billed concurrency slot; the comment claims it "can neither slow nor alter the request". Either
+  `void` it or correct the comment.
+- [ ] **F9 — shadow shares nested references with the live write** (`{...req.body.data}` twice), so
+  a transform mutating a nested value makes the shadow re-derive from mutated input and report a
+  false match. `structuredClone` both captures. Also: it runs `validate` twice per write.
+- [ ] **F10 — `COLLECTIONS.test.validate` sets `Math.random()`**, guaranteeing a permanent shadow
+  MISMATCH. Moot now that B3 gates the collection to emulators, but re-check if it returns.
+- [ ] **F12 — document `isUnique` as partial application** at the cutover site; a reviewer read the
+  2-arg form as dropping self-exclusion and predicted every re-save would fail.
+- [ ] **F4 — soften or close the blog-cache repopulate race.** `onPrefetch` unconditionally
+  `setRecord`s after a rebuild, so a rebuild straddling the commit still replaces the `cleared`
+  marker with pre-write posts stamped fresh. The `cleared` field is written but **never read**.
+  Make it a CAS inside a transaction, or downgrade the "closes the window" comment to "narrows".
+
+**P4 — packaging, drift, hygiene**
+
+- [ ] **F13 — declare `tjs-lang` in `functions/package.json`** and pin it EXACTLY: the baseline test
+  holds deliberate tripwires asserting tjs-lang#52 is still broken, so a caret flips the suite red
+  unpredictably. It currently resolves only by walking up to the root `node_modules`; a clean
+  `npm ci` in `functions/` leaves the suite unrunnable.
+- [ ] **F14 — reconcile tjs-lang version drift**: code pins `^0.13.11`, `ROADMAP.md`/`CLAUDE.md`
+  still say 0.13.1.
+- [ ] **F20 — two decoders, already drifted.** REST tags `geopoint`/`reference`; the admin path
+  handles only `toDate()`/`Buffer` — so a `GeoPoint` or `DocumentReference` backs up differently
+  depending on the operator's credentials. Converge on one shape + a fixture test per scalar type.
+- [ ] **F21 — the backup's collection list is a second, silently-drifting registry.** A new content
+  type drops out of backups with no signal; the empty-guard only fires at zero *total* docs.
+- [ ] **F22 — `--collection X` writes a normally-named partial snapshot** that occupies a retention
+  slot, so debug runs can prune complete snapshots. Name partial runs distinctly.
+- [ ] **F23 — the LaunchAgent's log dir may not exist at first run**, discarding the very
+  credential error its own Notes tell you to look for. (Subsumed by F18.)
+- [ ] **F6 — coalesce proofread annotation repositioning into one rAF pass.** O(N²) forced layouts
+  on Apply (~820 for 40 notes) and an unthrottled O(N) pass per keystroke thereafter. Admin-only,
+  cosmetic. Add `disconnectedCallback` cleanup.
+- [ ] **F24 — print a bundle-size delta** against a committed baseline (measured +1,150 B this
+  diff; the gap is the missing measurement).
+- [ ] **F25 — drop the unused `@codemirror/lint` dependency** — it invites the next contributor to
+  import `@codemirror/*` and re-hit the duplicate-instance breakage. See U1.
+
+**Completeness gaps (from the same review)**
+
+- [ ] **G1 — there is no release to cut.** Zero git tags; `package.json` reads `1.0.6` at both ends
+  of the reviewed range. Decide the version, bump, tag — or stop calling it a release review.
+- [ ] **G2 — the integration suite has never actually run.** 12 cases print `[SKIPPED]` while the
+  suite reports pass. Every write-path change this cycle went un-exercised end-to-end. Run it
+  against emulators before tagging and record that it executed.
+- [ ] **G3 — the `/docs` 403→404 change is an unversioned public-API contract change** with
+  `docs/FIRESTORE_API.md` untouched and no external-consumer inventory.
+- [ ] **G4 — three dependency bumps validated no further than "it compiles"** (`tjs-lang`
+  0.12→0.13.11 carrying a known open bug, `tosijs` 1.8.2, `tosijs-ui` 1.12.8).
+- [ ] **G5 — no CHANGELOG.md** (Tier 0 failure), and published `1.0.6` has no tag naming it.
+
 ## Outstanding Work
 
 ### Testing & Quality
