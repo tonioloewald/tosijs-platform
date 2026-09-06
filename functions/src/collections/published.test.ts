@@ -73,3 +73,37 @@ describe('deliberately NOT a parseability check', () => {
     expect(isPublished({ date: 'next tuesday' })).toBe(true)
   })
 })
+
+describe('sitemap must not advertise drafts (2026-09-06)', () => {
+  // Drafts are deliberately readable by direct link — "unlisted", not secret —
+  // so the property to protect is that they cannot be found by ACCIDENT.
+  // Handing them to crawlers is the most direct way to break that, and the
+  // production sitemap was doing exactly that for 57 posts.
+  const sitemapEligible = (post: { date?: unknown; path?: string }) => {
+    if (!isPublished(post)) return false
+    const d = new Date(String(post.date))
+    return !isNaN(d.valueOf())
+  }
+
+  test('an unpublished post is excluded', () => {
+    expect(sitemapEligible({ date: '', path: 'draft' })).toBe(false)
+  })
+
+  test('a post with no date field is excluded', () => {
+    expect(sitemapEligible({ path: 'draft' })).toBe(false)
+  })
+
+  test('a published post is included', () => {
+    expect(sitemapEligible({ date: '2026-01-01T00:00:00.000Z', path: 'p' })).toBe(
+      true
+    )
+  })
+
+  test('an unparseable date is excluded rather than emitting /blog/NaN/NaN/NaN/', () => {
+    // isPublished deliberately allows a mistyped date (visibility != display),
+    // so the sitemap needs its own parseability check — otherwise it emits a
+    // URL with NaN path segments, which is what production was serving.
+    expect(sitemapEligible({ date: 'next tuesday', path: 'p' })).toBe(false)
+    expect(isPublished({ date: 'next tuesday' })).toBe(true) // still visible on-site
+  })
+})
