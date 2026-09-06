@@ -364,17 +364,29 @@ not ours to design. Two consequences we should stop working around:
   *through the API*. It is not, and cannot be, a defence against someone holding project-level
   Firestore access. State that scope plainly rather than implying more.
 
-**Layer 1 — inside the system.** Roles: `owner` > `super` > `developer` > `admin` > `editor` >
-`author` > `public`.
+**Layer 1 — inside the system.** *`owner` is `developer` with special powers, and `super` is
+`developer`* (Tonio, 2026-09-06). The point is that **no new capability tier is being created**:
+`developer` is already effectively total access, because it holds write on `module` and modules are
+served as executable JavaScript through `/esm`. There is nothing functional left to grant above it.
+`super` and `owner` add **authority over the rules**, not power over the site.
 
-- `owner` and `super` have **total access**, including writing `role` and `config`.
-- **Neither may assign or remove `owner` or `super`.** A `super` can grant `admin`/`editor`/`author`
-  freely; it cannot mint another `super`, remove one, or touch `owner`.
-- **Only `owner`** adds/removes `super` and transfers `owner`.
+| role | capability | authority over the rules |
+|---|---|---|
+| `developer` | total (module write ⇒ arbitrary JS) | none |
+| `super` | same as `developer` | may write `role` and `config` |
+| `owner` | same as `developer` | everything `super` has, **plus** exclusively adding/removing `super` and transferring `owner` |
+
+Neither `super` nor `owner` may assign or remove `owner`/`super` — that is `owner`-only. A `super`
+grants `admin`/`editor`/`author` freely and cannot mint a peer.
+
+**The change that actually closes the hole: `admin` loses `role` write.** Today `role.ts` grants
+`ROLES.admin` `write: ALL`, and that single line is the whole escalation chain — admin writes
+`role`, grants itself `developer`, and developer is arbitrary JS on loewald.com. Moving `role` write
+to `super`/`owner` severs it at the first step, and the monotonicity invariant then prevents
+`super` from re-opening it at the second.
 
 The property that breaks the circularity is **monotonicity: no write may increase the writer's own
-authority.** The data stays inside the system; the *transitions* are constrained. That is both
-simpler and more practical than relocating the data.
+authority.** The data stays inside the system; the *transitions* are constrained.
 
 **Why this needs `isWriteAllowed` (§4.2), and is its first load-bearing requirement.** The current
 model is *collection × method × fields*. This rule is about **values** and needs **before-and-after**
