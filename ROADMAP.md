@@ -346,6 +346,45 @@ one.
   the gate verifies logic, not integration — so capability mocks are part of the trusted surface and
   should be supplied by the platform, not the procedure author.
 
+### The access lattice: split `AccessFilterFunc` into a boolean and a schema
+
+*Settled with Tonio, 2026-09-06 — makes §178's "read authorization resolved" concrete.*
+
+`AccessFilterFunc` (`(data, userRoles) => Promise<Error | any>`) currently conflates two unrelated
+jobs, which is why role combination had no well-defined join. **Audit of every use in the repo:**
+
+- **Row visibility** (returns the document *unchanged*, or an `Error`): `module.read`, `module.list`,
+  `page.read`, `page.list`, `blog.list` — five of six, and **all production uses**. These are
+  booleans wearing a costume; returning the data is ceremony.
+- **Projection/transform**: only `collections/index.ts`, the demo fixture — which additionally
+  *adds* a field (`data.dynamic = …`), so it is a read-time transform, not a projection. That
+  collection is now emulator-only (B3).
+
+So splitting the type costs almost nothing: replace the one demo projection with a schema and every
+remaining use is already a predicate.
+
+**The resulting lattice** (Tonio: *"if it says the user is true it's true; if it's a schema it's a
+union; true replaces any schema"*):
+
+| axis | value | join across a user's roles | top |
+|---|---|---|---|
+| row visibility | `boolean` | **OR** — any role granting visibility wins | `true` |
+| field projection | schema | **union** of properties | `ALL` |
+
+`ALL` is the top element, so `join(ALL, anything) = ALL`. Both axes join independently and
+deterministically — which **replaces the current accidental rule**, where precedence is decided by
+object-key order in each collection's `access` literal and a later entry *replaces* an earlier one
+(so holding more roles can grant less; demonstrated 2026-09-06).
+
+**Consequence to fix alongside it:** visibility predicates run **per row, after the query limit** —
+`getRecords` applies `.limit(n)` and the access filter then drops rows, so a request for 10
+published posts can return 3 while 50 exist. §178 already prefers pushing visibility into the query;
+this is the concrete reason rather than an optimisation.
+
+**Open:** schema union is clean over *properties*, but schemas also carry *constraints*
+(`min`/`max`/`pattern`). "Most permissive" would let a second role widen a constraint the first
+imposed — fine for read projections, a real authorization decision for write schemas.
+
 ### Meta-authority: the real root is the datastore, not anything we build
 
 *Settled with Tonio, 2026-09-06.*
