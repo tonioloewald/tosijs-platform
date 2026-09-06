@@ -364,6 +364,18 @@ not ours to design. Two consequences we should stop working around:
   *through the API*. It is not, and cannot be, a defence against someone holding project-level
   Firestore access. State that scope plainly rather than implying more.
 
+**`owner` is the in-system reflection of Layer 0** (original intent, confirmed 2026-09-06): it
+denotes *the person who holds the Firestore account*, not an authority invented in the data model.
+That is what makes the rest coherent — the bootstrap is self-consistent (you can only seed an owner
+if you already hold the credentials that make you one), and "owner transfers owner" is tracking a
+real-world fact rather than conferring a new power. Giving `owner` total in-system authority costs
+nothing, because that person can bypass the system entirely anyway.
+
+**So the intended invariant is `owner` ⇔ datastore access, and the current defect is that the
+mirror can be forged from the inside.** An admin writes `role`, grants itself `owner`, and now holds
+the in-system equivalent of Firestore access *without holding the Firestore account*. Read that way
+the fix below is not tidying — it restores the property the design always assumed.
+
 **Layer 1 — inside the system.** *`owner` is `developer` with special powers, and `super` is
 `developer`* (Tonio, 2026-09-06). The point is that **no new capability tier is being created**:
 `developer` is already effectively total access, because it holds write on `module` and modules are
