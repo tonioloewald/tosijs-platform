@@ -370,17 +370,15 @@ describe('getMethodAccess — multi-role precedence', () => {
     )
   })
 
-  test('author-only write yields a field-limited filter function, not ALL', async () => {
+  // CHANGED 2026-09-06 (review F1). This used to assert that an author-only
+  // write field map yields a strainer function. That was true of the HELPER and
+  // false of the SYSTEM: `doc.ts`'s write branch only tests the result for
+  // truthiness, so the strainer was built and then ignored — the config read as a
+  // restriction and behaved as unrestricted write. This test passing is precisely
+  // why the gap "looked covered". Non-ALL write configs now fail closed.
+  test('author-only write DENIES, because the write path cannot enforce a field map', () => {
     const user = createUserRoles([ROLES.author])
-    const access = getMethodAccess(collections, 'articles', 'POST', user)
-    expect(typeof access).toBe('function')
-    if (typeof access === 'function') {
-      const filtered = await access(
-        { _path: 'articles/1', title: 'T', body: 'B', secret: 'x' },
-        user
-      )
-      expect(filtered).toEqual({ _path: 'articles/1', title: 'T', body: 'B' })
-    }
+    expect(getMethodAccess(collections, 'articles', 'POST', user)).toBeUndefined()
   })
 
   test('a matching role that omits the access type does not clear inherited public access', () => {
@@ -438,17 +436,11 @@ describe('getMethodAccess — write-side field maps', () => {
     },
   }
 
-  test('a write FieldAccessMap strips fields outside the map', async () => {
-    const access = getMethodAccess(collections, 'posts', 'PATCH', authorUser)
-    expect(typeof access).toBe('function')
-    if (typeof access === 'function') {
-      const filtered = await access(
-        { _path: 'posts/1', title: 'T', body: 'B', ownerId: 'evil' },
-        authorUser
-      )
-      // ownerId is dropped; only whitelisted fields (plus _path) survive.
-      expect(filtered).toEqual({ _path: 'posts/1', title: 'T', body: 'B' })
-    }
+  // CHANGED 2026-09-06 (review F1) — see the note above. A write field map is
+  // now DENIED rather than strained, because straining a write would silently
+  // drop fields the author submitted, and the write path never applied it anyway.
+  test('a write FieldAccessMap denies rather than silently granting write-everything', () => {
+    expect(getMethodAccess(collections, 'posts', 'PATCH', authorUser)).toBeUndefined()
   })
 
   test('admin write ALL bypasses the field map', () => {

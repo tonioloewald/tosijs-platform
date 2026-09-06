@@ -132,6 +132,7 @@ COLLECTIONS['post/comment'] = {
 
 */
 
+import * as functions from 'firebase-functions'
 import { ROLES, UserRoles } from './roles'
 import type { Base } from 'tosijs-schema'
 
@@ -150,6 +151,19 @@ export type AccessFilterFunc = (
 
 export interface AccessConfig {
   read?: typeof ALL | FieldAccessMap | AccessFilterFunc
+  /**
+   * WRITE ONLY SUPPORTS `ALL` TODAY.
+   *
+   * The union is wider than the enforcement: `doc.ts`'s write branch tests this
+   * for truthiness only, so a field map or predicate here reads as a restriction
+   * and behaves as unrestricted write (review F1). `getMethodAccess` therefore
+   * DENIES any non-`ALL` write config and logs an error, rather than
+   * approximating a restriction it cannot honour.
+   *
+   * To restrict what a role may write, use `write: ALL` plus a `validate`
+   * transform that rejects or normalises the fields in question — that path is
+   * enforced and tested.
+   */
   write?: typeof ALL | FieldAccessMap | AccessFilterFunc
   list?: typeof ALL | FieldAccessMap | AccessFilterFunc
 }
@@ -251,6 +265,29 @@ export const getMethodAccess = (
         access = roleAccess[accessType]
       }
     }
+  }
+
+  // FAIL CLOSED on a write restriction we do not actually enforce (review F1).
+  //
+  // `AccessConfig.write` is typed and documented as `ALL | FieldAccessMap |
+  // AccessFilterFunc`, and this function faithfully builds a strainer for the
+  // non-ALL forms — but `doc.ts`'s write branch only tests the result for
+  // truthiness and never applies it. So `write: { title: ALL }` read as a
+  // restriction and behaved as unrestricted write to every field. Latent today
+  // only because every shipped config uses `write: ALL`.
+  //
+  // Denying is the right resolution rather than implementing the strainer: a
+  // write-side field filter would have to SILENTLY DROP fields the author
+  // submitted, which is the data-loss shape this codebase keeps finding. A
+  // restriction we cannot honour must refuse the write, loudly, not approximate it.
+  if (accessType === 'write' && access !== undefined && access !== ALL) {
+    functions.logger.error(
+      `access config for "${collectionPath}" restricts write access with a ` +
+        'field map or predicate, which the write path does not enforce. ' +
+        'Denying the write. Use `write: ALL` plus a `validate` transform, or ' +
+        'implement enforcement in doc.ts before configuring this.'
+    )
+    return undefined
   }
 
   if (filterFields) {

@@ -158,7 +158,7 @@ items were written back to `tosijs-coding-practices`.
   three, add a RELIED-ON case asserting a bare dot-path predicate is not silently truthy, and
   promote the `isWriteAllowed` non-boolean→false invariant out of `test.todo`. Upstream half is U2.
 
-**P2 — tests that cannot see the thing they claim to cover**
+**P2 — tests that cannot see the thing they claim to cover** — ✅ DONE
 
 - [ ] **F2 — add tests that fail if the shipped backend changes are deleted.** Mutation testing
   showed deleting the whole `afterWrite` block and reverting the opaque LIST status left the suite

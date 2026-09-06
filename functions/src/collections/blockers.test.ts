@@ -105,3 +105,57 @@ describe('B2: afterWrite is wired into DELETE, not just write', () => {
     expect(deleteBranch).toContain('afterWrite failed')
   })
 })
+
+// ── F1 — an unenforced write restriction must DENY, not silently allow ──────
+describe('F1: non-ALL write configs fail closed', () => {
+  const admin = {
+    name: 'a',
+    contacts: [],
+    roles: [ROLES.admin],
+    userIds: ['u1'],
+  } as unknown as UserRoles
+
+  const withWrite = (write: unknown) =>
+    ({
+      test1: { access: { [ROLES.admin]: { write } } },
+    }) as unknown as Parameters<typeof getMethodAccess>[0]
+
+  test('write: ALL is permitted (the only supported form)', () => {
+    expect(
+      getMethodAccess(withWrite(ALL), 'test1', 'PUT', admin, false)
+    ).toBe(ALL)
+  })
+
+  test('a FIELD MAP write config denies instead of granting unrestricted write', () => {
+    // The bug: doc.ts tested this for truthiness only, so a field map read as a
+    // restriction and behaved as write-everything.
+    expect(
+      getMethodAccess(withWrite({ title: ALL }), 'test1', 'PUT', admin, false)
+    ).toBeUndefined()
+  })
+
+  test('a PREDICATE write config denies too', () => {
+    const pred = async (d: unknown) => d
+    expect(
+      getMethodAccess(withWrite(pred), 'test1', 'PUT', admin, false)
+    ).toBeUndefined()
+  })
+
+  test('every write-mapped verb is covered, not just PUT', () => {
+    for (const m of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+      expect(
+        getMethodAccess(withWrite({ title: ALL }), 'test1', m, admin, false)
+      ).toBeUndefined()
+    }
+  })
+
+  test('READ and LIST still support field maps — only write is restricted', () => {
+    const cfg = {
+      test1: { access: { [ROLES.admin]: { read: { title: ALL } } } },
+    } as unknown as Parameters<typeof getMethodAccess>[0]
+    // a field map on read becomes a strainer function, as documented
+    expect(typeof getMethodAccess(cfg, 'test1', 'GET', admin, false)).toBe(
+      'function'
+    )
+  })
+})
