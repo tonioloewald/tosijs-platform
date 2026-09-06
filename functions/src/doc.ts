@@ -410,8 +410,16 @@ export const doc = onRequest({}, async (req, res) => {
         >
         // Keep the caller's body as sent, so shadow mode can re-derive the write
         // from the same inputs this handler started from (it is mutated below).
+        // F9: structuredClone, not a shallow spread. `data` below is built from
+        // the same `req.body.data`, so a shallow copy shares every nested object
+        // with the live write — a transform mutating a nested value would make
+        // the shadow re-derive from POST-mutation input and report a false match,
+        // which is the one thing a shadow must never do.
         const shadowBody = shadowEnabled()
-          ? ({ ...req.body.data } as Record<string, unknown>)
+          ? (structuredClone(req.body.data) as Record<string, unknown>)
+          : undefined
+        const shadowExisting = shadowEnabled()
+          ? (structuredClone(existing) as Record<string, unknown>)
           : undefined
         const _modified = new Date().toJSON()
         const _created = (existing._created as string) || _modified
@@ -479,16 +487,24 @@ export const doc = onRequest({}, async (req, res) => {
           // extracted pipeline and log any divergence. Runs AFTER the response is
           // sent and commits nothing, so it can neither slow nor alter the request.
           // Off unless SHADOW_WRITE_PIPELINE=1.
-          if (shadowBody !== undefined) {
-            await shadowCompareWrite({
+          // F8: deliberately NOT awaited. The response is already sent, but on
+          // Cloud Run gen2 an awaited promise keeps the invocation billed and
+          // holding a concurrency slot under post-response CPU throttling — so
+          // "cannot slow the request" was true of latency and false of cost.
+          // shadowCompareWrite swallows its own errors; .catch is belt-and-braces
+          // so an unhandled rejection can never crash the instance.
+          if (shadowBody !== undefined && shadowExisting !== undefined) {
+            void shadowCompareWrite({
               path,
               method: req.method as 'POST' | 'PUT' | 'PATCH',
               body: shadowBody,
-              existing,
+              existing: shadowExisting,
               config,
               userRoles,
-              actual: data,
+              actual: structuredClone(data) as Record<string, unknown>,
               now: _modified,
+            }).catch(() => {
+              /* diagnostics must never affect the request */
             })
           }
         } catch (e) {

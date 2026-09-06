@@ -16,6 +16,15 @@ COLLECTIONS.module = {
       data.revisions = 0
     } else if (existing.source !== data.source) {
       data.revisions = (existing.revisions ?? 0) + 1
+    } else {
+      // CARRY IT FORWARD. `revisions` is endpoint-managed provenance that the
+      // caller does not send, and PUT REPLACES the document — so leaving this
+      // branch unassigned dropped the field entirely and reset the revision
+      // history to nothing. Editing a module's `name` or `tags` (anything but
+      // `source`) silently erased how many times it had been revised.
+      // Found 2026-09-06 by the shadow-parity integration run, which is the
+      // first time a module was written through the endpoint by a test.
+      data.revisions = existing.revisions ?? 0
     }
 
     return data

@@ -211,6 +211,28 @@ capabilities) against 0.13.11's `SafeCapabilities` + `maxSourceBytes`.
     requires "non-boolean return evaluates as false"; upstream simply does not honour it). The
     decision to take (a) still stands — transforms are corrupted more broadly and more silently —
     but it no longer rests on predicates being safe.
+- **Phase 1 rung 1 — drop-in `doc`/`docs` parity. ✅ SHADOW PARITY VERIFIED 2026-09-06.**
+  The write pipeline is extracted (`collections/write-pipeline.ts`) and shadow mode
+  (`collections/shadow-compare.ts`) was run against the **live endpoint under emulators**, not
+  just synthetic input. Result over a run covering POST / PUT / PATCH / no-op / rejection /
+  DELETE across `post`, `module` (the revisions transform) and `page` (schema + unique):
+  **14 `[shadow] match`, 3 `[shadow] expected-noop`, 0 `MISMATCH`.** That meets the cutover
+  criterion recorded in `shadow-compare.ts`: zero mismatches, with `expected-noop` the only
+  remaining divergence — and it is the intended §3 behaviour change (an unchanged body should
+  neither write nor re-stamp; `doc.ts` today re-stamps `_modified` every time).
+  - Harness: `collections/shadow-parity.integration.test.ts` (skip-guarded, prints loudly when
+    it skips — a skipped test is not a passing one).
+  - **Running the integration suite for the first time found three real bugs**, all invisible
+    while it was skip-guarded into vacuous passes: `page` could not be written *at all*
+    (`PageSchema` lacked `_created`/`_modified`, which the endpoint stamps *before* strict
+    validation — the same regression fixed for `post` and missed here); `module` could not be
+    *created* (`ModuleSchema` required `revisions`, which only the transform supplies, and
+    validation runs before the transform); and a PUT that did not change `source` **silently
+    destroyed a module's revision count**, because PUT replaces and neither `validate` branch
+    assigned the field.
+  - **Remaining before cutover:** decide whether to adopt the no-op behaviour change (it is an
+    improvement, but it is a change), and extend parity to `config`/`role`.
+
 - **Phase 1 — consolidate the backend.** Bring tjs-lang's reference universal-endpoint / batteries
   here (or eliminate), unify with loewald's stronger RBAC, and collapse the service surface toward
   `/doc` + `/docs` + one universal stored-ajs endpoint. Everything else re-expressed as collection

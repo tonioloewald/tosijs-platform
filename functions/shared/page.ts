@@ -18,6 +18,13 @@ export const PageSchema = s.object({
   type: s.string.optional,
   navSort: s.string.optional,
   icon: s.string.optional,
+  // The /doc endpoint stamps these BEFORE schema validation, and tosijs-schema
+  // is strict about unexpected properties — so without them every page write
+  // failed with "Unexpected _created". Post and Module already had them; page
+  // was missed, and no test caught it because the integration suite had never
+  // actually run (2026-09-06).
+  _created: s.string.optional,
+  _modified: s.string.optional,
 })
 
 export type Page = Infer<typeof PageSchema>

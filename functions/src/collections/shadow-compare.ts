@@ -7,6 +7,30 @@
  * `doc.ts` has already decided, and logs any divergence. It never influences the
  * response, never writes, and never throws into the request path.
  *
+ * ## Enabling it (the operational half — F7)
+ *
+ * Set `SHADOW_WRITE_PIPELINE=1` in the functions runtime environment. For a
+ * deployed v2 function that means `functions/.env` (committed per-project by
+ * Firebase convention) or `--set-env-vars` on the underlying Cloud Run service:
+ *
+ * ```sh
+ * # local, against emulators
+ * SHADOW_WRITE_PIPELINE=1 npx firebase-tools emulators:start --only functions,firestore
+ *
+ * # deployed — redeploy with the var set in functions/.env
+ * echo 'SHADOW_WRITE_PIPELINE=1' >> functions/.env && bun deploy-functions
+ * ```
+ *
+ * Then read the divergence in Cloud Logging:
+ * `resource.type="cloud_run_revision" jsonPayload.message=~"^\[shadow\]"`.
+ * `[shadow] match` is the good line; `MISMATCH` is the one to act on, and
+ * `expected-noop` is the known §3 divergence awaiting cutover.
+ *
+ * **Cutover criteria** (record the outcome in ROADMAP before flipping): zero
+ * `MISMATCH body` and zero `MISMATCH pipeline-rejected` across a representative
+ * sample of real writes covering every registered collection — then the only
+ * remaining difference is `expected-noop`, which is the intended behaviour change.
+ *
  * ## Off by default
  *
  * Enabled only when `SHADOW_WRITE_PIPELINE=1`. A shadow that runs unasked on the

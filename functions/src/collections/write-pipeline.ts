@@ -49,6 +49,21 @@ export interface WritePipelineDeps {
   /**
    * Privileged read for uniqueness (§4.2). Returns true when `value` is free for
    * `field` (or already belongs to the document being written).
+   *
+   * **Document identity is bound by the INJECTOR, not passed here** — this is a
+   * partial application. `doc.ts`'s `isUnique(path, field, value, ref)` needs the
+   * ref to exclude the document being written from its own collision check, and
+   * both `path` and `ref` are request-scoped context the caller already holds. A
+   * reviewer read the 2-arg shape as *dropping* self-exclusion and predicted every
+   * re-save would fail at cutover (F12); it does not, but nothing showed the
+   * intended binding. At the cutover site, wire it exactly like this:
+   *
+   * ```ts
+   * { isUnique: (field, value) => isUnique(path, field, value, ref) }
+   * ```
+   *
+   * An implementation that ignores identity WOULD break every update, so do not
+   * write a fresh one.
    */
   isUnique: (field: string, value: unknown) => Promise<boolean>
 }

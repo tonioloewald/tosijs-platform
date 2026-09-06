@@ -178,20 +178,20 @@ items were written back to `tosijs-coding-practices`.
   branch.)* Add a table-driven test over the endpoint's denial branches, since `opacity.test.ts`
   imports only `./access` and structurally cannot notice.
 
-**P3 — shadow mode / pipeline hygiene (nothing ships on it yet)**
+**P3 — shadow mode / pipeline hygiene** — ✅ DONE (parity verified 2026-09-06; see ROADMAP Phase 1 rung 1)
 
-- [ ] **F7 — `SHADOW_WRITE_PIPELINE` has no operational half**: no `.env`, no `firebase.json` env,
+- [x] **F7 — `SHADOW_WRITE_PIPELINE` has no operational half**: no `.env`, no `firebase.json` env,
   no deploy flag, no docs. Meanwhile the *tested* copy is the one that doesn't ship. Document how to
   enable it on deployed v2 functions, or record the twin as carried-unverified.
-- [ ] **F8 — the shadow pass is `await`ed after `res.send()`**, so on Cloud Run gen2 it holds a
+- [x] **F8 — the shadow pass is `await`ed after `res.send()`**, so on Cloud Run gen2 it holds a
   billed concurrency slot; the comment claims it "can neither slow nor alter the request". Either
   `void` it or correct the comment.
-- [ ] **F9 — shadow shares nested references with the live write** (`{...req.body.data}` twice), so
+- [x] **F9 — shadow shares nested references with the live write** (`{...req.body.data}` twice), so
   a transform mutating a nested value makes the shadow re-derive from mutated input and report a
   false match. `structuredClone` both captures. Also: it runs `validate` twice per write.
-- [ ] **F10 — `COLLECTIONS.test.validate` sets `Math.random()`**, guaranteeing a permanent shadow
+- [x] **F10 — `COLLECTIONS.test.validate` sets `Math.random()`**, guaranteeing a permanent shadow
   MISMATCH. Moot now that B3 gates the collection to emulators, but re-check if it returns.
-- [ ] **F12 — document `isUnique` as partial application** at the cutover site; a reviewer read the
+- [x] **F12 — document `isUnique` as partial application** at the cutover site; a reviewer read the
   2-arg form as dropping self-exclusion and predicted every re-save would fail.
 - [ ] **F4 — soften or close the blog-cache repopulate race.** `onPrefetch` unconditionally
   `setRecord`s after a rebuild, so a rebuild straddling the commit still replaces the `cleared`
@@ -227,7 +227,7 @@ items were written back to `tosijs-coding-practices`.
 
 - [ ] **G1 — there is no release to cut.** Zero git tags; `package.json` reads `1.0.6` at both ends
   of the reviewed range. Decide the version, bump, tag — or stop calling it a release review.
-- [ ] **G2 — the integration suite has never actually run.** 12 cases print `[SKIPPED]` while the
+- [x] **G2 — the integration suite has never actually run.** 12 cases print `[SKIPPED]` while the
   suite reports pass. Every write-path change this cycle went un-exercised end-to-end. Run it
   against emulators before tagging and record that it executed.
 - [ ] **G3 — the `/docs` 403→404 change is an unversioned public-API contract change** with
