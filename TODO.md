@@ -84,9 +84,12 @@ invest in it. The ajs/security design is grounded on **tjs-lang 0.13.1** and is 
   authorization failure, leaking that a protected collection exists, while the internal `getDoc`
   helper already returns an opaque 404 to non-privileged callers. Aligned the handler with the
   `opaqueError`/PRIVILEGED_ROLES design (non-privileged → 404; admin/dev/owner still see 403).
-  Client is unaffected (it only checks `status/100 !== 2`). **Open, related:** the `docs` (LIST)
-  endpoint still returns 403 on denial and its own test expects 403 — decide whether list denials
-  should be opaque too (currently inconsistent with `doc`).
+  Client is unaffected (it only checks `status/100 !== 2`). **Resolved 2026-09-06:** list denials
+  are opaque too. `/docs` returned 403 for the same collection `/doc` hid behind a 404, so listing
+  disclosed the existence reading was careful to conceal — and the repo's own integration tests
+  asserted both, adjacent in one file. `PRIVILEGED_ROLES`/`hasPrivilegedRole`/`opaqueStatus` now
+  live in `collections/access.ts` and are shared, with `opacity.test.ts` pinning the *pair* rather
+  than either endpoint (the defect was them diverging, which per-endpoint tests can't catch).
 - [x] **Fix the broken `filterFields` branch in `getMethodAccess`** — was `delete access.key`
   (deletes a literal `.key`) inside `for (const key in Object.keys(...))` (iterates indices), so a
   role's `FieldAccessMap` was never intersected with the client's requested fields (`docs.ts`
