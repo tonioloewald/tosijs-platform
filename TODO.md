@@ -165,7 +165,7 @@ items were written back to `tosijs-coding-practices`.
   byte-identically green. *(Partly done: `blockers.test.ts` now covers `afterWrite`-on-DELETE and
   is mutation-verified. Still missing: the opaque-LIST wiring, and a real endpoint harness — no
   test imports `./doc` or `./docs`.)*
-- [ ] **F11 — cover `src/blog.ts`'s pure logic.** `inferResolutions`, `computeProofNotes` are pure
+- [x] **F11 — cover `src/blog.ts`'s pure logic.** `inferResolutions`, `computeProofNotes` are pure
   and untested; `inferResolutions` silently picks a side when both fit, which mis-attributes the
   author's prose. There is no `src/*.test.ts` at all — and B1 (data loss) shipped from this file.
 - [ ] **F1 — enforce or fail-closed the write-side access config.** `AccessConfig.write` is typed

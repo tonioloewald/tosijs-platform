@@ -39,16 +39,20 @@
     "initial-deploy": "bun scripts/initial-deploy.js",
     "restore": "bun scripts/restore-firestore.js",
     "backup:install": "bun scripts/backup-install.js",
-    "backup:uninstall": "bun scripts/backup-install.js --uninstall"
+    "backup:uninstall": "bun scripts/backup-install.js --uninstall",
+    "test": "bun test src && cd functions && bun test",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@codemirror/lint": "^6.9.7",
+    "@happy-dom/global-registrator": "^20.14.0",
     "@types/bun": "^1.3.14",
     "@types/marked": "^5.0.2",
     "@types/turndown": "^5.0.6",
     "@types/web": "^0.0.99",
     "bun-types": "canary",
     "chokidar": "^3.6.0",
+    "happy-dom": "^20.14.0",
     "http-server": "^14.1.1",
     "marked": "^16.4.2",
     "prettier": "^2.8.8",
