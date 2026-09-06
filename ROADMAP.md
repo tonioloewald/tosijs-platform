@@ -179,8 +179,9 @@ capabilities) against 0.13.11's `SafeCapabilities` + `maxSourceBytes`.
   lives as a test (`functions/src/collections/tjs-lang.baseline.test.ts`, 12 pass) instead of a
   scratchpad script, so the next re-validation is `bun test`. Results:
   - **Holds:** fuel metering halts a runaway rule; a zero-capability rule cannot reach I/O (fails
-    closed); **pure boolean predicates evaluate correctly** — so the reference rbac rule model is
-    sound on 0.13.11. New in 0.13.x: a `maxSourceBytes` cap refusing oversized source *before*
+    closed); **boolean predicates evaluate correctly *in #52-safe shapes*** (`.includes()`, `===`,
+    `!!`, bracket access, `if`-guards) — so the reference rbac rule model is workable on 0.13.11,
+    **but see the correction below: it is NOT unaffected.** New in 0.13.x: a `maxSourceBytes` cap refusing oversized source *before*
     transpilation (transpiling isn't fuel-metered — a real denial-of-wallet guard for any hosted
     stored-proc endpoint).
   - **Broken upstream ([tjs-lang#52](https://github.com/tonioloewald/tjs-lang/issues/52)), silently:**
@@ -195,8 +196,21 @@ capabilities) against 0.13.11's `SafeCapabilities` + `maxSourceBytes`.
     tjs-lang#52 corrupts, and would corrupt it silently (a `beforeWrite` returning
     `{...data, revisions}` persists `{revisions}` alone — data loss with a plausible payload).
     Option **(a)** — transform/field-strain/provenance/unique stay compiled TCB, ajs rules stay
-    pure predicates — is entirely unaffected. **Take (a)**, and treat (b) as gated on #52 plus a
-    reason better than convenience.
+    pure predicates — is **far less exposed, but not immune** (see the correction). **Take (a)**,
+    and treat (b) as gated on #52 plus a reason better than convenience.
+  - **CORRECTION (2026-09-06, review F3 / [tjs-lang#54](https://github.com/tonioloewald/tjs-lang/issues/54)).**
+    This entry originally said predicates were "entirely unaffected" by #52. **That was wrong, and
+    it fails OPEN.** #52 corrupts predicates too, and upstream's `rules.tjs` ends with
+    `allowed: !!result` — so a rule denying an unpublished document, written the obvious way as
+    `return doc.published`, returns the *string* `'doc.published'`, which is truthy, and the rule
+    **grants access**. Same for `const p = doc.published; return p` and a bare `return published`.
+    Safe shapes: bracket access, `!!`, `===`, `if`-guards, `.includes()` — which is the only reason
+    the original spike's cases passed. Consequences, all now pinned in
+    `tjs-lang.baseline.test.ts` §5–§6: rules we author or accept must use a #52-safe shape, and
+    **our host must interpret a rule result as `result === true`, never `!!result`** (§4.2 already
+    requires "non-boolean return evaluates as false"; upstream simply does not honour it). The
+    decision to take (a) still stands — transforms are corrupted more broadly and more silently —
+    but it no longer rests on predicates being safe.
 - **Phase 1 — consolidate the backend.** Bring tjs-lang's reference universal-endpoint / batteries
   here (or eliminate), unify with loewald's stronger RBAC, and collapse the service surface toward
   `/doc` + `/docs` + one universal stored-ajs endpoint. Everything else re-expressed as collection

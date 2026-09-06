@@ -27,6 +27,12 @@
  * Per ROADMAP Phase 0 (decided 2026-09-05, tjs-lang#52) the *transform* half stays
  * compiled TCB — this file — while ajs rules stay pure boolean predicates. So this
  * is trusted code: it is the thing a silent wrong value would persist.
+ *
+ * NOTE (2026-09-06): "rules stay predicates" is NOT the same as "rules are safe".
+ * tjs-lang#52 corrupts predicates too, and upstream coerces a corrupted result to
+ * a GRANT (tjs-lang#54) — so when the rule half is built, its host must interpret
+ * results as `result === true`, never `!!result`, and rules must avoid bare
+ * dot-path returns. Pinned in `tjs-lang.baseline.test.ts` §5-§6.
  */
 import { validate as schemaValidate } from 'tosijs-schema'
 import type { CollectionConfig } from './access'

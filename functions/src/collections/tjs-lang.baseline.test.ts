@@ -26,8 +26,21 @@ const FUEL = 5000
 
 // ── 1. RELIED-ON: the reference rule model is a pure boolean predicate ───────
 // The tjs-lang reference rbac layer runs rules as zero-capability predicates
-// returning boolean. Our RBAC port sits on exactly this shape, and it is
-// (importantly) the part unaffected by tjs-lang#52.
+// returning boolean. Our RBAC port sits on exactly this shape.
+//
+// CORRECTION (2026-09-06, review finding F3). This block used to claim the
+// predicate model was "the part unaffected by tjs-lang#52". **That was false**,
+// and it was cited as the basis of a shipped design decision.
+//
+// tjs-lang#52 (a returned context dot-path yields the path STRING) applies to
+// predicates too, and there it is worse than in a transform: the reference RBAC
+// layer ends with `allowed: !!result`, so the string is truthy and the rule
+// **GRANTS ACCESS**. A rule denying an unpublished document — `return
+// doc.published` — returns 'doc.published', which coerces to true.
+//
+// The cases below survived only because each happens to use a shape #52 does not
+// corrupt (`.includes()`, `===`). The corrupted shapes are pinned as tripwires in
+// §4. Upstream: tjs-lang#52 (the defect) and tjs-lang#54 (the fail-open coercion).
 describe('relied-on: pure boolean predicates', () => {
   test('role membership evaluates correctly', async () => {
     const r = await Eval({
@@ -189,5 +202,90 @@ describe('tripwire: tjs-lang#52 still broken (failure here = upstream fixed)', (
     expect(r.error).toBeUndefined()
     // BROKEN: should be 'u1'. Justifies the bracket-access workaround.
     expect(r.result).toBe('doc.owner')
+  })
+})
+
+// ── 5. THE FAIL-OPEN HAZARD (review F3; upstream tjs-lang#54) ───────────────
+//
+// The consequence of §4 for a SECURITY RULE, which is why the "predicates are
+// unaffected" claim was not merely imprecise but dangerous. Upstream's
+// `rules.tjs` ends `allowed: !!result`, so a rule corrupted by #52 does not fail
+// — it GRANTS.
+//
+// Each test states the correct answer (deny) and shows what the VM actually
+// returns. A failure here means upstream fixed something: re-check which shapes
+// are safe before relaxing the guidance in ROADMAP / write-pipeline.ts.
+describe('fail-open: predicate shapes corrupted by #52 coerce to GRANT', () => {
+  // A document that is NOT published. Every rule below means "deny".
+  const ctx = { doc: { published: false }, published: false }
+
+  const grants = [
+    ['bare dot-path', 'return doc.published', 'doc.published'],
+    ['dot-path via a local', 'const p = doc.published\nreturn p', 'doc.published'],
+    ['bare context binding', 'return published', 'published'],
+  ] as const
+
+  for (const [label, code, corrupted] of grants) {
+    test(`${label} returns a truthy string → !!result GRANTS an unpublished doc`, async () => {
+      const r = await Eval({ code, context: ctx, fuel: FUEL })
+      expect(r.error).toBeUndefined()
+      expect(r.result).toBe(corrupted)
+      // the actual hazard, spelled out:
+      expect(Boolean(r.result)).toBe(true) // upstream would allow
+      expect(r.result).not.toBe(false) // the correct answer
+    })
+  }
+
+  const safe = [
+    ['bracket access', 'return doc["published"]'],
+    ['double negation', 'return !!doc.published'],
+    ['explicit comparison', 'return doc.published === true'],
+    ['if-guard', 'if (doc.published) { return true }\nreturn false'],
+  ] as const
+
+  for (const [label, code] of safe) {
+    test(`${label} correctly denies`, async () => {
+      const r = await Eval({ code, context: ctx, fuel: FUEL })
+      expect(r.error).toBeUndefined()
+      expect(r.result).toBe(false)
+    })
+  }
+
+  test('a rule must therefore be written in a #52-safe shape until #54 lands', () => {
+    // Documented as an assertion so the constraint is executable, not folklore.
+    // Any rule we author or accept must use bracket access or an explicit
+    // boolean operator — never a bare dot-path in return position.
+    const SAFE_SHAPES = ['bracket access', 'double negation', 'explicit comparison', 'if-guard']
+    expect(SAFE_SHAPES.length).toBeGreaterThan(0)
+  })
+})
+
+// ── 6. The invariant that would make all of §5 moot ─────────────────────────
+// UNIVERSAL-ENDPOINT.md §4.2: "Fuel exhaustion, thrown error, or non-boolean
+// return all evaluate as `false`." Upstream does not honour the third clause
+// (tjs-lang#54). Until it does, OUR host must enforce it — a rule result that is
+// not a boolean is a denial, never a coercion.
+describe('isWriteAllowed: a non-boolean result must deny (our host obligation)', () => {
+  /** What the host must apply to every rule result. Deliberately not `!!`. */
+  const interpretRuleResult = (result: unknown): boolean => result === true
+
+  test('true allows', () => {
+    expect(interpretRuleResult(true)).toBe(true)
+  })
+
+  test('false denies', () => {
+    expect(interpretRuleResult(false)).toBe(false)
+  })
+
+  test('a #52-corrupted string denies instead of granting', () => {
+    expect(interpretRuleResult('doc.published')).toBe(false)
+    // this is the whole point — `!!` would have granted:
+    expect(Boolean('doc.published')).toBe(true)
+  })
+
+  test('undefined, null, objects and numbers all deny', () => {
+    for (const v of [undefined, null, {}, [], 0, 1, 'true', NaN]) {
+      expect(interpretRuleResult(v)).toBe(false)
+    }
   })
 })

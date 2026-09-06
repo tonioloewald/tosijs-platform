@@ -39,7 +39,9 @@ invest in it. The ajs/security design is grounded on **tjs-lang 0.13.1** and is 
     the port *relies on* and **tripwires that fail when tjs-lang#52 is fixed** (at which point the
     workarounds below can be deleted). Deltas from the 0.12 spike:
     - **Still true:** fuel halts a runaway rule; zero-capability rules can't reach I/O; member
-      assignment still forbidden; pure boolean predicates correct. Finding 5's context-binding
+      assignment still forbidden; boolean predicates correct **only in #52-safe shapes** — see the
+      2026-09-06 correction in ROADMAP Phase 0; a bare `return doc.field` predicate is corrupted and
+      upstream coerces it to a GRANT (F3 / tjs-lang#54). Finding 5's context-binding
       wrinkle is **gone** — `Eval` binds `context` fine on the node/dist path, and `SafeFunction`
       works with the documented `{ params, body }` signature.
     - **New:** `maxSourceBytes` refuses oversized source *before* transpilation (transpiling isn't
@@ -146,9 +148,9 @@ items were written back to `tosijs-coding-practices`.
   it (`bun run backup:install`) from `cwd`/`homedir`/`which bun`, label from the `.firebaserc`
   project id; add `backup:uninstall`.
 
-**P1 — a shipped claim is false, and it fails open**
+**P1 — a shipped claim is false, and it fails open** — ✅ DONE (`corrected 2026-09-06`)
 
-- [ ] **F3 / U2 — "pure predicates are unaffected by tjs-lang#52" is WRONG.** Reproduced on 0.13.11:
+- [x] **F3 / U2 — "pure predicates are unaffected by tjs-lang#52" is WRONG.** Reproduced on 0.13.11:
   `Eval({code:'return doc.published', context:{doc:{published:false}}})` returns the *string*
   `'doc.published'` (truthy) with no error; same for `const p = doc.published; return p`. Upstream
   `rules.tjs` ends `allowed: !!result`, so a corrupted rule **grants access**. This claim is cited
