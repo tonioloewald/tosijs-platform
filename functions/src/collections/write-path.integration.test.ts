@@ -21,6 +21,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
 import { test, expect, describe, beforeAll } from 'bun:test'
+import { emulatorFetch } from './emulator-fetch.test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -39,7 +40,7 @@ const AUTH_URL = 'http://127.0.0.1:9099'
 
 async function emulatorFunctionsRunning(): Promise<boolean> {
   try {
-    await fetch(`${FUNCTIONS_URL}/hello`, {
+    await emulatorFetch(`${FUNCTIONS_URL}/hello`, {
       method: 'GET',
       signal: AbortSignal.timeout(2000),
     })
@@ -62,7 +63,7 @@ async function getOwnerIdToken(): Promise<string | undefined> {
     fakeIdToken
   )}&providerId=google.com`
   try {
-    const res = await fetch(
+    const res = await emulatorFetch(
       `${AUTH_URL}/identitytoolkit.googleapis.com/v1/accounts:signInWithIdp`,
       {
         method: 'POST',
@@ -109,7 +110,7 @@ async function docRequest(
   } else {
     init.body = JSON.stringify({ p: path, data })
   }
-  const res = await fetch(url, init)
+  const res = await emulatorFetch(url, init)
   const text = await res.text()
   let json: any
   try {

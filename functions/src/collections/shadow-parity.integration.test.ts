@@ -24,6 +24,7 @@
  * release gate should read it.
  */
 import { describe, test, expect, beforeAll } from 'bun:test'
+import { emulatorFetch } from './emulator-fetch.test'
 
 const PROJECT_ID = 'liquid-force-425209-g2'
 const FUNCTIONS_URL = `http://127.0.0.1:5001/${PROJECT_ID}/us-central1`
@@ -37,7 +38,7 @@ async function getOwnerIdToken(): Promise<string> {
   const postBody = `id_token=${encodeURIComponent(
     JSON.stringify({ sub: 'owner', email: 'owner@gmail.com', email_verified: true })
   )}&providerId=google.com`
-  const res = await fetch(
+  const res = await emulatorFetch(
     `${AUTH_URL}/identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=fake-api-key`,
     {
       method: 'POST',
@@ -77,13 +78,13 @@ const doc = async (
   } else {
     init.body = JSON.stringify({ p: path, data })
   }
-  const res = await fetch(url, init)
+  const res = await emulatorFetch(url, init)
   return { status: res.status, text: await res.text() }
 }
 
 beforeAll(async () => {
   try {
-    const res = await fetch(`${FUNCTIONS_URL}/hello`, {
+    const res = await emulatorFetch(`${FUNCTIONS_URL}/hello`, {
       signal: AbortSignal.timeout(3000),
     })
     emulatorsRunning = res.ok || res.status < 500

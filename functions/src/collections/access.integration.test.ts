@@ -18,6 +18,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
 import { test, expect, describe, beforeAll } from 'bun:test'
+import { emulatorFetch } from './emulator-fetch.test'
 
 // Read project ID from .firebaserc
 import { readFileSync } from 'fs'
@@ -40,7 +41,7 @@ const FUNCTIONS_URL = `${EMULATOR_HOST}/${PROJECT_ID}/us-central1`
 async function checkEmulatorFunctionsRunning(): Promise<boolean> {
   try {
     // Try the hello endpoint which should always exist
-    await fetch(`${FUNCTIONS_URL}/hello`, {
+    await emulatorFetch(`${FUNCTIONS_URL}/hello`, {
       method: 'GET',
       signal: AbortSignal.timeout(2000),
     })
@@ -79,7 +80,7 @@ describe('Access Control Integration Tests', () => {
         return
       }
 
-      const response = await fetch(`${FUNCTIONS_URL}/doc?p=page/path=default`, {
+      const response = await emulatorFetch(`${FUNCTIONS_URL}/doc?p=page/path=default`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -99,7 +100,7 @@ describe('Access Control Integration Tests', () => {
         return
       }
 
-      const response = await fetch(`${FUNCTIONS_URL}/doc?p=role/owner-role`, {
+      const response = await emulatorFetch(`${FUNCTIONS_URL}/doc?p=role/owner-role`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -116,7 +117,7 @@ describe('Access Control Integration Tests', () => {
         return
       }
 
-      const response = await fetch(`${FUNCTIONS_URL}/doc`, {
+      const response = await emulatorFetch(`${FUNCTIONS_URL}/doc`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -136,7 +137,7 @@ describe('Access Control Integration Tests', () => {
         return
       }
 
-      const response = await fetch(`${FUNCTIONS_URL}/doc?p=config/app`, {
+      const response = await emulatorFetch(`${FUNCTIONS_URL}/doc?p=config/app`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -154,7 +155,7 @@ describe('Access Control Integration Tests', () => {
         return
       }
 
-      const response = await fetch(`${FUNCTIONS_URL}/docs?p=config`, {
+      const response = await emulatorFetch(`${FUNCTIONS_URL}/docs?p=config`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -172,7 +173,7 @@ describe('Access Control Integration Tests', () => {
         return
       }
 
-      const response = await fetch(`${FUNCTIONS_URL}/docs?p=role`, {
+      const response = await emulatorFetch(`${FUNCTIONS_URL}/docs?p=role`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -193,7 +194,7 @@ describe('Access Control Integration Tests', () => {
         return
       }
 
-      const response = await fetch(`${FUNCTIONS_URL}/doc?p=role/owner-role`, {
+      const response = await emulatorFetch(`${FUNCTIONS_URL}/doc?p=role/owner-role`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' },
       })
