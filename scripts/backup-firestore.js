@@ -11,10 +11,19 @@
  * separate, manual step (see RESTORING below) so a backup run can never be the
  * thing that destroys data.
  *
- * Backups land OUTSIDE the repo by default (~/Backups/tosijs-platform). A backup
+ * Backups land OUTSIDE the repo by default (~/Backups/tosijs-platform/<project-id>,
+ * namespaced so two projects cannot prune each other). A backup
  * inside the working tree is destroyed by the same `rm -rf`, bad merge or stray
  * `git clean` that destroys everything else, so it is not a failsafe. Nothing
  * here is ever committed.
+ *
+ * `--keep N` PRUNES. It deletes old snapshots under the SAME root, so a custom
+ * `--out` directory is also a directory this script will delete from. It only
+ * ever removes directories carrying a manifest.json naming this project and
+ * marked complete — anything else is reported and left alone.
+ *
+ * Files are written 0600 inside 0700 directories: `role` contains contact details
+ * (email, phone, mailing address) that Firestore exposes to admins only.
  *
  * Usage:
  *   bun run backup                      # dump every known collection
@@ -83,10 +92,14 @@ if (!PROJECT_ID) {
 // Timestamp is filesystem- and sort-safe: 2026-09-05T12-00-00Z
 const stamp = new Date().toISOString().replace(/:/g, '-').replace(/\..*$/, 'Z')
 // Default OUTSIDE the repo — see the header. Never committed, never cleaned by git.
+// F15: the root is namespaced BY PROJECT. It used to be a shared constant, so two
+// projects backing up to the same root pruned each other's snapshots — and a
+// low-frequency project could lose every backup it had while each manifest still
+// read "Backup OK".
 const outRoot =
   flag('out') ||
   process.env.TOSIJS_BACKUP_DIR ||
-  path.join(os.homedir(), 'Backups', 'tosijs-platform')
+  path.join(os.homedir(), 'Backups', 'tosijs-platform', PROJECT_ID)
 const outDir = path.join(outRoot, stamp)
 const only = flag('collection')
 const targets = only ? [only] : COLLECTIONS
@@ -232,7 +245,11 @@ const reader = await makeReader()
 async function backupCollection(name) {
   const docs = await reader.read(name)
   const dir = path.join(outDir, name)
-  fs.mkdirSync(dir, { recursive: true })
+  // F17: 0o700 / 0o600. `role` carries contacts (email, phone, mailing address)
+  // that Firestore only exposes to admins; the default 0o755/0o644 turned that
+  // into world-readable plaintext under a world-traversable home directory,
+  // retained 30 snapshots deep and swept up by Time Machine.
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
 
   let bytes = 0
   for (const doc of docs) {
@@ -243,7 +260,7 @@ async function backupCollection(name) {
       null,
       2
     )
-    fs.writeFileSync(path.join(dir, `${safeId}.json`), body)
+    fs.writeFileSync(path.join(dir, `${safeId}.json`), body, { mode: 0o600 })
     bytes += Buffer.byteLength(body)
   }
   return { name, count: docs.length, bytes }
@@ -268,7 +285,7 @@ const totalBytes = results.reduce((n, r) => n + r.bytes, 0)
 
 // A manifest makes a backup self-describing — which collections were attempted,
 // what was found, and whether anything failed. A restore should read this first.
-fs.mkdirSync(outDir, { recursive: true })
+fs.mkdirSync(outDir, { recursive: true, mode: 0o700 })
 fs.writeFileSync(
   path.join(outDir, 'manifest.json'),
   JSON.stringify(
@@ -278,6 +295,11 @@ fs.writeFileSync(
       transport: reader.transport,
       collections: results,
       attempted: targets,
+      // F22: a `--collection x` run is a PARTIAL snapshot. The pruner refuses to
+      // count partials toward retention, so debug runs cannot displace complete
+      // ones — restoring from "the newest snapshot" must never silently miss
+      // collections that run never fetched.
+      complete: !only,
       failed,
       totalDocs,
       totalBytes,
@@ -299,19 +321,74 @@ if (failed > 0 || totalDocs === 0) {
   process.exit(1)
 }
 
-// Retention. Only ever runs AFTER a verified-good backup above, so a failing run
-// can never prune the last known-good snapshot out from under us.
+// ── Retention ──────────────────────────────────────────────────────────────
+//
+// Only ever runs AFTER a verified-good backup above, so a failing run can never
+// prune the last known-good snapshot out from under us.
+//
+// F15: this used to delete anything under `outRoot` whose NAME started with a
+// date — no type check, no ownership check. In testing it deleted an unrelated
+// directory and an unrelated PDF that merely happened to be date-named. A
+// destructive action must positively identify its victims, so a candidate is
+// pruned only if ALL of the following hold:
+//   - it is a real directory, not a file and not a symlink;
+//   - it contains a readable manifest.json;
+//   - that manifest's `project` matches the project we just backed up;
+//   - that manifest records a COMPLETE run (F22: a `--collection x` partial must
+//     not occupy a retention slot and displace a full snapshot).
+// Anything failing a check is skipped and REPORTED, never silently kept or killed.
+//
+// F16: prune output goes to stderr unconditionally — not through `log()`, which
+// `--quiet` silences. The one shipped configuration that prunes (the LaunchAgent)
+// is the one that passes `--quiet`, so the only record of a deletion was being
+// suppressed in exactly the case where it mattered.
 const keep = Number(flag('keep') || 0)
+const pruned = []
+const skipped = []
 if (keep > 0) {
-  const snapshots = fs
+  const candidates = fs
     .readdirSync(outRoot)
     .filter((d) => /^\d{4}-\d{2}-\d{2}T/.test(d))
     .sort()
     .reverse()
-  for (const old of snapshots.slice(keep)) {
-    fs.rmSync(path.join(outRoot, old), { recursive: true, force: true })
-    log(`  pruned ${old}`)
+
+  const owned = []
+  for (const name of candidates) {
+    const dir = path.join(outRoot, name)
+    let why = null
+    try {
+      const st = fs.lstatSync(dir)
+      if (st.isSymbolicLink()) why = 'symlink'
+      else if (!st.isDirectory()) why = 'not a directory'
+      else {
+        const m = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf-8'))
+        if (m.project !== PROJECT_ID) why = `belongs to project ${m.project}`
+        else if (!m.complete) why = 'partial snapshot'
+      }
+    } catch {
+      why = 'no readable manifest.json'
+    }
+    if (why) skipped.push({ name, why })
+    else owned.push(name)
   }
+
+  for (const old of owned.slice(keep)) {
+    fs.rmSync(path.join(outRoot, old), { recursive: true, force: true })
+    pruned.push(old)
+    console.error(`  pruned ${old}`)
+  }
+  for (const s of skipped) {
+    console.error(`  kept (not ours) ${s.name} — ${s.why}`)
+  }
+}
+
+// Record the retention outcome IN the surviving manifest. Each pruned snapshot's
+// own manifest goes with it, so without this a deletion leaves no trace anywhere.
+if (keep > 0) {
+  const mPath = path.join(outDir, 'manifest.json')
+  const m = JSON.parse(fs.readFileSync(mPath, 'utf-8'))
+  m.retention = { keep, pruned, skipped }
+  fs.writeFileSync(mPath, JSON.stringify(m, null, 2), { mode: 0o600 })
 }
 
 console.log(
