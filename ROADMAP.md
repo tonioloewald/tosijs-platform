@@ -346,6 +346,62 @@ one.
   the gate verifies logic, not integration — so capability mocks are part of the trusted surface and
   should be supplied by the platform, not the procedure author.
 
+### Meta-authority: `role` and `config` cannot be governed by the model they define
+
+*Direction from Tonio, 2026-09-06:* `config` and `role` "have to live outside the standard RBAC
+model because they control how the RBAC system works. So we need a role that's unattainable through
+standard configuration and defined outside the rules of the system."
+
+That is the bootstrapping problem stated exactly: **the authority to change the rules must be
+strictly greater than any authority the rules can confer**, or it is circular.
+
+**The circularity is live today, and it is exploitable.**
+
+- `getUserRoles` (`utilities.ts`) derives every caller's roles **from the `role` collection**.
+- `role.ts` grants `ROLES.admin` **`write: ALL`** on that same collection.
+
+So an admin can PUT their own role document with `roles: ['owner', …]`, or append their uid to the
+owner role's `userIds`. **Admin → owner is one request**, which makes everything above `admin` in
+the hierarchy (`developer`, `owner`) decorative. And it does not stop at a title: `module.ts` grants
+**developer** write access to `module`, whose documents are served as executable JavaScript through
+`/esm`. The full chain is *admin → self-grant developer → write a module → arbitrary JS on
+loewald.com*. Not remotely reachable (it needs admin), but it means "admin" and "site takeover" are
+the same privilege level.
+
+**What the fix has to satisfy.** A meta-authority — call it `root` — that is:
+
+1. **Un-grantable by the system.** No write through `/doc`, and no edit of any collection the
+   system governs, can confer it.
+2. **Sourced from outside the governed data.** Its truth comes from somewhere the RBAC model does
+   not read, so authorization cannot be its own input.
+
+**Candidate mechanisms, in this stack:**
+
+| mechanism | un-grantable? | notes |
+|---|---|---|
+| **Firebase custom claim** (`root: true`), set only via the Admin SDK, verified from the decoded ID token | **yes** — our endpoints never mint claims; setting one needs service-account credentials | reads from the token, not Firestore, so it breaks the circularity by construction. Preferred. |
+| **Deploy-time allowlist** of root uids (`defineSecret`) | **yes** — changing it needs a deploy or Secret Manager access, both IAM-gated | good bootstrap + break-glass; coarse to rotate |
+| **`role`/`config` simply not writable through `/doc`** (seed/console only) | yes | strongest and simplest, but retires the role-manager UI (`src/role-manager.ts`) |
+| Firestore security rules | n/a | `firestore.rules` is deny-all; everything goes through functions |
+
+**Proposed:** custom claim as the mechanism, deploy-time allowlist as the bootstrap (so there is a
+way to mint the first root and a break-glass path if claims are lost). `role` and `config` writes
+then require `root`, and `root` is never a value that can appear in a role document.
+
+**This generalises §2.5, which already anticipated the same shape** for stored rules: "rule
+installation = most-privileged write … installing them needs a capability procedures/transforms
+cannot hold." `role`, `config`, and stored rules/procedures are one class — *the data that decides
+what everything else may do* — and they need one meta-authority. It is also the same question the
+capability model raises from the other end: **the capability to install a capability** is exactly
+this authority, so designing it once covers RBAC-over-functions too.
+
+**Consequence for parity testing (the immediate question):** `role` is not merely "another
+collection shape" — it is the authorization data, so a destructive parity fixture pointed at it is
+categorically different from one pointed at `post`. Cover `config` (which is genuinely uncovered:
+the only schema-less collection and the only cached one), guard every integration file so it
+*cannot* run against production, and defer `role` writes until `root` exists — at which point the
+right test is that a non-root admin is **refused**.
+
 ### Third-party APIs as capabilities — what 0.13.11 already gives us
 
 *"Add a third-party API via ajs rules and glue → new capability, no deployment."* Checked against
