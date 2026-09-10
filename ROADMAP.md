@@ -36,6 +36,66 @@ config; nothing bespoke ever ships to the server.
 Name stays **`tosijs-platform`**, repo stays put — the ambiguity that briefly motivated a separate
 `tosijs-edge` project isn't real.
 
+## Route contributions: prefetch and sitemap stop being endpoints (settled 2026-09-10)
+
+*Tonio:* "Prefetch just becomes a stored function provided by a component that needs to have routes
+with SSR content. So the blog provides a prefetch handler for routes that match its idea of what a
+blog route looks like. Similarly sitemap becomes something any component can contribute to."
+
+This collapses two bespoke Cloud Functions into **one primitive**: a component registers a stored
+function, and the platform invokes it for routes it claims. `prefetch.ts` and `sitemap.ts` do not
+get ported — they get *replaced by instances of the contribution model*, which is ROADMAP rung 2
+generalised from "prefetch becomes a stored procedure" to "everything route-shaped is a
+contribution".
+
+| concern | owner |
+|---|---|
+| routing; deciding what needs SSR; JIT-vs-static rendering | **tosijs-ui** |
+| hosting the contributed stored functions, invoking them, caching the result | **this repo** |
+| the handlers themselves (what a blog route is, what belongs in a sitemap) | **the component** (`tosijs-blog`, `tosijs-assets`, …) |
+
+tosijs-ui may replace static pre-rendering with **just-in-time + cached**, which fits the existing
+[Serving model](#serving-model): first hit builds and caches, the rest are cache reads.
+
+**Why this is structurally better, not just tidier:** yesterday's sitemap bugs were *drift* bugs —
+`sitemap.ts` had its own idea of "published" (`orderBy('date')`, which does not exclude `date: ''`)
+and its own idea of the host, and both were wrong. When the blog contributes its own sitemap
+entries, there is only one notion of a published post — the blog's — and no second implementation to
+drift from it. Same class as the list-guard leak, fixed structurally instead of instance by
+instance.
+
+### Libraries as a service — the same mechanism vends docs, examples and LLMs.txt
+
+*Tonio:* "we are providing front end code and libraries as a service (again with tests and so on)
+and these will vend example and doc pages including LLMs.txt via the same prefetch mechanism."
+
+So the contribution model is not only for a site's own content. A **library** shipped through this
+platform contributes its documentation surface the same way — doc pages, live examples, and
+`LLMs.txt` — all vended as routes backed by stored functions. Combined with `/esm` (modules served
+from Firestore) that makes a library **wholly data**: its code, its docs, its examples and its tests
+all stored, versioned and served with no deploy. That is the "with versioning and tests" core value
+applied to the front-end half, and it is the same self-gating story (a library version whose tests
+fail should not become servable).
+
+### The invariant this design MUST state: whose authority renders a cached page
+
+An SSR handler runs on someone's request and its output is **shared**. If it runs with the caller's
+privileges and the result is cached, a privileged visitor poisons the cache for everyone.
+
+This is not hypothetical here. `blog.ts`'s `onPrefetch` builds `latestPosts`/`recentPosts` via
+`getDocs(req, …)` — the **caller's** roles — and writes them to `config/blog-cache`, which is
+**publicly readable**. An `author` or `owner` holds `list: ALL` on `post`, so a rebuild triggered by
+a logged-in author would bake unpublished drafts into a cache that anonymous visitors then read.
+*(Established by code inspection; an attempt to reproduce it on 2026-09-10 was inconclusive because
+the handler is gated on being on the blog page and the synthetic request did not satisfy that — so
+treat it as unproven-but-reachable, and worth a real reproduction before relying on either answer.)*
+
+**Rule for the contribution model:** an SSR/prefetch handler whose output is cached must render with
+the **authority of the audience it is cached for** — i.e. anonymous, for a public page — never the
+authority of whoever happened to trigger the build. If a handler needs to render per-principal
+content, that output must not enter a shared cache. This is the old "authority in the read/cache
+key" invariant, and it now has a concrete instance to point at.
+
 ## Three legs (settled 2026-09-10, with tjs-lang)
 
 The platform is **three projects**, each owning one leg, plus front-end libraries built on top:
