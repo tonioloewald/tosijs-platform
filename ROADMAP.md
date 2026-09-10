@@ -36,6 +36,37 @@ config; nothing bespoke ever ships to the server.
 Name stays **`tosijs-platform`**, repo stays put — the ambiguity that briefly motivated a separate
 `tosijs-edge` project isn't real.
 
+## Three legs (settled 2026-09-10, with tjs-lang)
+
+The platform is **three projects**, each owning one leg, plus front-end libraries built on top:
+
+| leg | owns |
+|---|---|
+| **tosijs-ui** | build / docs / SEO |
+| **tjs-lang** | the transpiler, language, VM |
+| **tosijs-platform** (this repo) | **the service layer** |
+
+**This repo's core value, stated explicitly:** *RBAC · the universal endpoint · the data layer ·
+stored functions with versioning and tests.* Everything else here is either scaffolding for that or
+on its way out.
+
+**The blog and asset manager become separate front-end libraries on tosijs-ui — effectively separate
+projects.** That is now a statement about *ownership*, not just a future refactor: `src/blog.ts`,
+`src/asset-manager.ts` and the editors are not this repo's product, and work on them should be
+migration preparation rather than investment. (Yesterday's split of the pure blog helpers into
+`src/blog-pure.ts` is exactly that shape — the DOM-free logic goes to `tosijs-blog` cleanly, and it
+is now under test, which it never was inside `blog.ts`.)
+
+**"…with versioning and tests" is load-bearing.** It elevates the self-gating endpoint design
+(below: *Self-gating endpoints*) from a nice property to part of the stated product: a stored
+procedure ships with its own tests, is versioned, and the server refuses to install one whose tests
+fail. That is the thing a competing "just write a Cloud Function" cannot offer, so it is worth
+building deliberately rather than discovering.
+
+**What this reprioritises here:** the backend items — `isWriteAllowed` (which the RBAC monotonicity
+invariant *requires*, see *Meta-authority*), stored procedures with install-time test gating, and
+the capability model — are the product. Client-side polish is not.
+
 ## Repo topology (decided)
 
 1. **tjs-lang's actual backend stuff moves here or is eliminated.** tjs-lang stays *language + VM +
