@@ -20,6 +20,11 @@ This is **tosijs-platform**, a full-stack web application platform built on Fire
 
 ## Direction (read before large changes)
 
+Architectural decisions are recorded in **[DECISIONS.md](DECISIONS.md)** (dated, append-only, each
+entry naming the repo it lands in). Read that before proposing a change to RBAC, the access model,
+SSR, or the endpoint surface — several of those questions are settled and the reasoning matters more
+than the conclusion.
+
 The platform is pivoting — see **[ROADMAP.md](ROADMAP.md)** (direction settled 2026-08-24).
 **This repo consolidates into the pure backend** — `/doc` + `/docs` + one universal stored-ajs
 endpoint, with everything else expressed as collection config or stored ajs — while all client code

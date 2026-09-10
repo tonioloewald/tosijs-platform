@@ -3,6 +3,7 @@ import { onRequest } from 'firebase-functions/v2/https'
 import * as functions from 'firebase-functions'
 import compression from 'compression'
 import { optionsResponse } from './utilities'
+import { asPublicRequest } from './public-request'
 import { DOCTYPE, elements } from './elements'
 
 const compressResponse = compression()
@@ -45,9 +46,21 @@ export const getPrefetchData = async (
   url: string,
   options: PageOptions
 ): Promise<PrefetchData> => {
+  // SSR IS PUBLIC — enforced here, once, for every contributed handler.
+  //
+  // Prefetch output is shared and cached, so rendering it with the caller's
+  // rights would let a privileged visitor bake their private view into the page
+  // everyone else reads. blog.ts's handler builds its post pools with whatever
+  // roles it is handed and writes them to config/blog-cache, which is publicly
+  // readable, and author/owner hold `list: ALL` on post — so that was reachable.
+  //
+  // Doing it at the single invocation point rather than in each handler makes it
+  // structural: under the route-contribution model a contributed handler should
+  // not be ABLE to render privileged content, whoever wrote it.
+  const publicReq = asPublicRequest(req)
   const prefetched = await Promise.all(
     prefetches.map((f) =>
-      f(req, res, url, options).catch((error) => {
+      f(publicReq, res, url, options).catch((error) => {
         functions.logger.warn('Prefetch handler failed:', error)
         return {}
       })

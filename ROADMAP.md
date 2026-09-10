@@ -1,5 +1,9 @@
 # tosijs-platform Roadmap — backend consolidation
 
+> **Decisions live in [DECISIONS.md](DECISIONS.md)** — a dated, append-only ledger. This file is a
+> *plan* and gets rewritten; the ledger is the durable record, and each entry names which repo it
+> lands in so it survives the extraction of `tosijs-blog` / `tosijs-assets`.
+>
 > Rewritten 2026-08-24. **Supersedes** the prior "ajs / universal-endpoint" roadmap (whose
 > center of gravity — a server-side interpreter that *rebuilds* the content system as data —
 > predated the **tosijs-ui build/dev/doc-site system**, which now owns page generation). See
