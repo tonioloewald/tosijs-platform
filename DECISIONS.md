@@ -85,6 +85,17 @@ Circularity is broken by **monotonicity: no write may increase the writer's own 
 escalation chain (admin → self-grant developer → arbitrary JS). One-line fix available now
 (`[ROLES.admin]` → `[ROLES.owner]`); production currently has no admin, so it is preventive.
 Monotonicity itself needs D12's `isWriteAllowed`.
+
+**Demonstrated 2026-09-11**, no longer inferred: `privilege-lifecycle.integration.test.ts` §12–13
+drive it end-to-end — an admin writes the role collection, self-grants `developer`, and the new role
+is live on the very next request. Those tests assert the CURRENT (wrong) behaviour deliberately, so
+the suite flips the day `role.ts` moves to owner-only.
+
+**Also found by the same file:** removing a uid from `userIds` is **not revocation**. `getUserRoles`
+writes during a read — when the uid lookup misses it matches `contacts` by email and *re-appends the
+uid*. The grant is still real (roles and contacts are unchanged), so this is an operator footgun
+rather than an authorization bug: revoking means clearing `roles` or removing the contact, never just
+the uid.
 **Lands in:** this repo. → ROADMAP "Meta-authority".
 
 ## D5
