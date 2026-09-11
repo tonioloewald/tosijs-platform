@@ -47,8 +47,15 @@ The alternative — rules returning transformed `newData` — is exactly the sha
 returning `{...data, revisions}` persists `{revisions}` alone. Data loss with a plausible payload.
 
 **Correction (2026-09-06):** the original claim that predicates are "entirely unaffected" by #52 was
-**false and fails open** — see D3's neighbour, [tjs-lang#54](https://github.com/tonioloewald/tjs-lang/issues/54).
-The decision stands; the reasoning changed.
+**false and fails open** — [tjs-lang#54](https://github.com/tonioloewald/tjs-lang/issues/54).
+
+**Update (2026-09-11): #52 and #54 are FIXED in 0.13.12.** Verified directly; the tripwires guarding
+them fired and are now permanent regression cases. The original motivation for this decision is
+therefore **gone** — a transform returning `{...data, revisions}` now works. The decision is
+consequently **open for revisit**: keeping transforms compiled is now a choice about blast radius and
+about §6.1's "policy is not a sidecar" requirement, not a workaround for a language defect. One
+residual remains ([#56](https://github.com/tonioloewald/tjs-lang/issues/56), bare context bindings),
+neutralised at our boundary by interpreting rule results as `result === true`, never `!!result`.
 **Lands in:** this repo. → `tjs-lang.baseline.test.ts` §5–§6.
 
 ## D3

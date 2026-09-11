@@ -119,30 +119,43 @@ That demonstrates the ratchet working, which is the claim §2 stakes everything 
 weaker claim *and* a more fragile one — it is falsified by the first finding, whereas "found, fixed,
 ratcheted, re-checked" is strengthened by it.
 
-## 5. A live tension with §6.1 that the document can't see from where it sits
+## 5. A live tension with §6.1 — *substantially narrowed, see the correction below*
 
 > **Deploy atomicity**: … The versioned-endpoint design solves this *if the RBAC configuration is
 > part of the versioned endpoint artifact*, so a client pins the endpoint+policy version it was
 > built against. **Policy is not a sidecar.**
 
-Correct, and **not currently achievable in the service layer**, for a reason that traces back to
-§5.2's own subject matter.
+**CORRECTION (2026-09-11).** As filed, this section said ajs evaluation was "presently unreliable in
+the shapes a transform needs". That was **wrong in wording and is now wrong in fact**, and the
+correction matters more than the original point.
 
-Because ajs evaluation is presently unreliable in the shapes a transform needs (#52), this repo
-settled on: ajs rules stay pure boolean predicates; transform, field-strain, provenance and
-uniqueness stay **compiled TCB** — TypeScript deployed with the functions. That decision is right
-today (the alternative silently corrupts documents), but it means:
+*Wrong in fact:* tjs-lang#52 and #54 are **closed, fixed in 0.13.12**. Verified directly — spread
+composes, context dot-paths return values, and `return doc.published` on an unpublished document
+yields `false`, so the fail-open is gone. Filed 2026-09-05, fixed within a week. One residual remains
+(bare context bindings still return their own name — [#56](https://github.com/tonioloewald/tjs-lang/issues/56)),
+narrower than #52 and neutralised at our boundary because our host interprets rule results as
+`result === true` rather than `!!result`.
 
-- the **predicate** half of policy could be versioned data a client pins
-- the **transform** half is compiled code that ships with a deploy, and therefore *is* a sidecar —
-  the exact thing §6.1 forbids
+*Wrong in wording, which is the part worth owning:* "evaluation is unreliable" is a **systemic**
+claim — that the evaluator cannot be trusted. The evidence was **two specific defects**, both silent,
+one with a fail-open consequence. Two bugs in a young language, found and fixed inside a week, is a
+bug report; "unreliable" reads as an argument against the architecture. Those are different claims
+and only the second was supported. A document this careful about scoping its own claims deserved a
+scoped one back.
 
-So "policy is not a sidecar" is currently half-true, and the blocker is not design disagreement but
-interpreter correctness. Which is a useful thing for the document to know: **§5.2 is not only a trust
-concern, it is on the critical path for §6.1's deploy-atomicity guarantee.** Fixing #52 and building
-the conformance suite unblocks moving transforms into versioned artifacts; until then, endpoint
-pinning covers policy partially and the document should either say so or the roadmap should sequence
-it.
+**What survives:** the *structural* observation, independent of any particular defect. This repo's
+transform half is compiled TCB, so today the predicate half of policy could be versioned data a
+client pins while the transform half ships with a deploy — which is a sidecar, the thing §6.1
+forbids. That was **partly** motivated by #52 and is now unblocked by its fix; what remains is
+sequencing work, not a language problem. The general form is still worth stating: **§6.1's
+deploy-atomicity guarantee requires transforms to be versioned artifacts, so anything that keeps
+transforms in compiled code is on that critical path.**
+
+**And the episode is itself evidence for §2 and §5.2.** The defect was found by an oracle test,
+filed, fixed upstream in days, and the tripwires guarding it fired automatically the moment the fix
+landed — converting themselves into permanent regression cases. That is the ratchet described in
+§5.2 working end to end, observed rather than asserted. It is a better advertisement for the posture
+than the absence of bugs would have been.
 
 ## 6. One place v3 improved on my suggestion
 

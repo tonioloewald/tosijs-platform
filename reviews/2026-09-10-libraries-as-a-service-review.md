@@ -1,5 +1,12 @@
 # Review: *Libraries as a Service* design doc
 
+> **CORRECTION (2026-09-11).** §1 below uses tjs-lang#52/#54 as its worked example. Both are now
+> **closed and fixed in 0.13.12** — verified directly. The *structural* point stands (interpreter
+> correctness is a third term the reduction was missing, and v3 adopted it as §5.2); the example is
+> now historical. One residual remains: [#56](https://github.com/tonioloewald/tjs-lang/issues/56).
+> Elsewhere I described ajs evaluation as "unreliable" — that overstated two specific defects into a
+> systemic claim, and is retracted; see the v3 addendum §5.
+
 Reviewed 2026-09-10 from `tosijs-platform`, against a week of concrete evidence in the service
 layer. Ownership of the doc is unsettled; this review is filed here because the evidence is here.
 

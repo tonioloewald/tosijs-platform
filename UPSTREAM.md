@@ -34,7 +34,7 @@ the overlay in `blog.ts` can be reconsidered — though the decoupled version ma
 
 ## U2 — `tjs-lang`: a corrupted rule result coerces to a GRANT
 
-**Issue:** https://github.com/tonioloewald/tjs-lang/issues/54
+**Issue:** https://github.com/tonioloewald/tjs-lang/issues/54 — **CLOSED, fixed in 0.13.12** (verified 2026-09-11). Residual: https://github.com/tonioloewald/tjs-lang/issues/56
 **Related:** https://github.com/tonioloewald/tjs-lang/issues/52 (the underlying dot-path defect)
 
 tjs-lang#52 records that returning a context dot-path yields the path *string* rather than the

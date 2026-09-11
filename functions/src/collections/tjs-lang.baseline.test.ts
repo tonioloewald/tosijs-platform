@@ -7,14 +7,18 @@
  * TODO.md. This file is the spike as a *test*, so the next re-validation is
  * `bun test` rather than an archaeology exercise.
  *
- * Two kinds of assertion live here, and the difference matters:
+ * Three kinds of assertion live here:
  *
- *  1. RELIED-ON — properties the universal-endpoint port depends on. A failure
- *     here means the port's foundation moved; stop and re-derive.
- *  2. TRIPWIRE — currently-BROKEN upstream behaviour (tjs-lang#52), asserted as
- *     broken *on purpose*. A failure here is GOOD NEWS: upstream fixed it, so
- *     delete the workaround it guards and simplify the port. Each one names the
- *     workaround it justifies.
+ *  1. RELIED-ON — properties the port depends on. A failure means the foundation
+ *     moved; stop and re-derive.
+ *  2. REGRESSION — bugs found in the wild, now FIXED upstream, kept forever as
+ *     conformance cases so they cannot return silently (tjs-lang#52/#54, fixed
+ *     in 0.13.12). This is the ratchet: every interpreter bug found becomes a
+ *     permanent case.
+ *  3. TRIPWIRE — behaviour still broken upstream, asserted as broken *on
+ *     purpose*, so the suite goes red the day it is fixed. §6 holds the one
+ *     remaining case. The §4/§5 tripwires fired on 0.13.12 and were converted to
+ *     regressions, which is the mechanism working as intended.
  *
  * Run: cd functions && bun test src/collections/tjs-lang.baseline.test.ts
  */
@@ -28,19 +32,15 @@ const FUEL = 5000
 // The tjs-lang reference rbac layer runs rules as zero-capability predicates
 // returning boolean. Our RBAC port sits on exactly this shape.
 //
-// CORRECTION (2026-09-06, review finding F3). This block used to claim the
-// predicate model was "the part unaffected by tjs-lang#52". **That was false**,
-// and it was cited as the basis of a shipped design decision.
+// HISTORY, kept because the reasoning matters. On 0.13.11 this block claimed the
+// predicate model was "unaffected by tjs-lang#52". That was false and it fails
+// open: a returned context dot-path yielded the path STRING, and the reference
+// RBAC layer ends `allowed: !!result`, so `return doc.published` on an
+// unpublished document yielded a truthy string and GRANTED. The cases below
+// survived only because each used a shape #52 did not corrupt.
 //
-// tjs-lang#52 (a returned context dot-path yields the path STRING) applies to
-// predicates too, and there it is worse than in a transform: the reference RBAC
-// layer ends with `allowed: !!result`, so the string is truthy and the rule
-// **GRANTS ACCESS**. A rule denying an unpublished document — `return
-// doc.published` — returns 'doc.published', which coerces to true.
-//
-// The cases below survived only because each happens to use a shape #52 does not
-// corrupt (`.includes()`, `===`). The corrupted shapes are pinned as tripwires in
-// §4. Upstream: tjs-lang#52 (the defect) and tjs-lang#54 (the fail-open coercion).
+// Both are fixed in 0.13.12 (#52, #54 closed; verified 2026-09-11) and are now
+// permanent regression cases in §4/§5. §6 holds the one residual.
 describe('relied-on: pure boolean predicates', () => {
   test('role membership evaluates correctly', async () => {
     const r = await Eval({
@@ -106,11 +106,13 @@ describe('relied-on: sandbox guarantees', () => {
   })
 })
 
-// ── 3. RELIED-ON: the transform workarounds the port must use ───────────────
-// Because spread and dot-path returns are broken (§4), a `beforeWrite`-shaped
-// rule MUST build its result with Object.assign and read with bracket access.
-// These assertions are what make that workaround safe to depend on.
-describe('relied-on: transform workarounds (see tjs-lang#52)', () => {
+// ── 3. RELIED-ON: transform shapes ─────────────────────────────────────────
+// `Object.assign` and bracket access were WORKAROUNDS for #52; since 0.13.12
+// spread and dot-path access work too, so these are no longer forced. Kept as
+// relied-on because the port uses them and they must keep working — and the
+// module.validate oracle below is the end-to-end check that a real transform
+// ports correctly, which is the point of the whole file.
+describe('relied-on: transform shapes', () => {
   test('Object.assign builds a correct rewritten document', async () => {
     const r = await Eval({
       code: 'return Object.assign({}, data, { revisions: 4 })',
@@ -171,116 +173,144 @@ describe('relied-on: transform workarounds (see tjs-lang#52)', () => {
   })
 })
 
-// ── 4. TRIPWIRES for tjs-lang#52 — asserting the BUG on purpose ─────────────
-// A FAILURE HERE IS GOOD NEWS. It means upstream fixed the defect; go delete
-// the Object.assign / bracket-access workarounds above and in any stored proc,
-// and update ROADMAP Phase 0.
-describe('tripwire: tjs-lang#52 still broken (failure here = upstream fixed)', () => {
-  test('object spread is still silently a no-op', async () => {
+// ── 4. REGRESSION CASES — tjs-lang#52, fixed in 0.13.12 ────────────────────
+//
+// These were TRIPWIRES asserting the defect was still present, so the suite would
+// go red the day upstream fixed it. It did, on 0.13.12, and the tripwires fired.
+// They now assert the CORRECT behaviour and stay forever: every interpreter bug
+// found in the wild becomes a permanent conformance case, so it cannot return
+// silently. (#52 closed; verified 2026-09-11.)
+describe('regression: tjs-lang#52 (fixed 0.13.12) stays fixed', () => {
+  test('object spread includes the spread properties', async () => {
     const r = await Eval({
       code: 'const d = { a: 1 }\nreturn { ...d, c: 3 }',
       fuel: FUEL,
     })
     expect(r.error).toBeUndefined()
-    // BROKEN: should be { a: 1, c: 3 }. Justifies the Object.assign workaround.
-    expect(r.result).toEqual({ c: 3 })
+    expect(r.result).toEqual({ a: 1, c: 3 })
   })
 
-  test('array spread is still silently a no-op', async () => {
+  test('array spread includes the spread elements', async () => {
     const r = await Eval({ code: 'const a = [1, 2]\nreturn [...a]', fuel: FUEL })
     expect(r.error).toBeUndefined()
-    // BROKEN: should be [1, 2]. Note it yields a hole, so .length lies too.
-    expect(r.result).toEqual([null])
+    expect(r.result).toEqual([1, 2])
   })
 
-  test('returning a context dot-path still yields the path string', async () => {
+  test('spreading a CONTEXT-injected object works', async () => {
+    const r = await Eval({
+      code: 'return { ...data, c: 3 }',
+      context: { data: { a: 1, b: 2 } },
+      fuel: FUEL,
+    })
+    expect(r.error).toBeUndefined()
+    expect(r.result).toEqual({ a: 1, b: 2, c: 3 })
+  })
+
+  test('returning a context dot-path yields the VALUE, not the path string', async () => {
     const r = await Eval({
       code: 'return doc.owner',
       context: { doc: { owner: 'u1' } },
       fuel: FUEL,
     })
     expect(r.error).toBeUndefined()
-    // BROKEN: should be 'u1'. Justifies the bracket-access workaround.
-    expect(r.result).toBe('doc.owner')
+    expect(r.result).toBe('u1')
+  })
+
+  test('a dot-path via a local yields the value', async () => {
+    const r = await Eval({
+      code: 'const p = doc.owner\nreturn p',
+      context: { doc: { owner: 'u1' } },
+      fuel: FUEL,
+    })
+    expect(r.error).toBeUndefined()
+    expect(r.result).toBe('u1')
   })
 })
 
-// ── 5. THE FAIL-OPEN HAZARD (review F3; upstream tjs-lang#54) ───────────────
+// ── 5. THE FAIL-OPEN CASE — tjs-lang#54, fixed via #52 ─────────────────────
 //
-// The consequence of §4 for a SECURITY RULE, which is why the "predicates are
-// unaffected" claim was not merely imprecise but dangerous. Upstream's
-// `rules.tjs` ends `allowed: !!result`, so a rule corrupted by #52 does not fail
-// — it GRANTS.
-//
-// Each test states the correct answer (deny) and shows what the VM actually
-// returns. A failure here means upstream fixed something: re-check which shapes
-// are safe before relaxing the guidance in ROADMAP / write-pipeline.ts.
-describe('fail-open: predicate shapes corrupted by #52 coerce to GRANT', () => {
-  // A document that is NOT published. Every rule below means "deny".
+// The security consequence that made #52 more than a correctness bug: upstream's
+// rule layer ends `allowed: !!result`, so a rule returning a corrupted truthy
+// string GRANTED. With #52 fixed, the natural spellings evaluate correctly and
+// the fail-open is gone. Kept as a permanent case because it is the shape that
+// matters most — a rule that denies must actually deny.
+describe('regression: a deny rule denies (tjs-lang#54)', () => {
   const ctx = { doc: { published: false }, published: false }
 
-  const grants = [
-    ['bare dot-path', 'return doc.published', 'doc.published'],
-    ['dot-path via a local', 'const p = doc.published\nreturn p', 'doc.published'],
-    ['bare context binding', 'return published', 'published'],
-  ] as const
-
-  for (const [label, code, corrupted] of grants) {
-    test(`${label} returns a truthy string → !!result GRANTS an unpublished doc`, async () => {
-      const r = await Eval({ code, context: ctx, fuel: FUEL })
-      expect(r.error).toBeUndefined()
-      expect(r.result).toBe(corrupted)
-      // the actual hazard, spelled out:
-      expect(Boolean(r.result)).toBe(true) // upstream would allow
-      expect(r.result).not.toBe(false) // the correct answer
-    })
-  }
-
-  const safe = [
+  const spellings: Array<[string, string]> = [
+    ['bare dot-path', 'return doc.published'],
+    ['dot-path via a local', 'const p = doc.published\nreturn p'],
     ['bracket access', 'return doc["published"]'],
     ['double negation', 'return !!doc.published'],
     ['explicit comparison', 'return doc.published === true'],
     ['if-guard', 'if (doc.published) { return true }\nreturn false'],
-  ] as const
+  ]
 
-  for (const [label, code] of safe) {
-    test(`${label} correctly denies`, async () => {
+  for (const [label, code] of spellings) {
+    test(`${label} denies an unpublished document`, async () => {
       const r = await Eval({ code, context: ctx, fuel: FUEL })
       expect(r.error).toBeUndefined()
       expect(r.result).toBe(false)
+      // the property that actually matters at the RBAC boundary:
+      expect(Boolean(r.result)).toBe(false)
     })
   }
+})
 
-  test('a rule must therefore be written in a #52-safe shape until #54 lands', () => {
-    // Documented as an assertion so the constraint is executable, not folklore.
-    // Any rule we author or accept must use bracket access or an explicit
-    // boolean operator — never a bare dot-path in return position.
-    const SAFE_SHAPES = ['bracket access', 'double negation', 'explicit comparison', 'if-guard']
-    expect(SAFE_SHAPES.length).toBeGreaterThan(0)
+// ── 6. RESIDUAL: a bare context binding still returns its own name ─────────
+//
+// Found 2026-09-11 while verifying the #52 fix. `return published`, where
+// `published` is a context binding rather than a property access, still yields
+// the STRING 'published' instead of the bound value — so it is truthy and would
+// still fail open at an RBAC boundary. Narrower than #52 (property access is
+// fixed; only the bare-identifier form remains) but the same class.
+//
+// TRIPWIRE: this asserts the defect. It fails when upstream fixes it.
+describe('tripwire: bare context binding still returns its name', () => {
+  test('return <binding> yields the identifier, not the value', async () => {
+    const r = await Eval({
+      code: 'return published',
+      context: { published: false },
+      fuel: FUEL,
+    })
+    expect(r.error).toBeUndefined()
+    expect(r.result).toBe('published') // BROKEN: should be false
+  })
+
+  test('so a rule written that way would still grant', async () => {
+    const r = await Eval({
+      code: 'return published',
+      context: { published: false },
+      fuel: FUEL,
+    })
+    expect(Boolean(r.result)).toBe(true) // the hazard, spelled out
+  })
+
+  test('the property-access form is correct, so prefer it', async () => {
+    const r = await Eval({
+      code: 'return doc.published',
+      context: { doc: { published: false } },
+      fuel: FUEL,
+    })
+    expect(r.result).toBe(false)
   })
 })
 
-// ── 6. The invariant that would make all of §5 moot ─────────────────────────
-// UNIVERSAL-ENDPOINT.md §4.2: "Fuel exhaustion, thrown error, or non-boolean
-// return all evaluate as `false`." Upstream does not honour the third clause
-// (tjs-lang#54). Until it does, OUR host must enforce it — a rule result that is
-// not a boolean is a denial, never a coercion.
-describe('isWriteAllowed: a non-boolean result must deny (our host obligation)', () => {
-  /** What the host must apply to every rule result. Deliberately not `!!`. */
+// ── 7. The invariant our host must enforce regardless ───────────────────────
+// UNIVERSAL-ENDPOINT.md §4.2: "non-boolean return evaluates as false". Upstream
+// coerces with `!!`; we must not. This is belt-and-braces now that #52 is fixed,
+// and it is what makes §6's residual harmless at our boundary.
+describe('isWriteAllowed: a non-boolean result must deny', () => {
   const interpretRuleResult = (result: unknown): boolean => result === true
 
-  test('true allows', () => {
+  test('true allows; false denies', () => {
     expect(interpretRuleResult(true)).toBe(true)
-  })
-
-  test('false denies', () => {
     expect(interpretRuleResult(false)).toBe(false)
   })
 
-  test('a #52-corrupted string denies instead of granting', () => {
-    expect(interpretRuleResult('doc.published')).toBe(false)
-    // this is the whole point — `!!` would have granted:
-    expect(Boolean('doc.published')).toBe(true)
+  test('a stray string denies instead of granting', () => {
+    expect(interpretRuleResult('published')).toBe(false)
+    expect(Boolean('published')).toBe(true) // what `!!` would have done
   })
 
   test('undefined, null, objects and numbers all deny', () => {
