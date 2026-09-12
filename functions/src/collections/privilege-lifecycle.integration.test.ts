@@ -308,29 +308,41 @@ describe('D4 escalation: can a privileged user raise their OWN authority?', () =
     expect(r.status).toBe(200)
   })
 
-  test('12. TRIPWIRE (D4): an admin CAN currently write the role collection', async () => {
+  test('12. FIXED (D4): an admin can no longer write the role collection', async () => {
     if (guard()) return expect(true).toBe(true)
-    // This is the escalation chain's first step. When role.ts is changed to
-    // [ROLES.owner], this flips to a denial and the test below must be updated.
+    // Was a tripwire asserting the escalation worked; `role.ts` is now
+    // owner-only and it flipped, exactly as designed. The denial is OPAQUE —
+    // an admin is not privileged for `role`, so it reads as 404 rather than 403.
     const attempt = await doc(adminToken, 'PUT', ADMIN_ROLE, {
       name: 'lifecycle-admin-role',
-      roles: ['admin', 'developer'], // self-elevation: developer ⇒ arbitrary JS
+      roles: ['admin', 'developer'], // self-elevation attempt
       contacts: [{ type: 'email', value: ADMIN_EMAIL }],
       userIds: [],
     })
-    // CURRENT (wrong) behaviour: permitted.
-    expect(attempt.status).toBe(200)
+    expect([401, 403, 404]).toContain(attempt.status)
   })
 
-  test('13. and the self-granted role takes effect on the next request', async () => {
+  test('13. and the self-grant did NOT take effect', async () => {
     if (guard()) return expect(true).toBe(true)
     const res = await emulatorFetch(`${FUNCTIONS_URL}/user`, {
       headers: { Authorization: `Bearer ${adminToken}` },
     })
     expect(res.status).toBe(200)
     const me = (await res.json()) as { roles?: string[] }
-    // The escalation completed: admin → developer, in one request.
-    expect(me.roles ?? []).toContain('developer')
+    // The chain is severed at step one: no developer, so no /esm write, so no
+    // arbitrary JS. This is the property D4 exists to protect.
+    expect(me.roles ?? []).not.toContain('developer')
+    expect(me.roles ?? []).toContain('admin') // unchanged, not escalated
+  })
+
+  test('13b. an admin can no longer READ the role collection either', async () => {
+    if (guard()) return expect(true).toBe(true)
+    // Deliberate consequence of the one-line fix: the entry granted read/write/
+    // list together, so admin lost all three. Acceptable because production has
+    // no admin and `role` holds contact PII; revisit if a role-manager UI ever
+    // needs admin visibility (it would be a separate read-only entry).
+    const r = await doc(adminToken, 'GET', ADMIN_ROLE)
+    expect([401, 403, 404]).toContain(r.status)
   })
 
   test('14. cleanup', async () => {
