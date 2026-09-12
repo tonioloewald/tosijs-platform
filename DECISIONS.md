@@ -23,6 +23,7 @@ time, carry the entry with the code.
 | [D10](#d10) | SSR is public | this repo + every route contributor |
 | [D11](#d11) | One definition of "published" | tosijs-blog |
 | [D12](#d12) | Endpoints self-gate on their own tests | this repo |
+| [D13](#d13) | Build on demand; validate the design against what is unbuilt | all |
 
 ---
 
@@ -80,6 +81,12 @@ super + exclusively adds/removes `super` and transfers `owner`. Neither may assi
 `owner`/`super` — that is owner-only.
 
 Circularity is broken by **monotonicity: no write may increase the writer's own authority.**
+
+**Insufficient as stated — see [D13](#d13)(c).** That formulation holds for direct writes and fails
+for deferred ones: a procedure installed by a `super` and invoked by an `owner` runs with owner
+authority, so it can mint a `super` without its installer ever having raised their own authority.
+The correct statement is that monotonicity must hold over the **composition**, and the intended fix
+is that meta-authority operations are unreachable from a procedure.
 
 **Open / not yet implemented:** `role.ts` still grants `ROLES.admin` `write: ALL`, which is the whole
 escalation chain (admin → self-grant developer → arbitrary JS). One-line fix available now
@@ -220,3 +227,55 @@ code and needs its own fuel/quota budget or installing is a denial-of-wallet vec
 capabilities mean the gate verifies logic, not integration, so the mocks belong to the platform's
 trusted surface.
 **Lands in:** this repo. → ROADMAP "Self-gating endpoints".
+
+## D13
+**Implement only what is needed, when it is needed — but validate the design against the pieces that
+are not built yet.** *(2026-09-12)*
+
+The two halves are load-bearing together. Building ahead of evidence is the error the sovereign
+analysis argues against; designing without the unbuilt pieces in mind is how a model gets a shape
+that cannot express them, discovered at the point where changing it is expensive.
+
+So: no sockets, no rooms, no capability system today. But the RBAC model and the architecture get
+checked against them *now*, while a change costs a paragraph rather than a migration.
+
+**First validation pass, 2026-09-12** — checking the current design against sockets, rooms,
+migrations, stored procedures and third-party capabilities. Two gaps and one defect found:
+
+**(a) `COLLECTIONS` registers only at import time, so ephemeral collections are unrepresentable.**
+Every collection is a module-scope assignment (`COLLECTIONS.post = {…}`). Rooms (§D-games) and
+§7.4's test fixtures both need *runtime* registration. The access model itself is fine; the
+**registry** is not — and B3 proved registration is security-relevant, since a demo collection with
+`write: ALL` for `public` shipped to production. §8 already requires that an ephemeral backend's
+capabilities be "scoped to only its own ephemeral collections — an invariant, not an emergent
+property", and a flat global namespace cannot express that. **Implication:** ephemeral collections
+need a *namespace the access model understands* (e.g. a hard `ephemeral/<owner-id>/…` prefix rule),
+so the scoping is structural rather than a convention someone has to honour.
+
+**(b) The access model has no notion of a capability at all.** It is role × collection × method →
+access. Migrations (§7.3's deliberately unusual widen-scope-keep-validation shape), storage, `/gen`
+and third-party APIs are all role × **capability** → permitted invocation *and permitted arguments*.
+So **D5's lattice is incomplete as stated**: it describes the document axis only. It should either
+say so explicitly or grow a third object type. Not urgent — nothing ships on it — but the lattice
+should not be cited as complete.
+
+**(c) DEFECT — monotonicity does not survive deferred execution.** D4 states "no write may increase
+the writer's own authority", which holds for direct writes. A stored procedure (D12) is a write
+*now* that executes *later*, and §2.1 says procedures run with the **caller's** capabilities. So a
+`super` may install a procedure that writes to `role`; when an `owner` invokes it, it runs with
+owner authority and can mint a `super` — which D4 says only an owner may do. The installer never
+increased their own authority, so monotonicity as written is satisfied while the property it exists
+to protect is defeated. Classic confused deputy.
+
+*Fix to design in before procedures exist* — the cheapest is **(c3)**: meta-authority operations
+(mutating `role`, `super`, `owner`) are **not reachable from a procedure at all**; they require a
+direct, attributed write. That keeps D3's "root acts through the paved path" while removing the one
+place deferral is dangerous. The alternatives — intersecting caller and installer capabilities, or
+refusing to invoke a procedure you cannot read — are more general and more restrictive, and can be
+revisited if a case demands them. **The general statement to adopt:** *authority to install is not
+authority to execute, and monotonicity must hold over the composition, not over each write
+separately.*
+
+**Also noticed:** the join over *constraints* is one open question wearing two hats — schema
+projection union (D6) and capability-argument union (b) are the same problem. Solve once.
+**Lands in:** all repos (the discipline); this repo (the three findings).
