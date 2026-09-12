@@ -269,6 +269,65 @@ waiting to happen. Where at-least-once delivery matters, logical replication is 
 monotonic sequence (§6.1) is what lets a reconnecting client say "everything since N" rather than
 resynchronising the world.
 
+### Subscription granularity is a parameter, not a property
+
+Firestore's failure mode is that `onSnapshot` has **one granularity**: you get documents. So the
+cost of a subscription tracks *change volume* rather than *what the client is displaying* — a
+background tab pays the same as a focused list view, and a one-field edit ships a whole document.
+You can be crippled by updates you do not currently care about, and there is no dial.
+
+The fix is to make granularity a **client-declared, runtime-changeable parameter**:
+
+| tier | payload | what the server must evaluate | fan-out |
+|---|---|---|---|
+| 0 · epoch | "something in your view changed", + sequence | nothing per-subscriber | **O(1)** — one broadcast |
+| 1 · identity | ids added/updated/removed | **visibility only** (D5 boolean axis) | O(subscribers), boolean each |
+| 2 · field mask | id + *which* fields changed | visibility + mask ∩ projection | O(subscribers) |
+| 3 · delta | changed field values | visibility + full projection | O(subscribers) |
+| 4 · record | the whole document | visibility + full projection | O(subscribers) — Firestore's only mode |
+
+**This is not only a bandwidth argument — it makes RBAC dramatically cheaper.** Earlier in this
+document fan-out is O(subscribers) because D5's projection axis means two subscribers can see
+different fields of the same row. That is true *from tier 2 up*. At tier 1 only the **boolean
+visibility axis** is needed, so subscribers group trivially by role-set; at tier 0 no per-subscriber
+evaluation happens at all and one message serves everyone. **The cheap tiers are cheap precisely
+because they need less of the authorization model applied** — which is a nice property to discover
+rather than one to engineer.
+
+The tiers map exactly onto D5: a tier is a statement of *how much of the access evaluation you want
+performed and shipped*.
+
+**The client changes tier at runtime, because only the client knows what it is doing.** Tab
+backgrounded → tier 0. List visible → tier 1, refetch the ids actually on screen. Document open →
+tier 3 for that one id. The server cannot infer any of this, which is exactly why Firestore's fixed
+choice is wrong rather than merely expensive.
+
+**Two security notes, since granularity changes what leaks:**
+
+- **Tier 1 leaks existence**, so visibility must still be evaluated per id. "Document X changed" told
+  to someone who cannot read X discloses that X exists and is being modified. The boolean axis is
+  cheap, but it is not optional.
+- **Tier 0 leaks activity.** "Something you can see changed" is a traffic-analysis signal about how
+  busy your visible set is. Almost certainly acceptable, and it is the same family as §6.2's
+  "result-set size becomes a timing side channel" — worth naming rather than discovering.
+
+**Tier 0 does not need a socket.** It is invalidation, and invalidation composes with ordinary HTTP
+caching: SSE, long-poll, or even an ETag'd poll can carry "sequence is now N". That matters for the
+sovereign story, because persistent connections are the expensive infrastructure — if most clients
+live at tier 0 or 1 most of the time, the socket count needed is far smaller than the user count.
+
+**This generalises something already in the design.** ROADMAP's serving model already says
+`docs.json` carries a timestamp and the client asks for *updates since* it, receiving "nothing, a
+delta, or a whole fresh `docs.json`". That is tiering, invented for the doc corpus. Generalising it
+to subscriptions is the same idea applied to arbitrary collections, and the **monotonic sequence**
+(§6.1) is already the cursor it needs — which also gives reconnection catch-up ("everything since
+N") without resynchronising the world.
+
+**What Firestore gets right and this must not lose:** offline persistence, automatic reconnect, and
+the "query result is a live object" mental model. The sequence cursor covers catch-up; the live-object
+convenience belongs in the *client library*, built over tier 1 + fetch, rather than in the protocol.
+Keeping it out of the protocol is what allows the cheap tiers to exist at all.
+
 ## D. Game realtime is a *different capability* — conflating it is the error
 
 Data subscriptions and game networking share a transport and nothing else:
