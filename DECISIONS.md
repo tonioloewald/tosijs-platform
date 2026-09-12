@@ -12,7 +12,7 @@ time, carry the entry with the code.
 | # | decision | lands in |
 |---|---|---|
 | [D1](#d1) | Three legs; this repo is the service layer | all |
-| [D2](#d2) | ajs rules stay pure predicates; transforms stay compiled TCB | this repo |
+| [D2](#d2) | ajs rules stay pure predicates; transforms → ajs once the host exists | this repo |
 | [D3](#d3) | The real root of trust is datastore access | this repo |
 | [D4](#d4) | `owner`/`super` add authority over rules, not power | this repo |
 | [D5](#d5) | Access is a lattice: boolean visibility × schema projection | this repo |
@@ -50,13 +50,29 @@ returning `{...data, revisions}` persists `{revisions}` alone. Data loss with a 
 **Correction (2026-09-06):** the original claim that predicates are "entirely unaffected" by #52 was
 **false and fails open** — [tjs-lang#54](https://github.com/tonioloewald/tjs-lang/issues/54).
 
-**Update (2026-09-11): #52 and #54 are FIXED in 0.13.12.** Verified directly; the tripwires guarding
-them fired and are now permanent regression cases. The original motivation for this decision is
-therefore **gone** — a transform returning `{...data, revisions}` now works. The decision is
-consequently **open for revisit**: keeping transforms compiled is now a choice about blast radius and
-about §6.1's "policy is not a sidecar" requirement, not a workaround for a language defect. One
-residual remains ([#56](https://github.com/tonioloewald/tjs-lang/issues/56), bare context bindings),
-neutralised at our boundary by interpreting rule results as `result === true`, never `!!result`.
+**SUPERSEDED (2026-09-12): transforms move to ajs. Blocked on the ajs host, not on a decision.**
+
+#52 and #54 were fixed in 0.13.12 (verified; the tripwires fired and became regression cases), so
+the *only* argument for compiled transforms — that ajs silently corrupted them — is gone. Recorded
+first as "open for revisit", which was wrong: on inspection nothing argues for keeping them compiled
+as a permanent choice, and two things argue against it.
+
+- **§6.1 requires it.** "Policy is not a sidecar" is unsatisfiable while transforms ship with a
+  deploy: a client cannot pin a policy version that lives in compiled code. Deploy atomicity depends
+  on the transform being part of the versioned endpoint artifact.
+- **Blast radius was the counter, and D12 answers it.** A procedure that cannot install unless its
+  own tests pass is a stronger gate than `tsc` plus review.
+
+So this is a **settled direction awaiting a prerequisite**, not an open question. The prerequisite is
+the ajs host; until it exists, transforms stay compiled because there is nowhere else to put them.
+
+Residual: [#56](https://github.com/tonioloewald/tjs-lang/issues/56) (bare context bindings still
+return their own name) — neutralised at our boundary by interpreting rule results as
+`result === true`, never `!!result`.
+
+When the port happens: the rule half must also honour
+[D13](#d13)(c) — meta-authority operations are unreachable from a procedure (now written into
+`UNIVERSAL-ENDPOINT.md` §4.3).
 **Lands in:** this repo. → `tjs-lang.baseline.test.ts` §5–§6.
 
 ## D3
@@ -272,7 +288,7 @@ owner authority and can mint a `super` — which D4 says only an owner may do. T
 increased their own authority, so monotonicity as written is satisfied while the property it exists
 to protect is defeated. Classic confused deputy.
 
-*Fix to design in before procedures exist* — the cheapest is **(c3)**: meta-authority operations
+*Fix — chosen 2026-09-12 and written into `UNIVERSAL-ENDPOINT.md` §4.3.* The cheapest option: meta-authority operations
 (mutating `role`, `super`, `owner`) are **not reachable from a procedure at all**; they require a
 direct, attributed write. That keeps D3's "root acts through the paved path" while removing the one
 place deferral is dangerous. The alternatives — intersecting caller and installer capabilities, or

@@ -93,6 +93,24 @@ Ordering is a security property: `isWriteAllowed` sees what will actually land, 
 
 - ajs, stored as documents, versioned.
 - Executed with caller's capabilities. Every write they perform goes through §3.
+- **Meta-authority operations are NOT reachable from a procedure.** Mutating `role`, or granting or
+  revoking `super`/`owner`, requires a direct, attributed write by the principal themselves.
+
+  *Why this exception exists.* "Executed with caller's capabilities" plus "procedures are data a
+  lesser principal may install" is a confused deputy. A `super` installs procedure P containing
+  *"add role R to user U"*; installing it escalates nothing. Later an `owner` invokes P — perhaps
+  indirectly, via a UI action, a scheduled job, or another procedure — and P runs **with owner
+  authority** and mints a `super`. The installer never raised their own authority, so the
+  monotonicity rule ("no write may increase the writer's own authority") is satisfied at every step
+  while the property it protects is defeated. The authority that matters is at **execution** time,
+  not install time.
+
+  The general statement: **authority to install is not authority to execute, and monotonicity must
+  hold over the composition, not over each write separately.** This clause is the narrow, cheap
+  enforcement of it — the broader alternatives (execute with caller ∩ *installer* capabilities, or
+  refuse to invoke a procedure you cannot read) are more general and more restrictive, and can be
+  revisited if a case demands them. Role changes are rare and deliberate, and keeping them
+  attributed is consistent with root acting through the paved path.
 - Old versions are retained; infrastructure cost is zero. Non-infrastructure cost is not zero, so invocation of every procedure version is logged so legacy use is visible and can be retired deliberately.
 - Procedures should declare the schema version they were written against. A procedure whose schema is gone fails loudly rather than running against a shape it does not understand.
 
