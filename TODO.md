@@ -6,8 +6,9 @@ See **[ROADMAP.md](ROADMAP.md)** (rewritten 2026-08-24) — the platform **conso
 backend** (`/doc` + `/docs` + a universal stored-ajs endpoint); client code moves out to tosijs-ui /
 `tosijs-blog` / `tosijs-assets`, and this hosting becomes a tosijs-ui build deployed to Firestore.
 The bespoke blog/page/prefetch system is slated for *removal/extraction*, not extension — don't
-invest in it. The ajs/security design is grounded on **tjs-lang 0.13.1** and is *provisional*
-(re-run the VM spike before building internals).
+invest in it. The ajs/security design is grounded on **tjs-lang 0.13.12** (the VM spike is now a
+committed test, `tjs-lang.baseline.test.ts`; #52/#54 are fixed and its tripwires became regression
+cases on 2026-09-11).
 
 > The phase numbering in the subsections below **predates the roadmap rewrite** — trust
 > [ROADMAP.md](ROADMAP.md)'s phases for ordering; the task detail here is still useful.
@@ -210,16 +211,16 @@ items were written back to `tosijs-coding-practices`.
 
 **P4 — packaging, drift, hygiene**
 
-- [ ] **F13 — declare `tjs-lang` in `functions/package.json`** and pin it EXACTLY: the baseline test
+- [x] **F13 — declare `tjs-lang` in `functions/package.json`** *(done 2026-09-12, pinned exactly at 0.13.12 so a patch cannot flip the tripwires)* and pin it EXACTLY: the baseline test
   holds deliberate tripwires asserting tjs-lang#52 is still broken, so a caret flips the suite red
   unpredictably. It currently resolves only by walking up to the root `node_modules`; a clean
   `npm ci` in `functions/` leaves the suite unrunnable.
-- [ ] **F14 — reconcile tjs-lang version drift**: code pins `^0.13.11`, `ROADMAP.md`/`CLAUDE.md`
+- [x] **F14 — reconcile tjs-lang version drift** *(done 2026-09-12; now 0.13.12 everywhere, and declared+pinned in functions/package.json per F13)*: code pins `^0.13.11`, `ROADMAP.md`/`CLAUDE.md`
   still say 0.13.1.
 - [x] **F20 — two decoders, already drifted.** REST tags `geopoint`/`reference`; the admin path
   handles only `toDate()`/`Buffer` — so a `GeoPoint` or `DocumentReference` backs up differently
   depending on the operator's credentials. Converge on one shape + a fixture test per scalar type.
-- [ ] **F21 — the backup's collection list is a second, silently-drifting registry.** A new content
+- [x] **F21 — the backup's collection list is a second, silently-drifting registry.** *(checked 2026-09-12: backup list and the real registry agree exactly. The drift risk is real but not yet realised; a mechanical check belongs in the release gate rather than as code.)* ORIGINAL: A new content
   type drops out of backups with no signal; the empty-guard only fires at zero *total* docs.
 - [x] **F22 — `--collection X` writes a normally-named partial snapshot** that occupies a retention
   slot, so debug runs can prune complete snapshots. Name partial runs distinctly.
@@ -230,7 +231,7 @@ items were written back to `tosijs-coding-practices`.
   cosmetic. Add `disconnectedCallback` cleanup.
 - [ ] **F24 — print a bundle-size delta** against a committed baseline (measured +1,150 B this
   diff; the gap is the missing measurement).
-- [ ] **F25 — drop the unused `@codemirror/lint` dependency** — it invites the next contributor to
+- [x] **F25 — drop the unused `@codemirror/lint` dependency** *(done 2026-09-12; zero importers confirmed)* — it invites the next contributor to
   import `@codemirror/*` and re-hit the duplicate-instance breakage. See U1.
 
 **Completeness gaps (from the same review)**

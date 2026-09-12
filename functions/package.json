@@ -33,6 +33,7 @@
     "eslint-plugin-import": "^2.32.0",
     "firebase-functions-test": "^3.4.1",
     "marked": "^13.0.3",
+    "tjs-lang": "0.13.12",
     "typescript": "^5.9.3"
   },
   "private": true

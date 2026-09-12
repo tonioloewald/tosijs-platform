@@ -88,10 +88,10 @@ authority, so it can mint a `super` without its installer ever having raised the
 The correct statement is that monotonicity must hold over the **composition**, and the intended fix
 is that meta-authority operations are unreachable from a procedure.
 
-**Open / not yet implemented:** `role.ts` still grants `ROLES.admin` `write: ALL`, which is the whole
-escalation chain (admin → self-grant developer → arbitrary JS). One-line fix available now
-(`[ROLES.admin]` → `[ROLES.owner]`); production currently has no admin, so it is preventive.
-Monotonicity itself needs D12's `isWriteAllowed`.
+**FIXED AND DEPLOYED 2026-09-12.** `role.ts` is owner-only; the escalation chain is severed at step
+one. The privilege-lifecycle tripwires flipped on contact and now assert the denial. Monotonicity
+itself — a `super` not being able to mint a peer — still needs D12's `isWriteAllowed`, and D13(c)
+records that it must hold over *deferred* execution too.
 
 **Demonstrated 2026-09-11**, no longer inferred: `privilege-lifecycle.integration.test.ts` §12–13
 drive it end-to-end — an admin writes the role collection, self-grants `developer`, and the new role
@@ -122,6 +122,11 @@ less (demonstrated).
 
 **Audit:** every production `AccessFilterFunc` is already a predicate returning the document
 unchanged; only the emulator-only demo fixture projects. So the split is nearly free.
+
+**Incomplete as stated — see [D13](#d13)(b).** This lattice covers the **document** axis only. It has
+no notion of a *capability* (migrations, storage, `/gen`, third-party APIs), which is
+role × capability → permitted invocation *and arguments*. Do not cite D5 as a complete access model
+until that third object type is designed.
 **Open:** union over schema *constraints* (`min`/`max`/`pattern`) is not obviously "most permissive".
 **Lands in:** this repo. → ROADMAP "The access lattice".
 
