@@ -269,6 +269,57 @@ waiting to happen. Where at-least-once delivery matters, logical replication is 
 monotonic sequence (§6.1) is what lets a reconnecting client say "everything since N" rather than
 resynchronising the world.
 
+### The worked case, and the refinement it forces: a subscription has a *subject*
+
+The Snowfox failure in full: backend batch processing updated **every company record thousands of
+times**, and somewhere in the app there was a **company selector** — so the client was subscribed to
+all companies and learned about every write.
+
+Note what the selector actually needed: `{id, name}`, for a few hundred companies. A few KB, changing
+almost never. What it received was every field of every record, thousands of times, because the churn
+was in fields it did not render.
+
+**This breaks the tier model as stated above, and the break is instructive.** Tier 1 (identity) would
+*still* have fired on every one of those thousands of writes, because the id did change. Sending
+less data per event does not help when the problem is the *number* of events. So the tiers as a
+single dial are insufficient: **what you are told about and what you are sent are orthogonal.**
+
+| axis | question | example |
+|---|---|---|
+| **filter** | which changes are *relevant to me* | "only when `name` changes" |
+| **payload** | how much detail to ship when one is | "just the id" |
+
+The company selector wants a narrow filter (`{id, name}`) with a light payload (ids). Under
+Firestore both were fixed and maximal, so the cheap thing was simply unavailable and the expensive
+thing was the only option.
+
+**The unification: let the projection schema be the subscription's subject.** D5 already gives every
+principal a projection — the sub-schema of a collection they may see. If a subscription names a
+projection, then one object answers three questions at once:
+
+- **authorization** — you may see exactly these fields (D5, unchanged)
+- **filter** — a write notifies you only if it changes *the projected value*
+- **payload** — what ships is the projection
+
+So "subscribe to the `{id, name}` view of `company`" makes the batch-processing churn **definitionally
+not a change to your subscription**. Thousands of writes produce zero notifications, server-side,
+before any fan-out — and with §6.2's partial evaluation the filter can be pushed into the change feed
+so most writes never reach the subscription machinery at all.
+
+That also makes the *common case correct by default*: you subscribe to the view you render, which is
+the thing you already had to declare for authorization. The abstraction stops leaking storage units
+into an app that cares about a list of names.
+
+**One necessary exception, or the rule is unsound.** A change to a field you do *not* project can
+still change whether you may see the row at all — a post whose `date` is cleared becomes invisible
+even to a subscriber projecting only `{title}`. So the complete rule is:
+
+> notify when **the projected value changed** *or* **visibility changed** (as an add or a remove).
+
+Visibility transitions are not optional and cannot be filtered away; they are the boolean axis of D5
+and they are exactly the events a naive "did my fields change?" implementation would drop. Getting
+this wrong is a stale-UI bug in the best case and a disclosure bug in the worst.
+
 ### Provenance: this design already exists because Firestore froze Snowfox
 
 Worth recording before it is lost, because it changes the status of everything below from *proposal*
