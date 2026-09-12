@@ -26,6 +26,12 @@ import './collections/config'
 import './collections/role'
 import './blog'
 import './page'
+import * as functions from 'firebase-functions'
+import { setAccessLogger } from './collections/access'
+
+// The decision layer logs through an injected sink so it carries no vendor
+// dependency (it is the portable kernel). Deployed, that sink is Cloud Logging.
+setAccessLogger(functions.logger)
 
 export { doc } from './doc'
 export { docs } from './docs'

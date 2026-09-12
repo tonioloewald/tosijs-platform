@@ -1,14 +1,14 @@
 {
-  "name": "tosijs-platform",
-  "version": "1.0.6",
-  "description": "Full-stack web application platform - Firebase + tosijs, simpler than PHP/LAMP",
+  "name": "service-compris",
+  "version": "0.1.0",
+  "description": "Service compris \u2014 the decision layer of a backend: RBAC, a write pipeline, and role resolution, with no I/O and no vendor.",
   "keywords": [
-    "tosijs",
-    "firebase",
-    "cms",
-    "blog",
-    "platform",
-    "full-stack"
+    "rbac",
+    "access-control",
+    "authorization",
+    "write-pipeline",
+    "backend",
+    "tosijs"
   ],
   "homepage": "https://github.com/tonioloewald/tosijs-platform",
   "repository": {
@@ -19,6 +19,7 @@
   "author": "Tonio Loewald",
   "type": "module",
   "files": [
+    "dist-lib",
     "README.md",
     "LICENSE"
   ],
@@ -41,7 +42,9 @@
     "backup:install": "bun scripts/backup-install.js",
     "backup:uninstall": "bun scripts/backup-install.js --uninstall",
     "test": "bun test src && cd functions && bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:lib": "tsc -p tsconfig.lib.json",
+    "prepublishOnly": "bun run build:lib && bun run test"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.0",
@@ -64,5 +67,16 @@
   "dependencies": {
     "firebase": "^12.16.0",
     "turndown": "^7.2.4"
+  },
+  "main": "./dist-lib/lib/index.js",
+  "types": "./dist-lib/lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist-lib/lib/index.d.ts",
+      "default": "./dist-lib/lib/index.js"
+    }
+  },
+  "peerDependencies": {
+    "tosijs-schema": "^1.8.0"
   }
 }

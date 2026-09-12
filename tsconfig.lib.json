@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "declaration": true,
+    "sourceMap": true,
+    "skipLibCheck": true,
+    "outDir": "dist-lib",
+    "rootDir": ".",
+    "types": []
+  },
+  "include": ["lib/index.ts", "functions/src/collections/write-pipeline.ts",
+              "functions/src/collections/access.ts", "functions/src/collections/roles.ts"]
+}

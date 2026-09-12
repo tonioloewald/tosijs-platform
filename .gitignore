@@ -56,3 +56,7 @@ src/*.js
 
 # Firestore backups (default location is outside the repo; this is a safety net)
 /backups
+
+# library build output (published, not committed)
+/dist-lib
+*.tgz

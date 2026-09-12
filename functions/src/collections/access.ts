@@ -132,9 +132,27 @@ COLLECTIONS['post/comment'] = {
 
 */
 
-import * as functions from 'firebase-functions'
 import { ROLES, UserRoles } from './roles'
 import type { Base } from 'tosijs-schema'
+
+/**
+ * Where this module reports refusals.
+ *
+ * Injectable, with a `console` default, so the decision layer carries **no
+ * vendor dependency** — it previously imported `firebase-functions` solely for
+ * `logger`, which coupled the one genuinely portable part of the service layer
+ * to Firebase. The deployed functions call `setAccessLogger(functions.logger)`
+ * at startup so structured Cloud Logging still applies there.
+ */
+export interface AccessLogger {
+  error: (message: string) => void
+}
+
+let accessLogger: AccessLogger = console
+
+export const setAccessLogger = (logger: AccessLogger): void => {
+  accessLogger = logger
+}
 
 export const ALL = Symbol('ALL')
 
@@ -281,7 +299,7 @@ export const getMethodAccess = (
   // submitted, which is the data-loss shape this codebase keeps finding. A
   // restriction we cannot honour must refuse the write, loudly, not approximate it.
   if (accessType === 'write' && access !== undefined && access !== ALL) {
-    functions.logger.error(
+    accessLogger.error(
       `access config for "${collectionPath}" restricts write access with a ` +
         'field map or predicate, which the write path does not enforce. ' +
         'Denying the write. Use `write: ALL` plus a `validate` transform, or ' +
