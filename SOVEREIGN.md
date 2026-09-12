@@ -269,6 +269,37 @@ waiting to happen. Where at-least-once delivery matters, logical replication is 
 monotonic sequence (§6.1) is what lets a reconnecting client say "everything since N" rather than
 resynchronising the world.
 
+### Provenance: this design already exists because Firestore froze Snowfox
+
+Worth recording before it is lost, because it changes the status of everything below from *proposal*
+to *reconstruction of something that already earned its keep*. ROADMAP's serving model —
+`docs.json` plus "ask for updates since timestamp, receive nothing / a delta / a whole fresh copy" —
+was **not** designed as an elegant generalisation. It was built to work around Firestore
+subscriptions that would **freeze Snowfox for thirty seconds at a time**.
+
+The important part is what that failure was *not*. Thirty seconds is not a bandwidth problem and not
+a server problem: it is **main-thread work proportional to change volume**, in a client that had no
+way to decline. The SDK materialises changed documents and maintains its local persistence whether
+or not the application currently cares, and there is no dial and no backpressure — so a busy
+collection, a batch write, or a migration becomes a UI stall.
+
+Two consequences for the tier design, one of which I had underweighted:
+
+1. **The cheap tiers are cheap in *work*, not merely in bytes.** That is where the freeze actually
+   lived. Tier 0 costs the client one integer comparison; tier 1 costs a set difference. Framing the
+   tiers as a bandwidth optimisation undersells them and would tempt an implementer to "optimise" by
+   batching fat payloads, which reintroduces the exact failure.
+2. **The protocol needs backpressure, which Firestore has none of.** Tiers alone are insufficient: a
+   client sitting at tier 3 on a busy collection can still be buried. The subscriber must be able to
+   say *"I am behind"* and have the server coalesce — and the natural coalescing is **degrade a tier**:
+   collapse a backlog of deltas into "these ids changed" (tier 1), or into "sequence is now N"
+   (tier 0). Because the tiers are nested, dropping down is always sound: the client can recover the
+   detail by fetching, and the sequence cursor tells it exactly what it missed.
+
+This is also the strongest form of D13's discipline. The design was not validated by reasoning about
+an unbuilt feature; it was validated by a production failure in a real application, and the
+generalisation is the same shape that already worked.
+
 ### Subscription granularity is a parameter, not a property
 
 Firestore's failure mode is that `onSnapshot` has **one granularity**: you get documents. So the
