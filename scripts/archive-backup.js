@@ -208,6 +208,65 @@ for (const dest of dests) {
   }
 }
 
+/**
+ * Mirror the content-addressed blob store — copy-once, never re-tarred.
+ *
+ * Storage objects are ~164 MB and essentially immutable. Putting them inside the
+ * nightly tarball would ship 164 MB to every destination every night to protect
+ * data that does not change; keeping 30 nights would be ~5 GB per cloud.
+ *
+ * Because `backup-storage.js` keys blobs by content hash, mirroring is just
+ * "copy the files that are not there yet": each unique image crosses the wire
+ * ONCE, ever, however many snapshots reference it. The snapshot's `storage.json`
+ * manifest rides in the tarball (it lives in the snapshot directory) and is what
+ * maps names back onto these blobs.
+ *
+ * Deliberately NOT pruned here. A blob is only safe to delete once no surviving
+ * manifest mentions it, and the destination does not hold every manifest — that
+ * decision belongs to `backup-storage.js --gc`, locally, where it can see them
+ * all.
+ */
+const mirrorBlobs = () => {
+  const localObjects = path.join(backupRoot, 'storage', 'objects')
+  if (!fs.existsSync(localObjects)) return
+  for (const dest of dests) {
+    const destObjects = path.join(
+      dest,
+      'tosijs-platform-backups',
+      projectId,
+      'storage-objects'
+    )
+    let sent = 0
+    let bytes = 0
+    let present = 0
+    for (const prefix of fs.readdirSync(localObjects)) {
+      const srcDir = path.join(localObjects, prefix)
+      const dstDir = path.join(destObjects, prefix)
+      for (const hex of fs.readdirSync(srcDir)) {
+        const src = path.join(srcDir, hex)
+        const dst = path.join(dstDir, hex)
+        if (fs.existsSync(dst)) {
+          present++
+          continue
+        }
+        bytes += fs.statSync(src).size
+        sent++
+        if (DRY) continue
+        fs.mkdirSync(dstDir, { recursive: true, mode: 0o700 })
+        fs.copyFileSync(src, dst)
+        fs.chmodSync(dst, 0o600)
+      }
+    }
+    log(
+      `  blobs -> ${destObjects}: ` +
+        `${DRY ? '[dry-run] ' : ''}${sent} new (${(bytes / 1048576).toFixed(1)} MB), ` +
+        `${present} already there`
+    )
+  }
+}
+
+mirrorBlobs()
+
 if (!DRY) {
   fs.unlinkSync(staging)
   if (copied === 0) {

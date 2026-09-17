@@ -14,8 +14,10 @@
  *
  * Everything machine-specific is resolved HERE, at install time.
  *
- * The job runs TWO steps, chained with `&&`: take the snapshot, then gzip it
- * off-machine into iCloud Drive / Google Drive (scripts/archive-backup.js). A
+ * The job runs THREE steps, chained with `&&`: take the Firestore snapshot,
+ * back up Cloud Storage blobs (content-addressed, so each image is fetched and
+ * stored once ever), then gzip the snapshot off-machine into iCloud Drive /
+ * Google Drive and mirror any new blobs there. A
  * local-only backup does not survive losing the laptop, which is the failure the
  * archive step exists for. The chain is deliberate — no snapshot, no archive,
  * and the archive's failure shows up in the same log.
@@ -41,7 +43,7 @@ const dryRun = has('dry-run')
 if (process.platform !== 'darwin') {
   console.error('This installer is macOS-only (launchd). On Linux use cron/systemd:')
   console.error(
-    `  0 3 * * * cd ${projectRoot} && bun scripts/backup-firestore.js --quiet --keep 30 && bun scripts/archive-backup.js --quiet --keep 30`
+    `  0 3 * * * cd ${projectRoot} && bun scripts/backup-firestore.js --quiet --keep 30 && bun scripts/backup-storage.js --quiet --gc && bun scripts/archive-backup.js --quiet --keep 30`
   )
   process.exit(1)
 }
@@ -135,7 +137,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
     <array>
         <string>/bin/sh</string>
         <string>-lc</string>
-        <string>cd ${projectRoot} &amp;&amp; ${bun} scripts/backup-firestore.js --quiet --keep 30 &amp;&amp; ${bun} scripts/archive-backup.js --quiet --keep 30</string>
+        <string>cd ${projectRoot} &amp;&amp; ${bun} scripts/backup-firestore.js --quiet --keep 30 &amp;&amp; ${bun} scripts/backup-storage.js --quiet --gc &amp;&amp; ${bun} scripts/archive-backup.js --quiet --keep 30</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
