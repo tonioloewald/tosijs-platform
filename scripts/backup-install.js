@@ -14,7 +14,10 @@
  *
  * Everything machine-specific is resolved HERE, at install time.
  *
- * The job runs THREE steps, chained with `&&`: take the Firestore snapshot,
+ * The job runs scripts/backup-run.js, which performs three steps in order —
+ * Firestore snapshot, Cloud Storage blobs, off-site archive — and, crucially,
+ * REPORTS failure (macOS notification + status file + non-zero exit) instead of
+ * failing silently the way this job once did for a day. Previously the steps were:
  * back up Cloud Storage blobs (content-addressed, so each image is fetched and
  * stored once ever), then gzip the snapshot off-machine into iCloud Drive /
  * Google Drive and mirror any new blobs there. A
@@ -43,7 +46,7 @@ const dryRun = has('dry-run')
 if (process.platform !== 'darwin') {
   console.error('This installer is macOS-only (launchd). On Linux use cron/systemd:')
   console.error(
-    `  0 3 * * * cd ${projectRoot} && bun scripts/backup-firestore.js --quiet --keep 30 && bun scripts/backup-storage.js --quiet --gc && bun scripts/archive-backup.js --quiet --keep 30`
+    `  0 3 * * * cd ${projectRoot} && bun scripts/backup-run.js --quiet`
   )
   process.exit(1)
 }
@@ -198,7 +201,7 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
     <array>
         <string>/bin/sh</string>
         <string>-lc</string>
-        <string>cd ${projectRoot} &amp;&amp; ${bun} scripts/backup-firestore.js --quiet --keep 30 &amp;&amp; ${bun} scripts/backup-storage.js --quiet --gc &amp;&amp; ${bun} scripts/archive-backup.js --quiet --keep 30</string>
+        <string>cd ${projectRoot} &amp;&amp; ${bun} scripts/backup-run.js --quiet</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>

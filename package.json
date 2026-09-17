@@ -55,7 +55,9 @@
     "verify:prod": "cd functions && VERIFY_HOSTING=https://loewald.com VERIFY_FUNCTIONS=https://us-central1-liquid-force-425209-g2.cloudfunctions.net bun test src/collections/live-site.integration.test.ts",
     "backup:archive": "bun scripts/archive-backup.js",
     "backup:storage": "bun scripts/backup-storage.js",
-    "restore:storage": "bun scripts/restore-storage.js"
+    "restore:storage": "bun scripts/restore-storage.js",
+    "backup:run": "bun scripts/backup-run.js",
+    "backup:check": "bun scripts/backup-check.js"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.0",
