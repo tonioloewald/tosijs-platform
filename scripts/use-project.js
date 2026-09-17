@@ -138,6 +138,38 @@ if (declared !== aliases[alias]) {
   process.exit(1)
 }
 
+// PRESERVE whatever is in place before overwriting it.
+//
+// This destroyed the production config once (2026-09-17): `firebase-config.ts`
+// held production, no `firebase-config.default.ts` existed, and switching to the
+// sandbox overwrote it with nothing to switch back to. It is gitignored, so git
+// could not restore it — the values had to be recovered from a source map and
+// the deployed bundle.
+//
+// So: if the current config names a project that has an alias, and that alias
+// has no variant file yet, save it as that variant first. Switching projects
+// must never be able to lose one.
+if (fs.existsSync(configPath)) {
+  const current = currentClientProject()
+  const currentAlias = Object.entries(aliases).find(
+    ([, id]) => id === current
+  )?.[0]
+  if (currentAlias && !fs.existsSync(variantPath(currentAlias))) {
+    fs.copyFileSync(configPath, variantPath(currentAlias))
+    console.log(
+      `preserved       -> firebase-config.${currentAlias}.ts (was in place, had no variant)`
+    )
+  } else if (!currentAlias) {
+    // Names a project with no alias: keep it under its project id rather than
+    // discarding it, since we cannot guess which alias it belongs to.
+    const rescue = path.join(projectRoot, 'src', `firebase-config.${current}.ts`)
+    if (current && !fs.existsSync(rescue)) {
+      fs.copyFileSync(configPath, rescue)
+      console.log(`preserved       -> firebase-config.${current}.ts (no alias for it)`)
+    }
+  }
+}
+
 fs.copyFileSync(variant, configPath)
 console.log(`client config  -> ${aliases[alias]} (from firebase-config.${alias}.ts)`)
 

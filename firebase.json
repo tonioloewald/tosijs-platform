@@ -27,7 +27,11 @@
   },
   "hosting": {
     "public": "dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
     "rewrites": [
       {
         "source": "/sitemap.xml",
@@ -73,6 +77,9 @@
           }
         ]
       }
+    ],
+    "predeploy": [
+      "bun scripts/assert-build-target.js"
     ]
   },
   "storage": {

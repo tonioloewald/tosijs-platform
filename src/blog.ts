@@ -1368,6 +1368,22 @@ export class XinPostEditor extends Component<PostEditorParts> {
           part: 'tabSelector',
           style: {
             flex: '1 1 auto',
+            // `minHeight: 0` — this is the one that actually fixes "the title
+            // disappears when you paste a slab of text", and it is not obvious.
+            //
+            // The title was never SHRINKING, so `flex-shrink: 0` on it changed
+            // nothing. It was being SCROLLED out of view: the wrapper above is
+            // `position:fixed` inset-0 with `overflowY:auto`, and a flex item
+            // defaults to `min-height:auto`, which refuses to shrink below its
+            // content. A big paste blows up CodeMirror's intrinsic height, this
+            // item grows to match, the wrapper becomes scrollable, and the
+            // browser scrolls it to keep the caret visible — taking the title
+            // off the top of the screen.
+            //
+            // Breaking the `min-height:auto` chain (here AND on the editor
+            // itself) keeps the panel inside the viewport so CodeMirror's own
+            // scroller handles long content and nothing above it ever moves.
+            minHeight: 0,
           },
           onChange: this.tabChanged,
         },
@@ -1440,6 +1456,22 @@ export class XinPostEditor extends Component<PostEditorParts> {
             mode: 'markdown',
             style: {
               flex: '1 1 auto',
+              // `minHeight: 0` is the companion to the title's `flexShrink: 0`,
+              // and without it that fix just moves the damage.
+              //
+              // A flex item defaults to `min-height: auto`, which refuses to
+              // shrink below the content's intrinsic height. Paste a slab of
+              // text and CodeMirror's intrinsic height jumps, so this item
+              // cannot shrink — the column overflows, and since the parent is
+              // `height:100%; overflow:hidden` the surplus is CLIPPED. Before
+              // the title was pinned it was the title that gave (the reported
+              // "heading disappears"); pinned but without this, the bottom of
+              // the post would be cut off instead, with no way to scroll to it.
+              //
+              // `minHeight: 0` lets the item shrink to its flex basis so
+              // CodeMirror's own scroller handles the overflow, which is what
+              // makes the editor scroll instead of the layout breaking.
+              minHeight: 0,
               resize: 'none',
             },
             // NOTE: the ACE-era `options: { wrap: true }` was removed in tosijs-ui
