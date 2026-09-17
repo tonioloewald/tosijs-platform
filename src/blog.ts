@@ -992,6 +992,37 @@ export class XinPostEditor extends Component<PostEditorParts> {
     this.remove()
   }
 
+  /**
+   * Copy server-authoritative fields from a saved document into the editor.
+   *
+   * Only touches metadata the endpoint owns or derives — never `content`, which
+   * the author may have kept typing while the save was in flight.
+   *
+   * Assignment goes through `.value` on the live proxy, and tosijs THROWS when
+   * the key is absent ("Attempted to assign to readonly property") rather than
+   * no-opping, so each field is checked first. `editPost` now seeds from
+   * `emptyPost` so they should all be present; this stays defensive because a
+   * throw here would land *after* a successful save, which is the worst place
+   * for one — the write succeeded and the UI would report failure.
+   */
+  #reconcileEditorFrom = (saved: Record<string, unknown>) => {
+    const target = blog.editorPost as unknown as Record<
+      string,
+      { value: unknown } | undefined
+    >
+    for (const field of ['path', 'date', 'summary'] as const) {
+      const next = saved[field]
+      if (next === undefined) continue
+      const slot = target[field]
+      if (slot === undefined) continue
+      try {
+        slot.value = next
+      } catch (e) {
+        console.error(`could not reconcile ${field} after save`, e)
+      }
+    }
+  }
+
   savePost = async () => {
     if (this.#blockedByProofread('saving')) return
     const { source } = this.parts
@@ -1061,6 +1092,25 @@ export class XinPostEditor extends Component<PostEditorParts> {
     const savedPost = fresh instanceof Error || !fresh ? data : fresh
     // @ts-ignore-error currentPost accepts a plain post object
     blog.currentPost = savedPost
+
+    // Reconcile the EDITOR with what was actually stored.
+    //
+    // Until now the editor only ever held the client's *guess* at the saved
+    // shape: `savePost` assigns its computed slug before the request and nothing
+    // ever reads the response back. Two ways that goes wrong:
+    //
+    //   - the server can compute a different slug. `blog.ts`'s validate uses
+    //     `title.toLocaleLowerCase().replace(/[^\w]+/g, '-')`, which keeps
+    //     underscores and leaves trailing hyphens; the client's `slugify` strips
+    //     diacritics, trims hyphens and caps at 80 characters. They agree on
+    //     simple titles and diverge on real ones.
+    //   - any field the endpoint stamps or derives (`_created`, `_modified`) is
+    //     invisible to the editor until a reload.
+    //
+    // The stored document is the authority, so read it back. Reported symptom:
+    // Path stayed blank in Metadata after saving a new post even though the URL
+    // updated correctly — i.e. the slug existed everywhere except the editor.
+    this.#reconcileEditorFrom(savedPost as Record<string, unknown>)
     // savedPost is a plain object, so linkFromRef reads primitive path/date — no
     // /undefined. Guard against a draft with no date producing NaN in the URL.
     try {
