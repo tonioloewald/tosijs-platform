@@ -98,14 +98,20 @@ const SCHEMAS: Record<string, unknown> = {
  * 88% of its own data.
  */
 const KNOWN_BAD: Record<string, number> = {
-  // Awaiting `scripts/migrate-schema-residue.js --apply`, then a fresh backup.
-  post: 748,
-  // page: FIXED 2026-09-16 by schema alone — `css` declared, `imageUrl` made
-  // optional. No data migration was needed, which is why it is 0 and not absent.
+  // ALL ZERO as of 2026-09-17. Every stored document passes its own schema.
+  //
+  // Got here two ways: the schemas were widened to match reality (`page.css`
+  // declared, `page.imageUrl` made optional, `module.type` declared), and
+  // `scripts/migrate-schema-residue.js --apply` repaired 749 documents in
+  // production — stripping Appwrite residue from 748 posts and backfilling one
+  // module's `version`. Verified against a fresh snapshot: 0 posts with
+  // residue, 0 modules without a version.
+  //
+  // Leaving the ratchet in place at 0 rather than deleting it: the value was
+  // never "we know about these", it is "this can only go down".
+  post: 0,
   page: 0,
-  // One module still predates `version`; the migration backfills it to 0.0.0.
-  // The other was fixed by declaring `type`.
-  module: 1,
+  module: 0,
 }
 
 const BACKUP_ROOT = join(

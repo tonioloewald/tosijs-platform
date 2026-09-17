@@ -99,6 +99,67 @@ if (!bun) {
   console.error('Error: bun not found on PATH')
   process.exit(1)
 }
+/**
+ * gcloud needs a Python it approves of, and launchd gives the job no login
+ * shell — so whatever `CLOUDSDK_PYTHON` you have exported interactively is NOT
+ * present here.
+ *
+ * This bit us: after the Cloud SDK was updated it refused to run under the
+ * system Python 3.9, and the nightly job failed with "no usable credentials"
+ * for a whole day while working perfectly by hand. The failure looks like an
+ * auth problem and is actually an interpreter problem.
+ *
+ * So resolve a working interpreter AT INSTALL TIME and bake it into the plist,
+ * the same way `bun`'s location is.
+ */
+function resolveCloudSdkPython() {
+  const works = (env) => {
+    try {
+      execSync('gcloud version', {
+        stdio: 'pipe',
+        env: { ...process.env, ...env },
+      })
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (works({})) return process.env.CLOUDSDK_PYTHON || null
+  const candidates = [
+    process.env.CLOUDSDK_PYTHON,
+    ...(() => {
+      try {
+        return execSync('ls -d ~/.local/share/uv/python/*/bin/python3* 2>/dev/null', {
+          encoding: 'utf-8',
+          shell: '/bin/sh',
+        })
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+      } catch {
+        return []
+      }
+    })(),
+    '/opt/homebrew/bin/python3.13',
+    '/opt/homebrew/bin/python3.12',
+    '/opt/homebrew/bin/python3.11',
+  ].filter(Boolean)
+  for (const c of candidates) {
+    if (fs.existsSync(c) && works({ CLOUDSDK_PYTHON: c })) return c
+  }
+  return null
+}
+
+const cloudSdkPython = resolveCloudSdkPython()
+if (cloudSdkPython) {
+  console.log(`Using CLOUDSDK_PYTHON=${cloudSdkPython}`)
+} else if (which('gcloud')) {
+  console.error(
+    'Warning: gcloud runs, but no explicit CLOUDSDK_PYTHON was needed or found.\n' +
+      '  If the scheduled run later fails with a Python error, re-run this installer.'
+  )
+}
+
 if (!which('gcloud')) {
   console.error(
     'Warning: gcloud not found on PATH. The backup falls back to a gcloud access\n' +
@@ -142,7 +203,13 @@ const plist = `<?xml version="1.0" encoding="UTF-8"?>
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>${PATH}</string>
+        <string>${PATH}</string>${
+          cloudSdkPython
+            ? `
+        <key>CLOUDSDK_PYTHON</key>
+        <string>${cloudSdkPython}</string>`
+            : ''
+        }
     </dict>
     <key>StartCalendarInterval</key>
     <dict>
