@@ -45,7 +45,11 @@ import { assetManager } from './asset-manager'
 export interface BlogRef {
   _path?: string
   title: string
-  path: ''
+  // `string`, not `''`. This was declared as the LITERAL empty string, so
+  // TypeScript believed a ref's path could only ever be `''` — which made every
+  // real slug a type error waiting to be `as`-cast away, and quietly justified
+  // the `as unknown as BlogRef` casts dotted around this file.
+  path: string
   date?: string
   keywords?: string[]
   summary: string

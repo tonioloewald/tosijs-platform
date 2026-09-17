@@ -22,6 +22,7 @@
 import * as admin from 'firebase-admin'
 
 import type { Store, StoredDoc, QueryOptions } from './collections/store'
+import { physicalPath } from './collections/namespace'
 
 type DocRef = FirebaseFirestore.DocumentReference
 type AnyRef = DocRef | FirebaseFirestore.Query
@@ -54,7 +55,12 @@ export class FirestoreStore implements Store {
   }
 
   private ref(path: string): DocRef {
-    const parts = path.split('/')
+    // Logical -> physical. The identity function today (`:` is a legal Firestore
+    // collection id), so this changes nothing and stored data is untouched. It
+    // is applied HERE so that a substrate whose naming rules differ — Postgres
+    // table names cannot contain `:` — is a change in namespace.ts and nowhere
+    // else. See tosijs-platform#7.
+    const parts = physicalPath(path).split('/')
     let ref: FirebaseFirestore.Firestore | DocRef =
       admin.firestore() as FirebaseFirestore.Firestore
     while (parts.length) {
