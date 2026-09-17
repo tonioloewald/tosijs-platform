@@ -10,6 +10,11 @@ export const ModuleSchema = s.object({
   // schema demanded a field only the later stage could supply. It is
   // endpoint-managed provenance, not caller data.
   revisions: s.integer.min(0).optional,
+  // Module source language, e.g. 'js'. Undeclared until 2026-09-16 even though
+  // BOTH live modules carry it — so neither could be saved through /doc, and
+  // the module editor was broken for every module that exists. `esm.ts` serves
+  // `source` as text/javascript regardless, which is why nothing noticed.
+  type: s.string.optional,
   tags: s.array(s.string),
   _created: s.string.optional,
   _modified: s.string.optional,
