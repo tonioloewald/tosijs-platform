@@ -280,8 +280,24 @@ export const { blog } = tosi({
     async editPost(post?: BlogPost) {
       post = tosiValue(post)
       // @ts-ignore-error
+      // `...emptyPost` FIRST, always. Every field the editor binds or assigns
+      // (`path`, `date`, `summary`, `keywords`, …) must exist on the object,
+      // because tosijs THROWS on assignment to a key that is not there:
+      //
+      //   (proxy.missingKey as any).value = x
+      //   -> TypeError: Attempted to assign to readonly property.
+      //
+      // It does not silently no-op. `savePost` assigns `editorPost.path.value`
+      // and `publish`/`unpublish` assign `editorPost.date!.value` — the `!`
+      // there was already admitting the field might be absent — so one missing
+      // key aborts the save BEFORE the network call, and the post appears to
+      // save with nothing happening.
+      //
+      // Not hypothetical: stored posts predate several of these fields, and at
+      // least one production post carries no `date` key at all.
       blog.editorPost = post
         ? {
+            ...emptyPost,
             ...post,
             content:
               post.format === 'markdown'
@@ -1332,6 +1348,11 @@ export class XinPostEditor extends Component<PostEditorParts> {
             bindValue: blog.editorPost.title,
             style: {
               marginTop: vars.xinBlogPad50,
+              // This is a flex child of a column that also contains the editor,
+              // which grows without bound as you type. Without this the title
+              // input is the thing that gives — it shrinks to a sliver and then
+              // to nothing once the content fills the pane.
+              flexShrink: 0,
             },
           }),
           // Shown only while a proofread diff is open in the editor below. The diff
