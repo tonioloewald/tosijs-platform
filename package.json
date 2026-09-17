@@ -49,7 +49,10 @@
     "deploy:sandbox-functions": "firebase deploy -P sandbox --only functions",
     "use": "bun scripts/use-project.js",
     "sandbox:provision": "bun scripts/provision-sandbox.js",
-    "sandbox:reset": "bun scripts/reset-sandbox.js"
+    "sandbox:reset": "bun scripts/reset-sandbox.js",
+    "clone-to-sandbox": "bun scripts/clone-to-sandbox.js",
+    "verify:sandbox": "cd functions && bun test src/collections/live-site.integration.test.ts",
+    "verify:prod": "cd functions && VERIFY_HOSTING=https://loewald.com VERIFY_FUNCTIONS=https://us-central1-liquid-force-425209-g2.cloudfunctions.net bun test src/collections/live-site.integration.test.ts"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.0",
