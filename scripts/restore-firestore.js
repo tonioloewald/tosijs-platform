@@ -36,11 +36,19 @@
  *   --collection <name> restore one collection
  *   --all               restore every collection in the snapshot (needs --yes)
  *   --write             perform writes (default is dry-run)
+ *   --repair            apply the schema-residue fix on the way in
+ *   --force             restore even though some documents will be rejected
  *   --yes               required with --all, as a second pair of eyes
  *   --token <idToken>   Firebase ID token; else TOSIJS_ID_TOKEN
  *   --base <url>        service base URL (default https://loewald.com)
  */
 
+import { validate } from 'tosijs-schema'
+import {
+  SCHEMAS,
+  planRepair,
+  applyPlan,
+} from './migrate-schema-residue.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -53,6 +61,8 @@ const has = (n) => args.includes(`--${n}`)
 
 const from = flag('from')
 const write = has('write')
+const repair = has('repair')
+const force = has('force')
 const base = flag('base') || 'https://loewald.com'
 const token = flag('token') || process.env.TOSIJS_ID_TOKEN
 
@@ -147,6 +157,77 @@ function collect() {
 }
 
 const docs = collect()
+
+/**
+ * PREFLIGHT — would these documents survive the write gate?
+ *
+ * Restores go through `/doc`, so every document is schema-validated on the way
+ * in. Without this check the loop below simply attempts all of them and reports
+ * failures afterwards, which means you discover a problem PART-WAY THROUGH A
+ * DISASTER RECOVERY, with some documents restored and some not.
+ *
+ * That is not hypothetical. As of 2026-09-17, 748 of 849 stored posts carry
+ * Appwrite migration residue that the schema rejects, so restoring today's
+ * backup would silently restore 101 posts and refuse the rest — a 12% restore
+ * reported as "done with some errors".
+ *
+ * So: validate everything first, say exactly what would fail, and refuse unless
+ * told what to do about it. `--repair` applies the same fix as
+ * scripts/migrate-schema-residue.js on the way in; `--force` proceeds anyway.
+ */
+const preflight = () => {
+  const failures = []
+  const repaired = []
+  for (const d of docs) {
+    const schema = SCHEMAS[d.collection]
+    if (!schema) continue
+    let data = d.data
+    if (repair) {
+      const plan = planRepair(d.collection, data)
+      if (plan) {
+        data = applyPlan(data, plan)
+        repaired.push(`${d.collection}/${d.id}`)
+      }
+    }
+    const errors = []
+    validate(data, schema, {
+      onError: (path, message) => errors.push(`${path}: ${message}`),
+      strict: true,
+    })
+    if (errors.length) failures.push({ id: `${d.collection}/${d.id}`, errors })
+    else if (repair) d.data = data
+  }
+  return { failures, repaired }
+}
+
+const { failures: wouldFail, repaired } = preflight()
+
+if (repaired.length) {
+  console.log(`--repair would fix ${repaired.length} document(s) on the way in`)
+}
+if (wouldFail.length) {
+  const tally = new Map()
+  for (const f of wouldFail) {
+    for (const e of f.errors) tally.set(e, (tally.get(e) ?? 0) + 1)
+  }
+  console.error(
+    `\n${wouldFail.length} of ${docs.length} document(s) would be REJECTED by /doc:\n` +
+      [...tally]
+        .sort((a, b) => b[1] - a[1])
+        .map(([e, n]) => `    ${n}x  ${e}`)
+        .join('\n') +
+      `\n    e.g. ${wouldFail[0].id}\n`
+  )
+  if (write && !force) {
+    console.error(
+      'REFUSING to restore a partial set. A restore that silently drops most of\n' +
+        'your documents is worse than one that does not start.\n\n' +
+        '  --repair   apply the known residue fix on the way in\n' +
+        '  --force    restore anyway, accepting the rejections\n'
+    )
+    process.exit(1)
+  }
+}
 
 console.log(
   `Snapshot ${path.basename(from)} · project ${manifest.project} · taken ${manifest.takenAt}`
