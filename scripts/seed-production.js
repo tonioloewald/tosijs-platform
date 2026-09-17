@@ -15,8 +15,16 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { initializeApp, cert } from 'firebase-admin/app'
-import { getFirestore } from 'firebase-admin/firestore'
+// firebase-admin lives under functions/ (npm-managed), not at the root, so it is
+// imported by explicit path — same resolution as scripts/backup-firestore.js.
+// The bare specifier worked only when this script happened to be run from a
+// context that could resolve it; invoked from provision-sandbox.js it could not.
+const adminBase = new URL(
+  '../functions/node_modules/firebase-admin/lib/',
+  import.meta.url
+).pathname
+const { initializeApp } = await import(`${adminBase}app/index.js`)
+const { getFirestore } = await import(`${adminBase}firestore/index.js`)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..')
@@ -34,11 +42,26 @@ function getProjectId() {
   }
 }
 
-const PROJECT_ID = getProjectId()
+// `--project <id>` overrides .firebaserc's default so a sandbox can be seeded
+// without repointing production. Added 2026-09-16 for scripts/provision-sandbox.js;
+// without it every sandbox seed would silently write to the live project.
+const projectFlagIndex = process.argv.indexOf('--project')
+const PROJECT_OVERRIDE =
+  projectFlagIndex !== -1 ? process.argv[projectFlagIndex + 1] : null
+
+const PROJECT_ID = PROJECT_OVERRIDE || getProjectId()
 
 if (!PROJECT_ID) {
   console.error('Error: Could not read project ID from .firebaserc')
   process.exit(1)
+}
+
+if (PROJECT_OVERRIDE && PROJECT_OVERRIDE === getProjectId()) {
+  // Not fatal — seeding production is this script's original purpose — but it
+  // should never happen by accident from a sandbox script, so say so loudly.
+  console.warn(
+    `\n!!  --project names the DEFAULT (production) project: ${PROJECT_ID}\n`
+  )
 }
 
 // Initialize Firebase Admin (uses application default credentials)
