@@ -234,3 +234,76 @@ describe(`live site: ${HOSTING}`, () => {
     expect(r.status).toBeGreaterThanOrEqual(400)
   })
 })
+
+/**
+ * The AUTHENTICATED half.
+ *
+ * Everything above is anonymous, which is most of the public contract and none
+ * of the authorization model. Until the sandbox had a sign-in provider there was
+ * no way to check role resolution or the privilege boundary against a REAL
+ * deployment — only against emulators, which is where three real bugs once hid
+ * behind skip-guarded tests.
+ *
+ * Supply a token to run these:
+ *
+ *   VERIFY_ID_TOKEN=$(bun scripts/sandbox-token.js --grant owner) \
+ *     bun test src/collections/live-site.integration.test.ts
+ *
+ * Skips LOUDLY without one. Read-only: every request is a GET, so this is safe
+ * to point at production with a real token.
+ */
+describe('authenticated behaviour', () => {
+  const token = process.env.VERIFY_ID_TOKEN
+  const authed = (url: string) =>
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+
+  const needsToken = (): boolean => {
+    if (guard()) return true
+    if (!token) {
+      console.log(
+        '   [SKIPPED] set VERIFY_ID_TOKEN — authorization NOT verified'
+      )
+      return true
+    }
+    return false
+  }
+
+  test('a token resolves to a principal with roles', async () => {
+    if (needsToken()) return
+    const r = await authed(`${FUNCTIONS}/user`)
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { roles?: string[] }
+    // The point: an authenticated caller is NOT anonymous. An empty roles array
+    // here means role resolution silently failed — which is exactly what a
+    // missing composite index looked like (a 500 before the index existed, and
+    // an empty principal if the query had failed softer).
+    expect(body.roles?.length ?? 0).toBeGreaterThan(0)
+  })
+
+  test('a privileged principal can list a protected collection', async () => {
+    if (needsToken()) return
+    const r = await authed(`${FUNCTIONS}/docs?p=role`)
+    expect(r.status).toBe(200)
+  })
+
+  test('the SAME request is opaque to an anonymous caller', async () => {
+    if (needsToken()) return
+    // The privilege boundary, asserted as a difference rather than in isolation:
+    // privileged 200 / anonymous 404 on one identical URL.
+    const anon = await get(`${FUNCTIONS}/docs?p=role`)
+    expect(anon.status).toBe(404)
+  })
+
+  test('role resolution does not 500 — the missing-index regression', async () => {
+    if (needsToken()) return
+    // `getUserRoles` queries `role` by `userIds array-contains` with an orderBy,
+    // which REQUIRES a composite index. It has no try/catch, so a missing index
+    // took every authenticated request to a 500. Production had the index by
+    // console; source control did not, so a freshly provisioned host had none
+    // and this failed until firestore.indexes.json declared it.
+    for (const path of ['user', 'docs?p=post', 'doc?p=config/app']) {
+      const r = await authed(`${FUNCTIONS}/${path}`)
+      expect(r.status).toBeLessThan(500)
+    }
+  })
+})

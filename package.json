@@ -57,7 +57,8 @@
     "backup:storage": "bun scripts/backup-storage.js",
     "restore:storage": "bun scripts/restore-storage.js",
     "backup:run": "bun scripts/backup-run.js",
-    "backup:check": "bun scripts/backup-check.js"
+    "backup:check": "bun scripts/backup-check.js",
+    "verify:sandbox:auth": "VERIFY_ID_TOKEN=$(bun scripts/sandbox-token.js --grant owner 2>/dev/null) bun --cwd functions test src/collections/live-site.integration.test.ts"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.0",
