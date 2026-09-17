@@ -102,10 +102,29 @@ describe('doc.ts denial branches do not disclose existence', () => {
   })
 
   test('isUnique is bound with document identity at the call site', () => {
-    // A 2-arg `isUnique` that ignores `ref` cannot exclude the document being
-    // written from its own collision check, so every update would fail its own
+    // A 2-arg `isUnique` that drops the document's own identity cannot exclude
+    // it from its own collision check, so every update would fail its own
     // unique constraint (review F12 predicted exactly this at cutover).
-    expect(docTs).toMatch(/isUnique:\s*\(field,\s*value\)\s*=>\s*isUnique\(path,\s*field,\s*value,\s*ref\)/)
+    //
+    // Since the substrate port (#7) the identity is the CANONICAL path rather
+    // than a Firestore ref — the property is unchanged, the spelling is not.
+    expect(docTs).toMatch(
+      /isUnique:\s*\(field,\s*value\)\s*=>[\s\S]{0,120}store\.isUnique\([^)]*canonicalPath/
+    )
+  })
+
+  test('mutations go through the Store port, not Firestore directly', () => {
+    // The port's whole claim is that `/doc` talks to a Store. A stray
+    // `ref.set()` / `ref.delete()` would silently bypass it — and keep working,
+    // which is why this is asserted rather than assumed.
+    // Match the CALL form (`await ref.set(`), not the bare words — doc comments
+    // in this file still discuss `ref.set()` historically, and matching prose
+    // instead of code is how a source-level test passes for the wrong reason.
+    const handler = docTs.slice(docTs.indexOf("switch (req.method)"))
+    expect(handler).not.toMatch(/await\s+ref\.set\(/)
+    expect(handler).not.toMatch(/await\s+ref\.delete\(/)
+    expect(handler).toMatch(/store\.set\(canonicalPath/)
+    expect(handler).toMatch(/store\.delete\(canonicalPath/)
   })
 })
 

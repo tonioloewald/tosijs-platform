@@ -36,6 +36,7 @@ import {
   runWritePipeline,
   type WriteMethod,
 } from './collections/write-pipeline'
+import { FirestoreStore } from './firestore-store'
 
 // Schema validation moved into `runWritePipeline` at the 2026-09-16 cutover —
 // including the `strict: true` flag that stops tosijs-schema stride-sampling
@@ -194,6 +195,16 @@ const isUnique = async (
   return !duplicate
 }
 
+/**
+ * The substrate the endpoint's MUTATIONS go through (tosijs-platform#7).
+ *
+ * `getRef`/`isUnique` are injected rather than imported by the store, which
+ * keeps the dependency acyclic and — more importantly — means the ported code
+ * runs the exact same resolution and uniqueness logic it did before. The port
+ * changes who the endpoint talks to, not what it says.
+ */
+const store = new FirestoreStore({ getRef, isUnique })
+
 export const getDoc = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -324,6 +335,20 @@ export const doc = onRequest({}, async (req, res) => {
     return
   }
 
+  // SUBSTRATE PORT (tosijs-platform#7): mutations go through `Store`, not
+  // Firestore. `resolve` canonicalizes `collection/field=value` to
+  // `collection/id` once, so the round-trip count is unchanged and every later
+  // call takes an unambiguous path.
+  //
+  // GET still uses `getRef` below — `docs.ts` and the read path are the
+  // remaining half of #7, and porting them together with the query semantics
+  // (filter-before-limit, D7) is a separate change.
+  const canonicalPath = await store.resolve(path)
+  if (canonicalPath instanceof Error) {
+    res.status(404).send(canonicalPath.message)
+    return
+  }
+
   const ref = await getRef(path)
   if (ref instanceof Error) {
     res.status(404).send(ref.message)
@@ -333,12 +358,12 @@ export const doc = onRequest({}, async (req, res) => {
     res.status(400).send('invalid path')
     return
   }
-  const doc = await ref.get()
+  const doc = await store.get(canonicalPath)
 
   switch (req.method) {
     case 'GET':
       if (doc.exists) {
-        let data = doc.data() as Record<string, unknown> | undefined
+        let data = doc.data as Record<string, unknown> | undefined
         if (access === ALL) {
           data = { ...data, _path: path }
         } else if (typeof access === 'function') {
@@ -357,8 +382,8 @@ export const doc = onRequest({}, async (req, res) => {
     case 'DELETE':
       if (doc.exists && access === ALL) {
         try {
-          const deleted = doc.data() as Record<string, unknown>
-          await ref.delete()
+          const deleted = doc.data as Record<string, unknown>
+          await store.delete(canonicalPath)
           // A delete mutates the collection exactly as a write does, so it must
           // invalidate the same caches. Omitting this was the original bug's twin:
           // edits were fixed while deleting a post still served it for up to 24h.
@@ -386,7 +411,7 @@ export const doc = onRequest({}, async (req, res) => {
       // stamp, envelope strip, schema, validate, unique — is now
       // `runWritePipeline`, which *decides* and returns a typed outcome. This
       // handler still *commits*, and that split is deliberate: everything below
-      // `ref.set()` (afterWrite, the response) is a side effect of committing and
+      // the commit (afterWrite, the response) is a side effect of committing and
       // belongs to the caller, not to a pure pipeline.
       //
       // Two things that MUST stay wired, both of which a naive "replace the whole
@@ -397,7 +422,7 @@ export const doc = onRequest({}, async (req, res) => {
       //   2. `isUnique`'s document identity — see the binding note in
       //      write-pipeline.ts. Self-exclusion is bound HERE; a fresh 2-arg
       //      implementation that ignores `ref` would fail every update.
-      const existing = (doc.exists ? doc.data() : {}) as Record<string, unknown>
+      const existing = doc.data
       // Single clock reading for the whole request (§4.1: no ambient time).
       const now = new Date().toJSON()
 
@@ -414,7 +439,8 @@ export const doc = onRequest({}, async (req, res) => {
         },
         {
           now: () => now,
-          isUnique: (field, value) => isUnique(path, field, value, ref),
+          isUnique: (field, value) =>
+            store.isUnique(_collectionPath, field, value, canonicalPath),
         }
       )
 
@@ -450,7 +476,7 @@ export const doc = onRequest({}, async (req, res) => {
 
       const data = outcome.data
       try {
-        await ref.set(data)
+        await store.set(canonicalPath, data)
         // Post-commit side effects (cache invalidation, etc). Deliberately
         // after the write — see CollectionConfig.afterWrite. Failures are
         // logged, never surfaced: the write already succeeded, and turning a

@@ -84,15 +84,18 @@ describe('B2: afterWrite is wired into DELETE, not just write', () => {
     expect(callSites.length).toBeGreaterThanOrEqual(2)
   })
 
-  test('the DELETE branch invokes afterWrite after ref.delete()', () => {
+  test('the DELETE branch invokes afterWrite after the delete lands', () => {
     const deleteBranch = source.slice(
       source.indexOf("case 'DELETE':"),
       source.indexOf("case 'POST':")
     )
-    expect(deleteBranch).toContain('ref.delete()')
+    // Since the substrate port (#7) the delete goes through the Store, so this
+    // matches `store.delete(...)` rather than `ref.delete()`. The ORDERING
+    // property is what matters and is unchanged.
+    expect(deleteBranch).toContain('store.delete(')
     expect(deleteBranch).toContain('config.afterWrite(')
     // ordering: invalidate AFTER the delete lands, same rule as the write path
-    expect(deleteBranch.indexOf('ref.delete()')).toBeLessThan(
+    expect(deleteBranch.indexOf('store.delete(')).toBeLessThan(
       deleteBranch.indexOf('config.afterWrite(')
     )
   })
