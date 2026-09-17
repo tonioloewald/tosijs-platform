@@ -74,6 +74,17 @@ export interface WritePipelineInput {
   body: Record<string, unknown>
   /** Stored document, or `{}`/null when creating. */
   existing: Record<string, unknown> | null
+  /**
+   * Whether the document exists, when the caller knows authoritatively.
+   *
+   * Omit and existence is inferred from `existing` being non-empty — which is
+   * what the shadow-mode harness did and is right for every test fixture. It is
+   * NOT right against a real store: Firestore permits an **empty document**
+   * (`set({})`), for which `doc.exists` is `true` while `Object.keys(data)` is
+   * empty. Inferring there would let a POST overwrite an existing document
+   * instead of being refused, so `doc.ts` passes `doc.exists` explicitly.
+   */
+  exists?: boolean
   config: CollectionConfig
   userRoles: UserRoles
 }
@@ -142,7 +153,7 @@ export async function runWritePipeline(
 ): Promise<WriteOutcome> {
   const { method, body, config, userRoles } = input
   const existing = input.existing ?? {}
-  const exists = Object.keys(existing).length > 0
+  const exists = input.exists ?? Object.keys(existing).length > 0
 
   // Existence guards — POST creates, PUT/PATCH update.
   if (exists && method === 'POST') {
@@ -175,8 +186,15 @@ export async function runWritePipeline(
 
   if (config.schema) {
     const errors: Array<{ path: string; message: string }> = []
-    const valid = schemaValidate(data, config.schema, (path, message) => {
-      errors.push({ path, message })
+    // `strict: true` — see the identical note in `doc.ts`'s validateWithSchema.
+    // Without it tosijs-schema stride-samples arrays past ~100 entries, so the
+    // write gate would only spot-check long arrays. Kept in lockstep with
+    // `doc.ts` deliberately: a divergence here is a shadow-mode false match.
+    const valid = schemaValidate(data, config.schema, {
+      onError: (path: string, message: string) => {
+        errors.push({ path, message })
+      },
+      strict: true,
     })
     if (!valid) {
       return {

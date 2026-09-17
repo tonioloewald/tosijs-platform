@@ -26,6 +26,10 @@ import { join } from 'path'
 const src = (f: string) => readFileSync(join(__dirname, '..', f), 'utf-8')
 const docTs = src('doc.ts')
 const docsTs = src('docs.ts')
+// Since the 2026-09-16 cutover the write DECISION lives in the pipeline and only
+// the commit and the HTTP mapping remain in doc.ts, so wiring assertions about
+// rejection messages have to span both files.
+const pipelineTs = src('collections/write-pipeline.ts')
 
 describe('docs.ts routes LIST denials through opaqueStatus', () => {
   test('it imports the shared helper', () => {
@@ -66,8 +70,42 @@ describe('doc.ts denial branches do not disclose existence', () => {
   })
 
   test('the two post-authorization conflicts say what happened without echoing input', () => {
-    expect(docTs).toContain("send('document already exists')")
-    expect(docTs).toContain("send('cannot update non-existent document')")
+    // The messages themselves moved into the pipeline at the cutover...
+    expect(pipelineTs).toContain("message: 'document already exists'")
+    expect(pipelineTs).toContain("message: 'cannot update non-existent document'")
+    // ...and neither interpolates the caller's path.
+    expect(pipelineTs).not.toMatch(/message: `[^`]*\$\{path\}/)
+  })
+
+  test('doc.ts maps existence rejections to 403, not the opaque 404', () => {
+    // This is the half that stayed behind, and it is the one that can regress:
+    // the pipeline returns a typed reason and doc.ts chooses the status. Sending
+    // 404 here would be "safer" and wrong — the caller already holds write
+    // access, so hiding existence only degrades an author's error messages
+    // (review F5). Pinned because nothing else would notice the change.
+    const write = docTs.slice(docTs.indexOf("case 'POST':"))
+    expect(write).toMatch(
+      /reason === 'exists' \|\| outcome\.reason === 'missing'[\s\S]{0,120}status\(403\)/
+    )
+  })
+
+  test('doc.ts is wired to the pipeline and keeps no second write path', () => {
+    // The cutover's real risk is a partial revert leaving both paths alive.
+    expect(docTs).toContain('runWritePipeline(')
+    // The inline sequence's distinctive steps must be gone from doc.ts.
+    expect(docTs).not.toContain('config.validate(')
+    expect(docTs).not.toContain('validateWithSchema(')
+    // Shadow mode compared the pipeline against the inline path; with the inline
+    // path gone it would compare the pipeline to itself and always "match",
+    // which is worse than no check at all.
+    expect(docTs).not.toContain('shadowCompareWrite')
+  })
+
+  test('isUnique is bound with document identity at the call site', () => {
+    // A 2-arg `isUnique` that ignores `ref` cannot exclude the document being
+    // written from its own collision check, so every update would fail its own
+    // unique constraint (review F12 predicted exactly this at cutover).
+    expect(docTs).toMatch(/isUnique:\s*\(field,\s*value\)\s*=>\s*isUnique\(path,\s*field,\s*value,\s*ref\)/)
   })
 })
 

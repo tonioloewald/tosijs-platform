@@ -44,9 +44,73 @@ const validateWithSchema = (
   const errors: { path: string; message: string }[] = []
   const onError: ErrorHandler = (path, message) =>
     errors.push({ path, message })
-  const valid = schemaValidate(data, schema, onError)
+  // `strict: true` mirrors doc.ts — see the stride-sampling describe block below.
+  // If this mirror drifts from doc.ts, these tests stop testing the write path.
+  const valid = schemaValidate(data, schema, { onError, strict: true })
   return { valid, errors }
 }
+
+/**
+ * The write gate must not stochastically sample.
+ *
+ * tosijs-schema 1.9.0's `validate()` stride-samples arrays past ~100 entries
+ * unless `strict: true`. Measured on 1.9.0 by exhaustively placing one bad
+ * element at every index: a 200-element array is wrongly accepted for 100 of
+ * the 200 positions, a 1000-element array for 900. `doc.ts` and
+ * `write-pipeline.ts` previously passed a bare ErrorHandler, so both got the
+ * sampling default — the write gate only spot-checked long arrays.
+ *
+ * Today's schemas keep small arrays (`tags`, `contacts`), so this was latent
+ * rather than exploited. It stops being latent when installed manifests carry
+ * caller-authored schemas (tosijs-platform#5).
+ *
+ * These tests fail if the `strict` flag is dropped from either validator, and
+ * the first one also fails if upstream ever makes strict the default — at which
+ * point the flag is redundant and can go, deliberately rather than by accident.
+ */
+describe('schema validation does not sample (strict)', () => {
+  const longArraySchema = { type: 'array', items: { type: 'string' } }
+  const withOneBadEntry = (length: number, badIndex: number) =>
+    Array.from({ length }, (_, i) => (i === badIndex ? 42 : 'ok'))
+
+  test('sampling IS the upstream default — the reason the flag is needed', () => {
+    // Tripwire: if this starts failing, upstream made strict the default.
+    const ignore: ErrorHandler = () => undefined
+    const missed = Array.from({ length: 200 }, (_, bad) =>
+      schemaValidate(withOneBadEntry(200, bad), longArraySchema, ignore)
+    ).filter(Boolean).length
+    expect(missed).toBeGreaterThan(0)
+  })
+
+  test('strict catches a bad entry at EVERY position in a 200-element array', () => {
+    for (let bad = 0; bad < 200; bad++) {
+      const { valid } = validateWithSchema(
+        withOneBadEntry(200, bad),
+        longArraySchema
+      )
+      if (valid) {
+        throw new Error(`bad entry at index ${bad} was accepted`)
+      }
+    }
+    expect(true).toBe(true)
+  })
+
+  test('strict catches a bad entry deep in a 1000-element array', () => {
+    const { valid } = validateWithSchema(
+      withOneBadEntry(1000, 997),
+      longArraySchema
+    )
+    expect(valid).toBe(false)
+  })
+
+  test('valid long arrays still pass', () => {
+    const { valid } = validateWithSchema(
+      Array.from({ length: 1000 }, () => 'ok'),
+      longArraySchema
+    )
+    expect(valid).toBe(true)
+  })
+})
 
 describe('COLLECTIONS.module.validate — revision provenance (uses `existing`)', () => {
   const roles = createUserRoles([ROLES.developer])

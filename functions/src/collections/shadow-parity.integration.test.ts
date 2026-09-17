@@ -1,4 +1,23 @@
 /**
+ * ============================ RETIRED 2026-09-16 ============================
+ *
+ * This harness compared the extracted pipeline against `doc.ts`'s INLINE write
+ * path. That inline path no longer exists — `doc.ts` now calls
+ * `runWritePipeline` directly (the cutover this file was built to justify), so
+ * there is nothing left to compare and `shadowCompareWrite` is no longer called
+ * by anything.
+ *
+ * Left in place, skipping unconditionally, rather than deleted: deleting it is
+ * a judgement call for the owner, and a file that quietly compared the pipeline
+ * to *itself* would report "match" forever — a vacuous pass dressed as
+ * verification, which is precisely the failure mode this repo keeps catching.
+ *
+ * Its job was done: 14 match / 3 expected-noop / 0 mismatch, 2026-09-06.
+ *
+ * DELETE ME (with `shadow-compare.ts` and `shadow-compare.test.ts`) once the
+ * cutover is confirmed in production.
+ * ===========================================================================
+ *
  * Shadow-mode PARITY against the live endpoint (ROADMAP Phase 1, rung 1).
  *
  * The unit tests prove the extracted pipeline reproduces `doc.ts`'s decisions on
@@ -99,6 +118,15 @@ beforeAll(async () => {
 })
 
 const guard = (): boolean => {
+  // RETIRED — see the banner at the top of this file. `doc.ts` no longer runs a
+  // second write path, so this can no longer measure anything. Skipping here
+  // rather than deleting the file keeps the history legible without letting it
+  // report a meaningless "match".
+  console.log(
+    '   [SKIPPED] shadow parity RETIRED at the 2026-09-16 cutover — nothing to compare'
+  )
+  return true
+
   if (!emulatorsRunning) {
     console.log('   [SKIPPED] Emulators not running — parity NOT verified')
     return true

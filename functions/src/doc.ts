@@ -33,26 +33,13 @@ import {
 import { COLLECTIONS } from './collections'
 import { UserRoles } from './collections/roles'
 import {
-  shadowEnabled,
-  shadowCompareWrite,
-} from './collections/shadow-compare'
-import { validate as schemaValidate } from 'tosijs-schema'
+  runWritePipeline,
+  type WriteMethod,
+} from './collections/write-pipeline'
 
-interface SchemaError {
-  path: string
-  message: string
-}
-
-const validateWithSchema = (
-  data: any,
-  schema: any
-): { valid: boolean; errors: SchemaError[] } => {
-  const errors: SchemaError[] = []
-  const valid = schemaValidate(data, schema, (path, message) => {
-    errors.push({ path, message })
-  })
-  return { valid, errors }
-}
+// Schema validation moved into `runWritePipeline` at the 2026-09-16 cutover —
+// including the `strict: true` flag that stops tosijs-schema stride-sampling
+// long arrays. See the note on that call in write-pipeline.ts.
 
 const compressResponse = compression()
 
@@ -393,126 +380,98 @@ export const doc = onRequest({}, async (req, res) => {
       break
     case 'POST':
     case 'PUT':
-    case 'PATCH':
-      // These two are reached only AFTER the access gate above, so the caller
-      // already holds write access to this collection — telling them a document
-      // exists is not a disclosure, and 404-ing them would degrade an author's
-      // error messages for no security gain (review F5). What is worth removing
-      // is the reflected path: there is never a reason to echo caller input back.
-      if (doc.exists && req.method === 'POST') {
-        res.status(403).send('document already exists')
-      } else if (!doc.exists && req.method !== 'POST') {
-        res.status(403).send('cannot update non-existent document')
-      } else {
-        const existing = (doc.exists ? doc.data() : {}) as Record<
-          string,
-          unknown
-        >
-        // Keep the caller's body as sent, so shadow mode can re-derive the write
-        // from the same inputs this handler started from (it is mutated below).
-        // F9: structuredClone, not a shallow spread. `data` below is built from
-        // the same `req.body.data`, so a shallow copy shares every nested object
-        // with the live write — a transform mutating a nested value would make
-        // the shadow re-derive from POST-mutation input and report a false match,
-        // which is the one thing a shadow must never do.
-        const shadowBody = shadowEnabled()
-          ? (structuredClone(req.body.data) as Record<string, unknown>)
-          : undefined
-        const shadowExisting = shadowEnabled()
-          ? (structuredClone(existing) as Record<string, unknown>)
-          : undefined
-        const _modified = new Date().toJSON()
-        const _created = (existing._created as string) || _modified
-        let data =
-          req.method === 'PATCH'
-            ? { ...existing, ...req.body.data, _created, _modified }
-            : { ...req.body.data, _created, _modified }
+    case 'PATCH': {
+      // CUT OVER to the extracted pipeline (ROADMAP Phase 1 rung 1, 2026-09-16).
+      // The inline sequence that used to live here — existence guards, merge and
+      // stamp, envelope strip, schema, validate, unique — is now
+      // `runWritePipeline`, which *decides* and returns a typed outcome. This
+      // handler still *commits*, and that split is deliberate: everything below
+      // `ref.set()` (afterWrite, the response) is a side effect of committing and
+      // belongs to the caller, not to a pure pipeline.
+      //
+      // Two things that MUST stay wired, both of which a naive "replace the whole
+      // block" cutover drops:
+      //   1. `afterWrite` — it is post-commit cache invalidation and it is NOT in
+      //      the pipeline (by design). Dropping it makes the blog serve stale
+      //      content for up to 24h, the exact bug it was added to fix.
+      //   2. `isUnique`'s document identity — see the binding note in
+      //      write-pipeline.ts. Self-exclusion is bound HERE; a fresh 2-arg
+      //      implementation that ignores `ref` would fail every update.
+      const existing = (doc.exists ? doc.data() : {}) as Record<string, unknown>
+      // Single clock reading for the whole request (§4.1: no ambient time).
+      const now = new Date().toJSON()
 
-        // Envelope fields are managed by the endpoint (id from the ref, collection
-        // from the path), not part of the content schema — strip them before
-        // validation so a strict schema doesn't reject them, and don't store them
-        // back as content. `_path` is the request path, also stripped before save.
-        delete (data as Record<string, unknown>)._id
-        delete (data as Record<string, unknown>)._collection
-        delete (data as Record<string, unknown>)._path
+      const outcome = await runWritePipeline(
+        {
+          method: req.method as WriteMethod,
+          body: req.body.data as Record<string, unknown>,
+          existing,
+          // Explicit, not inferred: Firestore allows an empty document, for
+          // which `doc.exists` is true but `existing` has no keys.
+          exists: doc.exists,
+          config,
+          userRoles,
+        },
+        {
+          now: () => now,
+          isUnique: (field, value) => isUnique(path, field, value, ref),
+        }
+      )
 
-        // Schema validation (runs first if schema is defined)
-        if (config.schema) {
-          const { valid, errors } = validateWithSchema(data, config.schema)
-          if (!valid) {
-            res.status(400).json({
-              error: 'schema validation failed',
-              details: errors,
-            })
-            return
-          }
-        }
-
-        // Custom validation (runs after schema validation)
-        if (config.validate) {
-          data = await config.validate(data, userRoles, existing)
-          if (data instanceof Error) {
-            res.status(400).send('validation failed')
-            return
-          }
-        }
-        for (const uniqueField of config.unique || []) {
-          if (!(await isUnique(path, uniqueField, data[uniqueField], ref))) {
-            res
-              .status(400)
-              .send(`"${uniqueField}" is required to exist and be unique`)
-            return
-          }
-        }
-        try {
-          delete data._path
-          await ref.set(data)
-          // Post-commit side effects (cache invalidation, etc). Deliberately
-          // after the write — see CollectionConfig.afterWrite. Failures are
-          // logged, never surfaced: the write already succeeded, and turning a
-          // saved document into an error response would be a worse lie than a
-          // stale cache.
-          if (config.afterWrite) {
-            try {
-              await config.afterWrite(data, userRoles)
-            } catch (e) {
-              functions.logger.warn(`afterWrite failed for ${path}:`, e)
-            }
-          }
+      if (outcome.status === 'rejected') {
+        // Existence rejections stay 403 (not 404): this point is reached only
+        // AFTER the access gate, so the caller already holds write access and
+        // telling them a document exists is not a disclosure. 404-ing them would
+        // degrade an author's error messages for no security gain (review F5).
+        if (outcome.reason === 'exists' || outcome.reason === 'missing') {
+          res.status(403).send(outcome.message)
+        } else if (outcome.reason === 'schema') {
           res
-            .status(200)
-            .send(`${req.method === 'POST' ? 'created' : 'updated'} ${path}`)
-
-          // Shadow mode (ROADMAP Phase 1 rung 1): re-derive this write through the
-          // extracted pipeline and log any divergence. Runs AFTER the response is
-          // sent and commits nothing, so it can neither slow nor alter the request.
-          // Off unless SHADOW_WRITE_PIPELINE=1.
-          // F8: deliberately NOT awaited. The response is already sent, but on
-          // Cloud Run gen2 an awaited promise keeps the invocation billed and
-          // holding a concurrency slot under post-response CPU throttling — so
-          // "cannot slow the request" was true of latency and false of cost.
-          // shadowCompareWrite swallows its own errors; .catch is belt-and-braces
-          // so an unhandled rejection can never crash the instance.
-          if (shadowBody !== undefined && shadowExisting !== undefined) {
-            void shadowCompareWrite({
-              path,
-              method: req.method as 'POST' | 'PUT' | 'PATCH',
-              body: shadowBody,
-              existing: shadowExisting,
-              config,
-              userRoles,
-              actual: structuredClone(data) as Record<string, unknown>,
-              now: _modified,
-            }).catch(() => {
-              /* diagnostics must never affect the request */
-            })
-          }
-        } catch (e) {
-          functions.logger.error(`Error saving ${path}:`, e)
-          res.status(500).send('Save failed')
+            .status(400)
+            .json({ error: outcome.message, details: outcome.details })
+        } else {
+          // `validate` and `unique`. Note this now surfaces the validator's own
+          // message where the inline path sent a fixed 'validation failed' and
+          // discarded it — a deliberate improvement, and the reason a rejected
+          // write is finally debuggable.
+          res.status(400).send(outcome.message)
         }
+        return
+      }
+
+      if (outcome.status === 'noop') {
+        // §3: an unchanged body neither writes nor re-stamps. The inline path
+        // re-stamped `_modified` on every PUT, so identical re-saves churned
+        // provenance and invalidated caches for nothing. No commit means no
+        // `afterWrite` — there is nothing to invalidate.
+        res.status(200).send(`unchanged ${path}`)
+        return
+      }
+
+      const data = outcome.data
+      try {
+        await ref.set(data)
+        // Post-commit side effects (cache invalidation, etc). Deliberately
+        // after the write — see CollectionConfig.afterWrite. Failures are
+        // logged, never surfaced: the write already succeeded, and turning a
+        // saved document into an error response would be a worse lie than a
+        // stale cache.
+        if (config.afterWrite) {
+          try {
+            await config.afterWrite(data, userRoles)
+          } catch (e) {
+            functions.logger.warn(`afterWrite failed for ${path}:`, e)
+          }
+        }
+        res
+          .status(200)
+          .send(`${req.method === 'POST' ? 'created' : 'updated'} ${path}`)
+      } catch (e) {
+        functions.logger.error(`Error saving ${path}:`, e)
+        res.status(500).send('Save failed')
       }
       break
+    }
     default:
       res.status(400).send('bad request type')
   }
