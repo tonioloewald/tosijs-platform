@@ -22,10 +22,13 @@ COLLECTIONS.role = {
     // already edit the datastore directly. When `super` is added (D4) it joins
     // this map; `admin` does not.
     //
-    // NOTE: the key order of this map is load-bearing. `getMethodAccess`
-    // iterates `Object.keys(config.access)` and the LAST matching role wins,
-    // replacing earlier entries — so adding a less-privileged role *below* this
-    // one would silently reduce an owner's access.
+    // Key order is NO LONGER load-bearing (changed 2026-09-17). This comment
+    // used to warn that `getMethodAccess` let the last matching role replace
+    // earlier ones, so adding a less-privileged entry below this one would
+    // silently reduce an owner's access. Grants are now joined as a lattice —
+    // `ALL` absorbing, field maps unioned, predicates ORed — so the result is
+    // independent of both config key order and role order. See `joinAccess` in
+    // access.ts, and the permutation property test in access.test.ts.
     [ROLES.owner]: {
       read: ALL,
       write: ALL,

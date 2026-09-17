@@ -75,15 +75,29 @@ const json = async (url: string) => {
 const published = (p: Record<string, unknown>) =>
   String(p.date ?? '').trim() !== ''
 
+// A cold Cloud Function can take several seconds, and this runs inside the
+// default `bun test` suite. Without an explicit budget the probe blew bun's 5s
+// per-test timeout and FAILED the run rather than skipping it — a network test
+// that turns red when the network is slow is worse than useless. Bounded here,
+// with the timeout treated as "unreachable" so the suite degrades to a loud
+// skip instead.
+const PROBE_MS = 20_000
+
 beforeAll(async () => {
   try {
-    const r = await json(`${FUNCTIONS}/docs?p=post`)
-    reachable = r.status === 200 && Array.isArray(r.body)
-    if (reachable) posts = r.body as Array<Record<string, unknown>>
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), PROBE_MS)
+    const res = await fetch(`${FUNCTIONS}/docs?p=post`, {
+      signal: controller.signal,
+    })
+    clearTimeout(timer)
+    const body = (await res.json()) as unknown
+    reachable = res.status === 200 && Array.isArray(body)
+    if (reachable) posts = body as Array<Record<string, unknown>>
   } catch {
     reachable = false
   }
-})
+}, PROBE_MS + 5_000)
 
 const guard = (): boolean => {
   if (!reachable) {

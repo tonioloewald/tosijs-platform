@@ -254,6 +254,107 @@ export const collectionPath = (path: string): string => {
   return pathParts.filter((_, index) => index % 2 === 0).join('/')
 }
 
+/**
+ * Join the grants a caller holds into one effective grant.
+ *
+ * ## Why this replaced last-match-wins
+ *
+ * This used to walk `Object.keys(config.access)` and let the LAST matching role
+ * *replace* the running value. Two consequences, both bad:
+ *
+ *   - **holding more roles could grant less.** If a narrower role sorted after a
+ *     broader one, the narrow one won. Nothing in the type system or the config
+ *     format said so; it was decided by object literal key order.
+ *   - **key order was load-bearing**, so `role.ts` carried a warning comment
+ *     explaining that adding a less-privileged entry *below* `owner` would
+ *     silently reduce an owner's access. Configs were correct only by
+ *     convention — every one of them happens to list the privileged role last.
+ *
+ * That convention cannot survive install manifests (tosijs-platform#5), where
+ * the access map is generated from JSON and key order arrives from a file
+ * nobody thinks of as ordered. So precedence becomes a **lattice join**:
+ * order-independent by construction, per ROADMAP §"The access lattice" (D5).
+ *
+ * ## The lattice
+ *
+ * `ALL` is the top element: `join(ALL, anything) === ALL`.
+ *
+ * | grant kind            | join rule                                    |
+ * |-----------------------|----------------------------------------------|
+ * | `ALL`                 | absorbing — wins outright                    |
+ * | `FieldAccessMap`      | **union** of permitted fields                |
+ * | `AccessFilterFunc`    | **OR** — any predicate that permits, permits  |
+ *
+ * ## The mixed case
+ *
+ * A predicate and a field map together are not cleanly comparable, because
+ * `AccessFilterFunc` currently conflates two axes that D5 separates: row
+ * VISIBILITY (a boolean) and field PROJECTION (a schema). Until that split
+ * lands, mixed grants resolve most-permissively and deterministically: try the
+ * predicates first (OR); if one permits, its result stands, since a production
+ * predicate returns the row unchanged and that is strictly wider than any field
+ * map. If none permits, fall back to the union of the field maps, so a field map
+ * still grants on its own.
+ *
+ * This case does not arise in any shipped config — every production predicate is
+ * paired only with `ALL` — but it is reachable from a manifest, so it is defined
+ * rather than left to chance.
+ */
+export const joinAccess = (
+  grants: Array<typeof ALL | FieldAccessMap | AccessFilterFunc>
+): typeof ALL | FieldAccessMap | AccessFilterFunc | undefined => {
+  if (grants.length === 0) return undefined
+  if (grants.length === 1) return grants[0]
+
+  // `ALL` is absorbing. Checked first so the common case is cheap and no
+  // strainer is ever built when one is not needed.
+  if (grants.some((g) => g === ALL)) return ALL
+
+  const funcs = grants.filter(
+    (g) => typeof g === 'function'
+  ) as AccessFilterFunc[]
+  const maps = grants.filter(
+    (g) => typeof g === 'object' && g !== null
+  ) as FieldAccessMap[]
+
+  const unionOfMaps = (): FieldAccessMap | undefined => {
+    if (!maps.length) return undefined
+    const union: FieldAccessMap = {}
+    for (const map of maps) {
+      for (const key of Object.keys(map)) {
+        // A field permitted by ANY held role is permitted. `ALL` on a field is
+        // the top of that field's own little lattice.
+        if (union[key] !== ALL) union[key] = map[key]
+      }
+    }
+    return union
+  }
+
+  if (!funcs.length) return unionOfMaps()
+
+  const fallback = unionOfMaps()
+  return async (data: any, userRoles?: any): Promise<any> => {
+    let lastError: unknown
+    for (const fn of funcs) {
+      const result = await fn(data, userRoles)
+      // A predicate signals denial with an Error (or nothing); anything else is
+      // a grant. First grant wins — they are ORed, so one suffices.
+      if (!(result instanceof Error) && result !== undefined) return result
+      lastError = result
+    }
+    if (fallback) {
+      const filtered: { [key: string]: any } = { _path: data?._path }
+      for (const key of Object.keys(fallback)) {
+        if (fallback[key] === ALL) filtered[key] = data[key]
+      }
+      return filtered
+    }
+    return lastError instanceof Error
+      ? lastError
+      : new Error('access denied')
+  }
+}
+
 export const getMethodAccess = (
   collections: CollectionMap,
   collectionPath: string,
@@ -267,23 +368,26 @@ export const getMethodAccess = (
     return undefined
   }
 
-  let roleAccess = config.access[ROLES.public]
   const accessType = accessMap[method] as 'read' | 'write' | 'list' | undefined
 
   if (accessType === undefined) {
     return undefined
   }
 
-  let access = roleAccess ? roleAccess[accessType] : undefined
-
+  // Collect every grant that applies to this caller: `public` always, plus each
+  // role they hold. A SET of grants, not a sequence — which is the whole point,
+  // see joinAccess.
+  const grants: Array<typeof ALL | FieldAccessMap | AccessFilterFunc> = []
+  const publicGrant = config.access[ROLES.public]?.[accessType]
+  if (publicGrant !== undefined) grants.push(publicGrant)
   for (const role of Object.keys(config.access)) {
-    if (userRoles.roles.includes(role as keyof typeof ROLES)) {
-      roleAccess = config.access[role]
-      if (roleAccess && roleAccess[accessType]) {
-        access = roleAccess[accessType]
-      }
-    }
+    if (role === ROLES.public) continue
+    if (!userRoles.roles.includes(role as keyof typeof ROLES)) continue
+    const grant = config.access[role]?.[accessType]
+    if (grant !== undefined) grants.push(grant)
   }
+
+  let access = joinAccess(grants)
 
   // FAIL CLOSED on a write restriction we do not actually enforce (review F1).
   //

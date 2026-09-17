@@ -357,7 +357,13 @@ describe('getMethodAccess — multi-role precedence', () => {
     },
   }
 
-  test('last matching role in config order wins (editor ALL overrides author field-map)', () => {
+  // RENAMED 2026-09-17. This was "last matching role in config order wins",
+  // which described the mechanism that was just REMOVED. The assertion was
+  // always right and the explanation was always fragile: it held because `ALL`
+  // happens to be absorbing AND `editor` happens to be listed after `author`.
+  // Reorder the config literal and the old implementation returned the field
+  // map instead — silently granting less to someone holding MORE roles.
+  test('ALL is absorbing: editor ALL joins with author field-map to ALL', () => {
     const user = createUserRoles([ROLES.author, ROLES.editor])
     expect(getMethodAccess(collections, 'articles', 'POST', user)).toBe(ALL)
   })
@@ -368,6 +374,70 @@ describe('getMethodAccess — multi-role precedence', () => {
     expect(getMethodAccess(collections, 'articles', 'POST', a)).toBe(
       getMethodAccess(collections, 'articles', 'POST', b)
     )
+  })
+
+  /**
+   * The property the lattice exists to guarantee, over BOTH orderings.
+   *
+   * Role-array order was already covered. Config KEY order was not, and that is
+   * the one that mattered: `getMethodAccess` walked `Object.keys(config.access)`
+   * and let the last match replace the running value, so the access a caller got
+   * depended on how someone happened to type an object literal. Every shipped
+   * config listed the privileged role last, so it worked — by convention.
+   *
+   * Install manifests (tosijs-platform#5) generate that map from JSON, where key
+   * order is preserved but nobody treats it as semantic. This test is what makes
+   * generated configs safe.
+   */
+  const permutations = <T, >(items: T[]): T[][] =>
+    items.length <= 1
+      ? [items]
+      : items.flatMap((item, i) =>
+          permutations([...items.slice(0, i), ...items.slice(i + 1)]).map(
+            (rest) => [item, ...rest]
+          )
+        )
+
+  test('result is independent of config KEY order, for every permutation', () => {
+    const entries: Array<[string, any]> = [
+      [ROLES.public, { read: ALL, list: ALL }],
+      [ROLES.author, { write: { title: ALL, body: ALL } }],
+      [ROLES.editor, { write: ALL }],
+    ]
+    const user = createUserRoles([ROLES.author, ROLES.editor])
+
+    const results = permutations(entries).map((ordering) => {
+      const shuffled: CollectionMap = {
+        articles: { access: Object.fromEntries(ordering) },
+      }
+      return getMethodAccess(shuffled, 'articles', 'POST', user)
+    })
+
+    expect(results.length).toBe(6)
+    // Every ordering must agree, and agree on the PERMISSIVE answer.
+    for (const r of results) expect(r).toBe(ALL)
+  })
+
+  test('holding more roles never grants less', () => {
+    // The concrete regression: with the old walk, `author` alone denied (F1
+    // fail-closed on an unenforceable write field map) and `author + editor`
+    // granted ALL — but only because of key order. Reverse the literal and
+    // adding the editor role took access AWAY. Monotonicity, pinned.
+    const reversed: CollectionMap = {
+      articles: {
+        access: {
+          [ROLES.editor]: { write: ALL },
+          [ROLES.author]: { write: { title: ALL, body: ALL } },
+        },
+      },
+    }
+    const authorOnly = createUserRoles([ROLES.author])
+    const both = createUserRoles([ROLES.author, ROLES.editor])
+
+    expect(getMethodAccess(reversed, 'articles', 'POST', authorOnly)).toBeUndefined()
+    // Adding a role must not reduce access — this returned the field map (and
+    // therefore denied) before the join.
+    expect(getMethodAccess(reversed, 'articles', 'POST', both)).toBe(ALL)
   })
 
   // CHANGED 2026-09-06 (review F1). This used to assert that an author-only

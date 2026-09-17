@@ -67,11 +67,50 @@ describe('token pass-through: capability grants exactly the caller’s rights', 
     expect(await pub.get('post/a')).toMatchObject({ title: 'A' })
   })
 
-  test('editor read is field-strained (no body)', async () => {
+  /**
+   * CHANGED 2026-09-17 with the access-lattice join, and the change is the
+   * point rather than a casualty of it.
+   *
+   * This asserted that an editor sees `title` but NOT `body`, because the
+   * `editor` field map replaced the `public` predicate under the old
+   * last-match-wins walk. That restriction was never real: an editor is also a
+   * member of the public, and `public.read` returns the WHOLE row for a
+   * published post. The editor could see `body` at any time by simply not
+   * sending their token. Measured, both before and after:
+   *
+   *     anonymous  body = "secret-A"
+   *     editor     body = "secret-A"   (after the join)
+   *     editor     body = undefined    (before — while anonymous still saw it)
+   *
+   * So the old behaviour restricted the *more* privileged principal and left
+   * the *less* privileged one unrestricted — an illusory control that read as
+   * enforcement. The lattice unions grants, so a role can never see less than
+   * the public grant it also holds. Monotonicity, which is what D5 asks for.
+   *
+   * To actually hide `body` from editors, `public.read` must stop returning it.
+   * A narrower role grant cannot claw back what public already gives away.
+   */
+  test('editor sees at least what public sees — a role never grants less', async () => {
     const editor = capFor([ROLES.editor])
-    const doc = (await editor.get('post/a')) as Record<string, unknown>
-    expect(doc.title).toBe('A')
-    expect(doc.body).toBeUndefined()
+    const pub = capFor([])
+    const asEditor = (await editor.get('post/a')) as Record<string, unknown>
+    const asPublic = (await pub.get('post/a')) as Record<string, unknown>
+
+    expect(asEditor.title).toBe('A')
+    // The honest assertion: whatever public can see, the editor can see.
+    for (const key of Object.keys(asPublic)) {
+      expect(asEditor[key]).toEqual(asPublic[key])
+    }
+  })
+
+  test('a field map DOES strain when no wider grant applies', async () => {
+    // The projection still works — it just cannot undercut `public`. Here the
+    // row is unpublished, so the public predicate denies and only the editor's
+    // field map grants, which is exactly when straining is meaningful.
+    const editor = capFor([ROLES.editor])
+    const doc = (await editor.get('post/b')) as Record<string, unknown>
+    expect(doc?.title).toBe('B')
+    expect(doc?.body).toBeUndefined()
   })
 
   test('list is filtered/strained per principal', async () => {
