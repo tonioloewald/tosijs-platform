@@ -83,6 +83,16 @@ const published = (p: Record<string, unknown>) =>
 // skip instead.
 const PROBE_MS = 20_000
 
+/**
+ * Per-test budget. Every test here makes at least one network call, and a Cloud
+ * Function that has just been deployed is COLD — which is precisely when this
+ * suite gets run. Bun's 5s default turned a healthy `/esm` (verified at 0.4s
+ * warm) into a red run immediately after a production deploy. A verification
+ * suite that fails because the thing it verifies was starting up is worse than
+ * useless: it trains you to ignore it.
+ */
+const NET_MS = 30_000
+
 beforeAll(async () => {
   try {
     const controller = new AbortController()
@@ -144,7 +154,7 @@ describe(`live site: ${HOSTING}`, () => {
     const rows = (r.body as unknown[]) ?? []
     expect(rows.length).toBe(5)
     expect((rows as Array<Record<string, unknown>>).every(published)).toBe(true)
-  })
+  }, NET_MS)
 
   test('a draft IS still readable by direct link (deliberate)', async () => {
     if (guard()) return
@@ -163,7 +173,7 @@ describe(`live site: ${HOSTING}`, () => {
     }
     const r = await json(`${FUNCTIONS}/doc?p=${encodeURIComponent(draftPath)}`)
     expect(r.status).toBe(200)
-  })
+  }, NET_MS)
 
   test('a protected collection denies OPAQUELY (404, never 403)', async () => {
     if (guard()) return
@@ -172,14 +182,14 @@ describe(`live site: ${HOSTING}`, () => {
       const r = await get(`${FUNCTIONS}/docs?p=${path}`)
       expect(r.status).toBe(404)
     }
-  })
+  }, NET_MS)
 
   test('/user leaks no privilege to an anonymous caller', async () => {
     if (guard()) return
     const r = await json(`${FUNCTIONS}/user`)
     const body = r.body as { roles?: string[] } | null
     expect(body?.roles ?? []).toEqual([])
-  })
+  }, NET_MS)
 
   test('the sitemap advertises only published posts', async () => {
     if (guard()) return
@@ -189,7 +199,7 @@ describe(`live site: ${HOSTING}`, () => {
     for (const d of drafts) {
       expect(r.text).not.toContain(`/${String(d.path)}`)
     }
-  })
+  }, NET_MS)
 
   test('the sitemap emits no undefined hosts', async () => {
     if (guard()) return
@@ -197,14 +207,14 @@ describe(`live site: ${HOSTING}`, () => {
     // host lookup that returned undefined and was never checked.
     const r = await get(`${FUNCTIONS}/sitemap`)
     expect(r.text).not.toContain('undefined')
-  })
+  }, NET_MS)
 
   test('SSR serves HTML for the homepage', async () => {
     if (guard()) return
     const r = await get(`${HOSTING}/`)
     expect(r.status).toBe(200)
     expect(r.type).toContain('text/html')
-  })
+  }, NET_MS)
 
   test('SSR serves HTML for a published post slug', async () => {
     if (guard()) return
@@ -213,7 +223,7 @@ describe(`live site: ${HOSTING}`, () => {
     const r = await get(`${HOSTING}/${String(slug)}`)
     expect(r.status).toBe(200)
     expect(r.type).toContain('text/html')
-  })
+  }, NET_MS)
 
   test('/esm serves a public module as javascript', async () => {
     if (guard()) return
@@ -226,13 +236,13 @@ describe(`live site: ${HOSTING}`, () => {
     const r = await get(`${HOSTING}/esm/${String(list[0].name)}`)
     expect(r.status).toBe(200)
     expect(r.type).toContain('javascript')
-  })
+  }, NET_MS)
 
   test('/esm does not serve a module that is not public', async () => {
     if (guard()) return
     const r = await get(`${HOSTING}/esm/definitely-not-a-public-module`)
     expect(r.status).toBeGreaterThanOrEqual(400)
-  })
+  }, NET_MS)
 })
 
 /**
@@ -278,13 +288,13 @@ describe('authenticated behaviour', () => {
     // missing composite index looked like (a 500 before the index existed, and
     // an empty principal if the query had failed softer).
     expect(body.roles?.length ?? 0).toBeGreaterThan(0)
-  })
+  }, NET_MS)
 
   test('a privileged principal can list a protected collection', async () => {
     if (needsToken()) return
     const r = await authed(`${FUNCTIONS}/docs?p=role`)
     expect(r.status).toBe(200)
-  })
+  }, NET_MS)
 
   test('the SAME request is opaque to an anonymous caller', async () => {
     if (needsToken()) return
@@ -292,7 +302,7 @@ describe('authenticated behaviour', () => {
     // privileged 200 / anonymous 404 on one identical URL.
     const anon = await get(`${FUNCTIONS}/docs?p=role`)
     expect(anon.status).toBe(404)
-  })
+  }, NET_MS)
 
   test('role resolution does not 500 — the missing-index regression', async () => {
     if (needsToken()) return
@@ -305,5 +315,5 @@ describe('authenticated behaviour', () => {
       const r = await authed(`${FUNCTIONS}/${path}`)
       expect(r.status).toBeLessThan(500)
     }
-  })
+  }, NET_MS)
 })

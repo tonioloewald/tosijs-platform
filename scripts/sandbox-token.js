@@ -115,7 +115,12 @@ const { idToken, localId } = res.json
  * depend on which path runs.
  */
 if (val('grant')) {
-  const role = val('grant')
+  // Comma-separated, because roles are INDEPENDENT rather than hierarchical:
+  // `owner` is meta-authority over role/config and grants nothing on `post`,
+  // which is an `author` collection. A principal that needs to both administer
+  // and write content holds both, exactly as a real role document does.
+  const roles = val('grant').split(',').map((r) => r.trim()).filter(Boolean)
+  const role = roles.join('+')
   const { token } = await import('./sandbox-lib.js')
   const docPath =
     `https://firestore.googleapis.com/v1/projects/${projectId}` +
@@ -124,7 +129,7 @@ if (val('grant')) {
   const body = {
     fields: {
       name: { stringValue: `Sandbox ${role}` },
-      roles: { arrayValue: { values: [{ stringValue: role }] } },
+      roles: { arrayValue: { values: roles.map((r) => ({ stringValue: r })) } },
       userIds: { arrayValue: { values: [{ stringValue: localId }] } },
       contacts: {
         arrayValue: {
