@@ -20,6 +20,22 @@ export const helloWorld = onRequest((request, response) => {
 });
 */
 
+// `/state` was REMOVED 2026-09-18. It was a second, unaudited write path into
+// the same datastore the access model governs: owner-gated, but bypassing
+// COLLECTIONS, schema, validate, uniqueness and afterWrite entirely — writing
+// arbitrary caller-named collections with merge:true, stamping `_path` into
+// stored documents (the one field /doc deliberately strips, so it could forge
+// provenance §5 calls unforgeable), and batch-deleting whole collections.
+//
+// It had to go BEFORE /install ships: every invariant the install system
+// asserts would otherwise be bypassable with one POST /state/push.
+//
+// It granted an owner nothing they could not already do via the console — per
+// D3 `owner` IS the datastore holder — while adding an HTTP-reachable,
+// token-bearing surface the console is not. Its useful halves live on:
+// `pullState` ≈ scripts/backup-firestore.js, seeding ≈ scripts/seed-*.js, both
+// of which write with admin credentials directly.
+
 // Collections
 import './collections/module'
 import './collections/config'
@@ -39,7 +55,6 @@ export { docs } from './docs'
 export { hello } from './hello'
 export { prefetch, prefetchData } from './prefetch'
 export { sitemap } from './sitemap'
-export { state } from './state'
 export { user } from './user'
 export { esm } from './esm'
 export { cachedQuery } from './cached-query'

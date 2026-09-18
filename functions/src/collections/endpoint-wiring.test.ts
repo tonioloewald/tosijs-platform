@@ -20,7 +20,7 @@
  * Run: cd functions && bun test src/collections/endpoint-wiring.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { readFileSync } from 'fs'
+import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
 const src = (f: string) => readFileSync(join(__dirname, '..', f), 'utf-8')
@@ -154,5 +154,31 @@ describe('doc.ts fires afterWrite on every mutation path', () => {
     // saved document into a client-visible error.
     const warnings = docTs.match(/afterWrite failed/g) ?? []
     expect(warnings.length).toBeGreaterThanOrEqual(2)
+  })
+})
+
+/**
+ * `/state` must stay gone.
+ *
+ * It was a second, unaudited write path into the same datastore the access
+ * model governs: owner-gated, but bypassing COLLECTIONS, schema, validate,
+ * uniqueness and afterWrite entirely — writing arbitrary caller-named
+ * collections with `merge:true`, stamping `_path` into stored documents (the one
+ * field /doc deliberately strips, so it could forge the provenance §5 calls
+ * unforgeable), and batch-deleting whole collections.
+ *
+ * Removed 2026-09-18, BEFORE the install system ships: every invariant /install
+ * asserts would otherwise be bypassable with one `POST /state/push`. This is the
+ * cheapest durable way to make its return a deliberate act rather than a merge.
+ */
+describe('/state stays retired', () => {
+  test('the module is gone', () => {
+    expect(existsSync(join(__dirname, '..', 'state.ts'))).toBe(false)
+  })
+
+  test('nothing exports or imports it', () => {
+    const index = src('index.ts')
+    expect(index).not.toMatch(/export\s*\{\s*state\s*\}/)
+    expect(index).not.toMatch(/from '\.\/state'/)
   })
 })
