@@ -24,6 +24,7 @@ import type {
   Manifest,
   Visibility,
   AccessGrant,
+  DeriveOp,
 } from './manifest'
 
 /**
@@ -109,9 +110,135 @@ export function compileGrant(grant: AccessGrant): typeof ALL | ((row: any) => Pr
   }
 }
 
+/** URL slug, matching the client's `slugify` so both ends agree. */
+const slugify = (text: string): string =>
+  String(text ?? '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'untitled'
+
+const SHORT_ID_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
+
+export interface DeriveContext {
+  /** Injected clock — §4.1 forbids ambient time in a transform. */
+  now: () => string
+  /** Injected randomness, so `shortId` is deterministic under test. */
+  random: () => number
+  principal: { uid?: string; name?: string; roleId?: string }
+}
+
+/**
+ * Compile `derive` ops into the transform half of a collection config.
+ *
+ * This is what replaces a hand-written `validate` for declarative collections —
+ * the reason `post` can stop being TypeScript. A CLOSED registry of
+ * parameterised operations, not a language: the manifest SELECTS a transform, it
+ * never carries code. An unknown op cannot appear (the validator refuses it) and
+ * would be ignored here rather than guessed at.
+ *
+ * Ops only ever ADD or NORMALISE fields the caller could have sent. None of them
+ * touches the envelope, so provenance stays unforgeable (§5).
+ */
+export function compileDerive(
+  ops: DeriveOp[],
+  ctx: DeriveContext
+): (data: Record<string, unknown>) => Record<string, unknown> {
+  return (data) => {
+    const out = { ...data }
+    for (const op of ops) {
+      switch (op.op) {
+        case 'slug': {
+          const current = String(out[op.to] ?? '').trim()
+          if (op.when === 'always' || !current) {
+            out[op.to] = slugify(String(out[op.from] ?? ''))
+          } else {
+            // Normalise what the author typed, so a hand-entered slug and a
+            // generated one cannot disagree about what is legal.
+            out[op.to] = slugify(current)
+          }
+          break
+        }
+        case 'shortId': {
+          if (out[op.to] === undefined || out[op.to] === '') {
+            const n = op.length ?? 8
+            let id = ''
+            for (let i = 0; i < n; i++) {
+              id +=
+                SHORT_ID_ALPHABET[
+                  Math.floor(ctx.random() * SHORT_ID_ALPHABET.length)
+                ]
+            }
+            out[op.to] = id
+          }
+          break
+        }
+        case 'now':
+          if (!out[op.to]) out[op.to] = ctx.now()
+          break
+        case 'principal':
+          if (!out[op.to]) {
+            out[op.to] =
+              (ctx.principal as Record<string, string | undefined>)[op.field] ??
+              ''
+          }
+          break
+        case 'constant':
+          out[op.to] = op.value
+          break
+        default:
+          // Unreachable through the validator. Ignored rather than guessed.
+          break
+      }
+    }
+    return out
+  }
+}
+
+/**
+ * Compile `envelope.version.bumpOn` — endpoint-managed revision counting.
+ *
+ * `module` maintains a `revisions` count that increments when `source` changes
+ * and is CARRIED FORWARD otherwise. That carry-forward is not incidental: PUT
+ * replaces the document, so a branch that failed to reassign the field silently
+ * erased a module's entire revision history (found 2026-09-06).
+ *
+ * Expressing it declaratively removes the bug class rather than the bug — the
+ * caller cannot send the field at all, so there is no branch left to forget.
+ */
+export function compileVersionBump(
+  field: string,
+  bumpOn: string[]
+): (
+  data: Record<string, unknown>,
+  existing: Record<string, unknown>
+) => Record<string, unknown> {
+  return (data, existing) => {
+    const out = { ...data }
+    const isUpdate = existing && Object.keys(existing).length > 0
+    if (!isUpdate) {
+      out[field] = 0
+      return out
+    }
+    const changed = bumpOn.some((f) => existing[f] !== data[f])
+    const previous = Number(existing[field] ?? 0)
+    out[field] = changed ? previous + 1 : previous
+    return out
+  }
+}
+
+export interface CompileOptions {
+  /** Injected so derived values are deterministic under test (§4.1). */
+  now?: () => string
+  random?: () => number
+}
+
 /** Compile one installed collection into a `CollectionConfig`. */
 export function compileCollection(
-  collection: InstalledCollection
+  collection: InstalledCollection,
+  options: CompileOptions = {}
 ): CollectionConfig {
   const access: Record<string, AccessConfig> = {}
   for (const rule of collection.access) {
@@ -130,6 +257,35 @@ export function compileCollection(
   }
 
   const config: CollectionConfig = { access }
+
+  // `derive` and `envelope.version` compose into the single `validate` slot the
+  // write pipeline already calls. Order matters: derive first (it may create the
+  // field a version bump compares), then the version bump, which the caller can
+  // never influence because it runs last and overwrites.
+  const derive = collection.derive?.length
+    ? compileDerive(collection.derive, {
+        now: options.now ?? (() => new Date().toJSON()),
+        random: options.random ?? Math.random,
+        principal: {},
+      })
+    : null
+  const bump = collection.envelope?.version?.bumpOn?.length
+    ? compileVersionBump('revisions', collection.envelope.version.bumpOn)
+    : null
+
+  if (derive || bump) {
+    config.validate = async (
+      data: Record<string, unknown>,
+      _roles: unknown,
+      existing: Record<string, unknown>
+    ) => {
+      let out = data
+      if (derive) out = derive(out)
+      if (bump) out = bump(out, existing ?? {})
+      return out
+    }
+  }
+
   if (collection.schema) config.schema = collection.schema as never
   if (collection.unique) config.unique = collection.unique
   if (collection.tagFields) config.tagFields = collection.tagFields

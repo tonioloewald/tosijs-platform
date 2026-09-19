@@ -82,6 +82,17 @@ export interface InstalledCollection {
   immutable?: boolean
   cacheLatencySeconds?: number
   /**
+   * Endpoint-managed provenance the caller may never send.
+   *
+   * `version.bumpOn` names the fields whose change increments a `revisions`
+   * counter — how `module` tracks source revisions. Declaring it removes a bug
+   * CLASS rather than a bug: PUT replaces the document, and a hand-written
+   * branch that forgot to carry the count forward silently erased a module's
+   * entire revision history (2026-09-06). A caller cannot send the field, so
+   * there is no branch left to forget.
+   */
+  envelope?: { version?: { bumpOn: string[] } }
+  /**
    * An ARRAY, not a role-keyed object. Object key order decided precedence
    * under the old engine, and a manifest's key order comes from a file nobody
    * treats as ordered. Grants are joined as a lattice (see `joinAccess`), so
