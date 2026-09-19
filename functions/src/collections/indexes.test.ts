@@ -83,6 +83,28 @@ describe('firestore.indexes.json covers the queries the code actually makes', ()
     expect(hasIndex('role', 'userIds', '_created')).toBe(true)
   })
 
+  test('getUserRoles also queries role.contacts by array-contains', () => {
+    // The email fallback stopped being a 100-document client-side scan on
+    // 2026-09-19. The query it became needs its own composite index — and
+    // this is the ONE path a brand-new user hits on first sign-in, so getting
+    // it wrong means a fresh host works for nobody.
+    expect(utilities).toMatch(
+      /'role',\s*\n?\s*'contacts',\s*\n?\s*'array-contains'/
+    )
+  })
+
+  test('role: contacts array-contains + _created order IS declared', () => {
+    expect(hasIndex('role', 'contacts', '_created')).toBe(true)
+  })
+
+  test('the scan it replaced is gone', () => {
+    // `getRecords('role', undefined, undefined, undefined, 100)` — an
+    // unfiltered fetch of the 100 newest role docs, matched in memory.
+    expect(utilities).not.toMatch(
+      /getRecords<RoleDoc>\(\s*'role',\s*undefined/
+    )
+  })
+
   test('the file is not the empty stub it used to be', () => {
     expect(indexes.indexes.length).toBeGreaterThan(0)
   })

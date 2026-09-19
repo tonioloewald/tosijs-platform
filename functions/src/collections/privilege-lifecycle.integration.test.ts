@@ -233,12 +233,14 @@ describe('privilege lifecycle: grant → exercise → change → revoke → re-a
   })
 })
 
-describe('REVOCATION BY uid ALONE — the read path re-grants it', () => {
-  // getUserRoles does a WRITE during a read: if the uid lookup misses, it falls
-  // back to matching `contacts` by email and then APPENDS the uid back into
-  // userIds for "future fast lookups". So removing a uid is not revocation —
-  // the next request re-adds it. Only a stateful test can see this.
-  test('7. granting by email populates userIds automatically (the fast-path writeback)', async () => {
+describe('uid and contact are BOTH grants — neither caches the other', () => {
+  // FIXED 2026-09-19. getUserRoles used to do a WRITE during a read: if the uid
+  // lookup missed it matched `contacts` by email and then APPENDED the uid back
+  // into userIds "for future fast lookups". That made userIds a derived cache
+  // wearing the costume of a grant — so removing a uid was not revocation, the
+  // next request silently re-added it, and because it happened during a read it
+  // appeared in no audit of writes. Only a stateful test can see any of this.
+  test('7. granting by email alone works, and writes NOTHING back', async () => {
     if (guard()) return expect(true).toBe(true)
     const w = await setSubjectRoles(['author'], true, []) // email only, NO uid
     if (w.status !== 200) return
@@ -246,22 +248,41 @@ describe('REVOCATION BY uid ALONE — the read path re-grants it', () => {
     const me = await whoAmI()
     expect(me.roles).toContain('author') // matched via contacts
 
-    // the read path should have written the uid back
+    // The read path must leave the document alone. If the uid reappears here,
+    // the writeback is back and so is the un-revokable grant.
     const after = await doc(ownerToken, 'GET', SUBJECT_ROLE)
     if (after.status === 200) {
       const role = JSON.parse(after.text) as { userIds?: string[] }
-      expect(role.userIds ?? []).toContain(subjectUid)
+      expect(role.userIds ?? []).not.toContain(subjectUid)
     }
   })
 
-  test('8. removing the uid does NOT revoke — the email fallback re-grants', async () => {
+  test('8. a contact grant survives on its own merit, not via a cached uid', async () => {
     if (guard()) return expect(true).toBe(true)
-    // Revoke the way an operator plausibly would: drop them from userIds.
+    // Same state as 7 — the point is that it is re-derived every request from
+    // contacts, so it is still `author` for a reason that can be revoked.
     await setSubjectRoles(['author'], true, [])
-
     const me = await whoAmI()
-    // DOCUMENTED HAZARD: still author, because contacts still matches.
     expect(me.roles).toContain('author')
+  })
+
+  test('8b. removing the CONTACT revokes, with the uid never having been set', async () => {
+    if (guard()) return expect(true).toBe(true)
+    await setSubjectRoles(['author'], false, []) // role kept, contact dropped
+    const me = await whoAmI()
+    expect(me.roles).toEqual([])
+  })
+
+  test('8c. and a uid grant revokes by removing the uid', async () => {
+    if (guard()) return expect(true).toBe(true)
+    // The revocation an operator would reach for first. It used to be undone
+    // on the very next request.
+    const granted = await setSubjectRoles(['author'], false, [subjectUid])
+    if (granted.status !== 200) return
+    expect((await whoAmI()).roles).toContain('author')
+
+    await setSubjectRoles(['author'], false, [])
+    expect((await whoAmI()).roles).toEqual([])
   })
 
   test('9. revocation requires removing the CONTACT, not just the uid', async () => {

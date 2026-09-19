@@ -6,6 +6,7 @@ import { Response } from 'express'
 import { DecodedIdToken } from 'firebase-admin/auth'
 
 import { UserRoles, anonymousUser } from './collections/roles'
+import { joinRoleDocs, MAX_ROLE_DOCS } from './collections/join-roles'
 
 admin.initializeApp()
 
@@ -204,11 +205,28 @@ async function getUser(
     return false
   }
   try {
-    const decodedIdToken = await admin.auth().verifyIdToken(idToken)
+    // `checkRevoked` costs one extra Auth lookup, and buys the difference
+    // between "signed out everywhere" meaning it and meaning it in an hour.
+    // Without it a disabled or revoked session keeps full access for the
+    // remaining life of an already-issued ID token — up to ~1h, during which
+    // the only visible state says the user has no access at all.
+    //
+    // Unauthenticated requests never reach here (no header, early return), so
+    // public and SSR traffic pays nothing.
+    const decodedIdToken = await admin.auth().verifyIdToken(idToken, true)
     req.user = decodedIdToken
     return decodedIdToken
   } catch (error) {
-    functions.logger.error('Error while verifying Firebase ID token:', error)
+    // Fails CLOSED in every case, including a transient Auth outage: an
+    // unverifiable token is anonymous, never trusted-by-default. Revocation is
+    // logged distinctly because it is an expected event, not a malfunction,
+    // and burying it in generic errors makes it unfindable.
+    const code = (error as { code?: string })?.code
+    if (code === 'auth/id-token-revoked') {
+      functions.logger.info('Rejected a revoked ID token')
+    } else {
+      functions.logger.error('Error while verifying Firebase ID token:', error)
+    }
     return false
   }
 }
@@ -240,76 +258,84 @@ async function syncRolesToCustomClaims(
   }
 }
 
+/**
+ * Role documents naming this email as a contact.
+ *
+ * An INDEXED equality match on the whole contact object — Firestore compares
+ * maps by content, so `{type, value}` matches regardless of key order. It
+ * replaces a scan of the 100 most recently created role documents that then
+ * matched client-side: on any host with more than 100 roles, a principal whose
+ * grant fell outside that window silently resolved to `anonymousUser`. Silently
+ * is the problem — "you have no access" and "we did not look properly" were
+ * indistinguishable, to the user and in the logs.
+ *
+ * The trade is that matching is now exact rather than fuzzy, so a contact
+ * stored with different case than the token's email will not match; both forms
+ * are tried below.
+ */
+async function rolesByEmail(email: string): Promise<RoleDoc[]> {
+  return getRecords<RoleDoc>(
+    'role',
+    'contacts',
+    'array-contains',
+    { type: 'email', value: email },
+    MAX_ROLE_DOCS
+  )
+}
+
+/**
+ * Every role document granting authority to this principal.
+ *
+ * `userIds` first, `contacts` only if that finds nothing. Both are AUTHORITY —
+ * neither is a cache of the other.
+ *
+ * That is the change: the email path used to APPEND the uid to `userIds` for
+ * "future fast lookups", which made `userIds` a derived cache while looking
+ * like a grant. An operator revoking the obvious way — removing the uid — was
+ * silently re-granted on the principal's next request, and the write happened
+ * during a READ, so it was invisible in any audit of writes. Now removing
+ * either one removes exactly that grant, and revoking both revokes.
+ */
+async function findRoleDocs(uid: string, email?: string): Promise<RoleDoc[]> {
+  const byUid = await getRecords<RoleDoc>(
+    'role',
+    'userIds',
+    'array-contains',
+    uid,
+    MAX_ROLE_DOCS
+  )
+  if (byUid.length || !email) return byUid
+
+  const lower = email.toLowerCase()
+  const found = await rolesByEmail(lower)
+  if (found.length || lower === email) return found
+  // Stored contacts predating any normalisation may carry the original case.
+  return rolesByEmail(email)
+}
+
 async function getUserRoles(req: AuthenticatedRequest): Promise<UserRoles> {
   const user = await getUser(req)
   if (!user) {
     return anonymousUser
   }
 
-  // First, try to find role by userIds (fast path)
-  let roles = await getRecords<RoleDoc>(
-    'role',
-    'userIds',
-    'array-contains',
-    user.uid,
-    2
-  )
-
-  if (roles.length === 0 && user.email) {
-    // Fallback: find role by email in contacts
-    // We need to get all roles and check contacts manually since Firestore
-    // doesn't support querying nested array fields directly
-    const allRoles = await getRecords<RoleDoc>(
-      'role',
-      undefined,
-      undefined,
-      undefined,
-      100
+  const docs = await findRoleDocs(user.uid, user.email)
+  if (docs.length >= MAX_ROLE_DOCS) {
+    functions.logger.error(
+      `role lookup for ${user.uid} hit the ${MAX_ROLE_DOCS}-document bound — ` +
+        `authority may be incomplete`
     )
-    const matchingRole = allRoles.find((role) =>
-      role.contacts?.some(
-        (contact) =>
-          contact.type === 'email' &&
-          contact.value?.toLowerCase() === user.email?.toLowerCase()
-      )
-    )
-
-    if (matchingRole) {
-      // Add user's uid to the role's userIds for future fast lookups
-      const userIds = matchingRole.userIds || []
-      if (!userIds.includes(user.uid)) {
-        userIds.push(user.uid)
-        if (matchingRole._id) {
-          await admin
-            .firestore()
-            .collection('role')
-            .doc(matchingRole._id)
-            .update({ userIds })
-          functions.logger.info(
-            `Added uid ${user.uid} to role ${matchingRole._id} for email ${user.email}`
-          )
-        }
-      }
-      roles = [matchingRole]
-    }
   }
+  const userRole = joinRoleDocs(docs, (m) => functions.logger.warn(m))
 
-  // Get the user's role document (if found)
-  const firstRole = roles[0]
-  const userRole: UserRoles = firstRole
-    ? {
-        _id: firstRole._id,
-        name: firstRole.name || 'unknown',
-        contacts: (firstRole.contacts || []).map((c) => ({
-          type: c.type as 'email' | 'phone' | 'address',
-          value: c.value,
-        })),
-        roles: (firstRole.roles || []) as UserRoles['roles'],
-        userIds: firstRole.userIds || [],
-      }
-    : anonymousUser
-
-  // Sync roles to custom claims for Storage rules enforcement
+  // Sync roles to custom claims for Storage rules enforcement.
+  //
+  // A second source of truth for authorization, written best-effort during a
+  // READ, consumed only by `storage.rules`. It is on the list to DELETE along
+  // with those rules (#3) — claims are baked into an issued token, so a role
+  // revoked here stays live in storage until it expires. Not removed yet
+  // because `asset-manager.ts` uploads through the Storage client SDK and
+  // would break; kept deliberately, not by oversight.
   if (userRole !== anonymousUser && userRole.roles?.length > 0) {
     await syncRolesToCustomClaims(user.uid, userRole.roles)
   }

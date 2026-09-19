@@ -7,6 +7,14 @@
         { "fieldPath": "userIds", "arrayConfig": "CONTAINS" },
         { "fieldPath": "_created", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "role",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "contacts", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "_created", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

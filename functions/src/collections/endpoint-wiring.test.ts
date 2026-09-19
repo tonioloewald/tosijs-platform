@@ -31,6 +31,44 @@ const docsTs = src('docs.ts')
 // rejection messages have to span both files.
 const pipelineTs = src('collections/write-pipeline.ts')
 
+describe('getUserRoles: the B1 defects stay fixed (#6)', () => {
+  // Every assertion here matches a CALL FORM, never prose — two wiring tests in
+  // this repo have previously passed against a doc comment describing a
+  // mechanism that was not in the code.
+  const utilities = src('utilities.ts')
+
+  test('tokens are checked for revocation', () => {
+    // Without the second argument a revoked or disabled session keeps full
+    // access for the remaining life of an issued ID token, ~1h.
+    expect(utilities).toMatch(/verifyIdToken\(idToken, true\)/)
+  })
+
+  test('the read path no longer WRITES', () => {
+    // The uid writeback made `userIds` a cache wearing a grant's costume:
+    // removing a uid was undone on the principal's next request, by a write
+    // that happened during a read and so appeared in no audit.
+    expect(utilities).not.toMatch(/\.update\(\{\s*userIds/)
+    expect(utilities).not.toMatch(/userIds\.push\(/)
+  })
+
+  test('all matching role documents are joined, not [0]', () => {
+    expect(utilities).toMatch(/joinRoleDocs\(docs/)
+    expect(utilities).not.toMatch(/roles\[0\]/)
+    expect(utilities).not.toMatch(/const firstRole/)
+  })
+
+  test('the email lookup is a query, not a scan', () => {
+    expect(utilities).toMatch(/'contacts',\s*\n?\s*'array-contains'/)
+    expect(utilities).not.toMatch(/allRoles\.find\(/)
+  })
+
+  test('/install attributes the act to the TOKEN, not the role document', () => {
+    const installTs = src('install/endpoint.ts')
+    expect(installTs).toMatch(/const uid = user\.uid/)
+    expect(installTs).not.toMatch(/userRoles\.userIds\[0\]/)
+  })
+})
+
 describe('docs.ts routes LIST denials through opaqueStatus', () => {
   test('it imports the shared helper', () => {
     expect(docsTs).toMatch(/opaqueStatus/)

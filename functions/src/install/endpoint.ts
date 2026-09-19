@@ -34,6 +34,7 @@ import { unenforcedKeywords } from 'tosijs-schema'
 
 import {
   optionsResponse,
+  getUser,
   getUserRoles,
   AuthenticatedRequest,
 } from '../utilities'
@@ -106,7 +107,17 @@ export const install = onRequest({}, async (request, response: Response) => {
     response.status(403).send('installing requires the `configurator` role')
     return
   }
-  const uid = userRoles.userIds[0]
+  // The uid comes from the TOKEN, never from the role document. A role
+  // document's `userIds` is a list of everyone it grants — and since roles are
+  // joined across documents it is now a union of several such lists — so
+  // `userIds[0]` would attribute an install to whoever happens to be first.
+  // The ledger's entire value is saying who did it.
+  const user = await getUser(req)
+  if (!user) {
+    response.status(401).send('authentication required')
+    return
+  }
+  const uid = user.uid
   const principal = { uid, roles: userRoles.roles as readonly string[] }
 
   try {
