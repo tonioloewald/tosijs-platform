@@ -233,3 +233,46 @@ describe('projections', () => {
     expect(await fn({ title: 'x', date: '2026' })).toEqual({ title: 'x' })
   })
 })
+
+describe('lte/gte — added for capability ceilings (#11)', () => {
+  const vis = (op: 'lte' | 'gte', value: unknown) =>
+    compileVisibility({ field: 'bytes', op, value } as never)
+
+  test('numbers compare numerically', () => {
+    expect(vis('lte', 1000)({ bytes: 999 })).toBe(true)
+    expect(vis('lte', 1000)({ bytes: 1000 })).toBe(true)
+    expect(vis('lte', 1000)({ bytes: 1001 })).toBe(false)
+    expect(vis('gte', 1000)({ bytes: 1001 })).toBe(true)
+    expect(vis('gte', 1000)({ bytes: 999 })).toBe(false)
+  })
+
+  test('strings compare lexically — for date cutoffs', () => {
+    const before = compileVisibility({
+      field: 'date',
+      op: 'lte',
+      value: '2026-01-01',
+    } as never)
+    expect(before({ date: '2025-12-31' })).toBe(true)
+    expect(before({ date: '2026-06-01' })).toBe(false)
+  })
+
+  test('MISMATCHED TYPES DENY — never coerce', () => {
+    // `'10' <= 9` is a comparison nobody meant, and for a ceiling a surprising
+    // `true` is granted excess. So a type mismatch is a denial, not a guess.
+    expect(vis('lte', 1000)({ bytes: '999' })).toBe(false)
+    expect(vis('lte', '1000')({ bytes: 999 })).toBe(false)
+    expect(vis('gte', 0)({ bytes: true })).toBe(false)
+    expect(vis('lte', 1000)({ bytes: null })).toBe(false)
+  })
+
+  test('an ABSENT field denies a ceiling', () => {
+    // "no bytes declared" must not read as "within the limit".
+    expect(vis('lte', 1000)({})).toBe(false)
+  })
+
+  test('an unknown op still denies', () => {
+    expect(
+      compileVisibility({ field: 'x', op: 'sorta-lte' } as never)({ x: 1 })
+    ).toBe(false)
+  })
+})

@@ -46,7 +46,11 @@ import {
   type Grant,
   type InstallRecords,
 } from './apply'
-import type { Manifest, CapabilityRequest } from './manifest'
+import {
+  unenforcedCapabilities,
+  type Manifest,
+  type CapabilityDeclaration,
+} from './manifest'
 import { bumpEpochIn } from './epoch'
 import { sameManifest, ManifestConflict } from './manifest-identity'
 
@@ -165,7 +169,9 @@ export const install = onRequest({}, async (request, response: Response) => {
 
       case 'POST': {
         const manifest = req.body?.manifest as unknown
-        const approving = req.body?.approving as CapabilityRequest[] | undefined
+        const approving = req.body?.approving as
+          | Record<string, CapabilityDeclaration>
+          | undefined
         if (!manifest) {
           response.status(400).send('expected { manifest } in the body')
           return
@@ -219,6 +225,10 @@ export const install = onRequest({}, async (request, response: Response) => {
             status: 'needs-approval',
             name,
             added: decision.added,
+            // Says plainly which of these this host cannot yet enforce. An
+            // approval prompt that overstates what it is asking about is how
+            // people learn to stop reading them.
+            unenforced: unenforcedCapabilities(manifest as Manifest),
             note:
               'nothing changed. re-POST with `approving` set to exactly these ' +
               'capabilities to apply the upgrade.',
@@ -233,6 +243,7 @@ export const install = onRequest({}, async (request, response: Response) => {
           status: decision.status,
           name,
           version: (manifest as Manifest).version,
+          unenforced: unenforcedCapabilities(manifest as Manifest),
         })
         return
       }

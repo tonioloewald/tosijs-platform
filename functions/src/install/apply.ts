@@ -36,16 +36,17 @@
 import {
   validateManifest,
   type Manifest,
-  type CapabilityRequest,
+  type CapabilityDeclaration,
   type ValidateManifestOptions,
 } from './manifest'
+import { canonical } from './manifest-identity'
 
 export interface Grant {
   /** Namespace this grant governs. */
   name: string
   activeVersion: string | null
   status: 'active' | 'pending' | 'revoked'
-  capabilities: CapabilityRequest[]
+  capabilities: Record<string, CapabilityDeclaration>
   approvedBy?: string
   approvedAt?: string
   revokedAt?: string
@@ -77,7 +78,7 @@ export type InstallDecision =
        * Still outstanding: new or wider than what was already granted, and not
        * covered by `approving`. This is the list to put in front of a human.
        */
-      added: CapabilityRequest[]
+      added: CapabilityEntry[]
       records: InstallRecords
     }
   | { status: 'refused'; problems: string[] }
@@ -107,7 +108,7 @@ export interface InstallInput {
    * Matched exactly, by the same whole-request key as the diff, so approving
    * `maxBytes: 1000` does not approve `maxBytes: 999999`.
    */
-  approving?: CapabilityRequest[]
+  approving?: Record<string, CapabilityDeclaration>
 }
 
 /**
@@ -167,29 +168,41 @@ export function additiveProblems(
   return problems
 }
 
-/** Capability identity for diffing. Two requests match iff every arg matches. */
-const capabilityKey = (c: CapabilityRequest): string =>
-  JSON.stringify(
-    Object.keys(c)
-      .sort()
-      .map((k) => [k, c[k]])
-  )
+/** A capability, with the name it was declared under. */
+export interface CapabilityEntry {
+  name: string
+  capability: CapabilityDeclaration
+}
 
 /**
- * Capabilities in `next` that were not already granted.
+ * Capabilities in `next` that are new, or that CHANGED.
  *
- * Compared on the WHOLE request, arguments included — a blob capability whose
- * `maxBytes` grew is a different request, not the same one. Treating it as
- * unchanged would let an upgrade widen a limit a human approved at a lower
- * value, which is precisely the quiet escalation the re-approval rule exists to
- * stop.
+ * Compared on the WHOLE declaration — arguments and access rules included —
+ * using a deep, key-order-independent serialisation. Two separate escalations
+ * this is the only thing standing in front of:
+ *
+ *   - a blob capability whose `maxBytes` grew from 1000 to 999999 is a
+ *     different request, not the same one;
+ *   - a capability whose `access` widened from `admin` to `public` is likewise
+ *     a different request, and this is precisely why the access rules live
+ *     INSIDE the declaration. Beside it, an upgrade could open a capability to
+ *     everyone with no re-approval.
+ *
+ * Key order is ignored because a manifest arrives as JSON from a file nobody
+ * treats as ordered, and spurious re-approval prompts are how people learn to
+ * approve without reading. Array order is preserved, because an access LIST is
+ * a sequence.
  */
 export function addedCapabilities(
-  granted: CapabilityRequest[],
-  requested: CapabilityRequest[]
-): CapabilityRequest[] {
-  const have = new Set(granted.map(capabilityKey))
-  return requested.filter((c) => !have.has(capabilityKey(c)))
+  granted: Record<string, CapabilityDeclaration> = {},
+  requested: Record<string, CapabilityDeclaration> = {}
+): CapabilityEntry[] {
+  return Object.entries(requested)
+    .filter(([name, capability]) => {
+      const already = granted[name]
+      return already === undefined || canonical(already) !== canonical(capability)
+    })
+    .map(([name, capability]) => ({ name, capability }))
 }
 
 export function decideInstall(input: InstallInput): InstallDecision {
@@ -239,10 +252,17 @@ export function decideInstall(input: InstallInput): InstallDecision {
     }
   }
 
-  const requested = m.capabilities ?? []
-  const added = addedCapabilities(existing?.capabilities ?? [], requested)
+  const requested = m.capabilities ?? {}
+  const added = addedCapabilities(existing?.capabilities ?? {}, requested)
   // Whatever the human did not explicitly approve is still outstanding.
-  const outstanding = addedCapabilities(input.approving ?? [], added)
+  // Matched by CONTENT, not by name: approving a name would approve whatever
+  // that name means when the approval lands.
+  const approving = input.approving ?? {}
+  const outstanding = added.filter(
+    ({ name, capability }) =>
+      approving[name] === undefined ||
+      canonical(approving[name]) !== canonical(capability)
+  )
   // A new install is always an approval event; an upgrade only when it asks for
   // something new. This is the clause that lets routine upgrades be routine.
   const needsApproval = !isUpgrade ? false : outstanding.length > 0
@@ -251,7 +271,7 @@ export function decideInstall(input: InstallInput): InstallDecision {
     name: m.name,
     activeVersion: needsApproval ? (existing?.activeVersion ?? null) : m.version,
     status: needsApproval ? 'pending' : 'active',
-    capabilities: needsApproval ? (existing?.capabilities ?? []) : requested,
+    capabilities: needsApproval ? (existing?.capabilities ?? {}) : requested,
     approvedBy: needsApproval ? existing?.approvedBy : principal.uid,
     approvedAt: needsApproval ? existing?.approvedAt : nowIso,
   }
@@ -281,8 +301,8 @@ export function decideInstall(input: InstallInput): InstallDecision {
         // The real diff, not the outstanding remainder — the ledger records
         // what changed, and separately what a human signed off on.
         addedCapabilities: added,
-        ...(input.approving?.length
-          ? { approvedCapabilities: input.approving }
+        ...(Object.keys(approving).length
+          ? { approvedCapabilities: approving }
           : {}),
       },
     },

@@ -31,7 +31,7 @@ const PROVENANCE = ['installedBy', 'installedAt']
  * equal: Firestore never stores undefined, so they are the same thing on the
  * way back. `null` is a real stored value and is preserved.
  */
-const canonical = (value: unknown): string => {
+export const canonical = (value: unknown): string => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   const object = value as Record<string, unknown>

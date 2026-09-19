@@ -55,13 +55,28 @@ export type Visibility =
   | { schema: JsonSchema }
   | {
       field: string
-      op: 'includes' | 'eq' | 'neq' | 'nonEmpty' | 'absent'
+      op: 'includes' | 'eq' | 'neq' | 'nonEmpty' | 'absent' | 'lte' | 'gte'
       value?: string | number | boolean
     }
   | { all: Visibility[] }
   | { any: Visibility[] }
 
-export const VISIBILITY_OPS = ['includes', 'eq', 'neq', 'nonEmpty', 'absent']
+/**
+ * `lte`/`gte` exist for CAPABILITY ceilings — `{field: 'bytes', op: 'lte',
+ * value: 1000000}`. Without them the vocabulary cannot express the single most
+ * common capability constraint, which would mean settling a shape already known
+ * to be wrong. They work on rows too (date cutoffs), and never coerce across
+ * types: a mismatched comparison denies rather than guessing.
+ */
+export const VISIBILITY_OPS = [
+  'includes',
+  'eq',
+  'neq',
+  'nonEmpty',
+  'absent',
+  'lte',
+  'gte',
+]
 
 export type AccessGrant =
   | 'ALL'
@@ -101,9 +116,64 @@ export interface InstalledCollection {
   access: AccessRule[]
 }
 
-export interface CapabilityRequest {
+/**
+ * Capability kinds this host RECOGNISES. A closed vocabulary, like DERIVE_OPS
+ * and for the same reason: an unrecognised kind cannot be enforced, and a
+ * capability that is granted but unenforceable is worse than one refused.
+ */
+export const CAPABILITY_KINDS = ['blob', 'email', 'sms', 'outbound', 'turn']
+
+/**
+ * Kinds this host can currently ENFORCE. Deliberately empty.
+ *
+ * The shape is settled (#11); enforcement is not built. Recognising a kind and
+ * enforcing it are different claims, and collapsing them would let a human
+ * approve "this library may send email" for a power that no code grants and no
+ * code limits. Declaring an unenforced capability is allowed — it is inert —
+ * but the install response says so, because an approval prompt that overstates
+ * what it is asking about is how people learn to stop reading them.
+ */
+export const ENFORCED_CAPABILITY_KINDS: string[] = []
+
+/**
+ * A capability a manifest declares — and says who may exercise it.
+ *
+ * ## `access` is INSIDE the capability, not beside it
+ *
+ * `addedCapabilities` diffs whole declarations, which is what stops
+ * `maxBytes: 1000 → 999999` slipping through an upgrade unapproved. Widening
+ * access from `admin` to `public` is at least as dangerous as raising a byte
+ * limit, so the rules live here where that diff already sees them. Alongside,
+ * an upgrade could quietly open a capability to everyone with no re-approval.
+ *
+ * ## Absent or empty `access` means NOBODY
+ *
+ * Deny by default, exactly as an unregistered collection is unreachable —
+ * including for `owner`, whose real power is the datastore (D3) rather than an
+ * in-system bypass. A capability with no rules is declared, inert, and safe;
+ * the upgrade that later adds a rule re-triggers approval because the
+ * declaration changed.
+ */
+export interface CapabilityDeclaration {
   kind: string
+  /** Who may exercise it, and under what constraint on the ARGUMENTS. */
+  access?: CapabilityAccessRule[]
+  /** kind-specific arguments and limits. */
   [arg: string]: unknown
+}
+
+export interface CapabilityAccessRule {
+  role: string
+  /**
+   * `'ALL'`, or a constraint on the call arguments.
+   *
+   * The same `AccessGrant` a collection uses, pointed at arguments instead of a
+   * stored row — `visible` constrains ("the recipient must be a project
+   * member", "bytes must be lte 1e6") and `project` narrows which arguments
+   * may be passed at all. Argument clamping IS field projection, which is what
+   * makes sharing the lattice legitimate rather than a pun.
+   */
+  use: AccessGrant
 }
 
 export interface Manifest {
@@ -111,7 +181,12 @@ export interface Manifest {
   name: string
   version: string
   collections: Record<string, InstalledCollection>
-  capabilities?: CapabilityRequest[]
+  /**
+   * Keyed by namespaced name, mirroring `collections`. An array carried no
+   * identity, so an upgrade that reordered it looked like a change and one
+   * that renamed a capability looked like none.
+   */
+  capabilities?: Record<string, CapabilityDeclaration>
   usesRoles?: string[]
   functions?: never
 }
@@ -378,5 +453,95 @@ export function validateManifest(
     })
   }
 
+  // --- capabilities ---------------------------------------------------------
+  //
+  // Previously UNVALIDATED: a manifest could request any kind with any
+  // arguments and it passed. That is tolerable only while nothing consults the
+  // grant; it stops being tolerable the moment anything does.
+  if (m.capabilities !== undefined) {
+    if (Array.isArray(m.capabilities)) {
+      fail(
+        '"capabilities" must be an object keyed by name, not an array — ' +
+          'an array carries no identity, so a reorder looks like a change and ' +
+          'a rename looks like none'
+      )
+    } else if (m.capabilities === null || typeof m.capabilities !== 'object') {
+      fail('"capabilities" must be an object')
+    } else {
+      for (const [logical, raw] of Object.entries(
+        m.capabilities as Record<string, unknown>
+      )) {
+        const where = `capabilities["${logical}"]`
+
+        // Namespaced like a collection, and for the same reason: two libraries
+        // that both want `notify` must not collide.
+        const refusal = namespace ? refuseDeclaration(namespace, logical) : null
+        if (refusal) fail(`${where}: ${refusal.message}`)
+
+        if (raw === null || typeof raw !== 'object') {
+          fail(`${where}: must be an object`)
+          continue
+        }
+        const cap = raw as Record<string, unknown>
+
+        if (!CAPABILITY_KINDS.includes(cap.kind as string)) {
+          fail(
+            `${where}.kind: ${JSON.stringify(cap.kind)} is not a capability ` +
+              `this host recognises — expected one of ` +
+              `${CAPABILITY_KINDS.join(', ')}`
+          )
+        }
+
+        if (cap.access === undefined) continue
+        if (!Array.isArray(cap.access)) {
+          fail(`${where}.access: must be an ARRAY of rules`)
+          continue
+        }
+        cap.access.forEach((rule, i) => {
+          const r = rule as Record<string, unknown>
+          const rw = `${where}.access[${i}]`
+          if (typeof r?.role !== 'string' || !knownRoles.includes(r.role)) {
+            fail(`${rw}.role: "${String(r?.role)}" is not a role this host defines`)
+          }
+          const use = r?.use
+          if (use === undefined) {
+            // Silence here would mean "declared a rule, granted nothing",
+            // which reads as a grant to whoever wrote it.
+            fail(`${rw}.use: required — a rule that grants nothing is a mistake`)
+            return
+          }
+          if (use === 'ALL') return
+          if (use === null || typeof use !== 'object') {
+            fail(`${rw}.use: must be "ALL" or an object`)
+            return
+          }
+          const g = use as Record<string, unknown>
+          if (g.visible !== undefined) {
+            problems.push(...validateVisibility(g.visible, `${rw}.use.visible`))
+          }
+          if (g.project !== undefined) {
+            problems.push(
+              ...assertSafeSchema(g.project as JsonSchema, `${rw}.use.project`, unenforced)
+            )
+          }
+        })
+      }
+    }
+  }
+
   return problems
+}
+
+/**
+ * Declared capabilities whose kind this host recognises but cannot yet enforce.
+ *
+ * Surfaced in the install response rather than refused. They are inert — no
+ * code consults the grant — so refusing them would block a library from
+ * declaring its real needs ahead of the host supporting them. But the human
+ * approving must not be told they are approving a live power.
+ */
+export function unenforcedCapabilities(manifest: Manifest): string[] {
+  return Object.entries(manifest.capabilities ?? {})
+    .filter(([, c]) => !ENFORCED_CAPABILITY_KINDS.includes(c.kind))
+    .map(([name]) => name)
 }

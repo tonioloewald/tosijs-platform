@@ -24,6 +24,8 @@ import {
   validateManifest,
   assertSafeSchema,
   validateVisibility,
+  unenforcedCapabilities,
+  ENFORCED_CAPABILITY_KINDS,
   type Manifest,
 } from './manifest'
 import { ROLES } from '../collections/roles'
@@ -296,5 +298,109 @@ describe('the validator reports EVERY problem, not just the first', () => {
     )
     // version + platform-collection + unknown-role, at least.
     expect(errs.length).toBeGreaterThanOrEqual(3)
+  })
+})
+
+describe('capabilities — the shape settled 2026-09-19 (#11)', () => {
+  const cap = (capabilities: unknown) =>
+    validateManifest(ok({ capabilities } as never), opts).map((e) => e.message)
+
+  test('an ARRAY is refused with the reason, not silently accepted', () => {
+    // The old shape. An array carries no identity, so an upgrade that
+    // reordered it looked like a change and one that renamed a capability
+    // looked like none.
+    expect(cap([{ kind: 'blob' }]).join()).toContain('keyed by name')
+  })
+
+  test('an unrecognised kind is refused', () => {
+    // Closed vocabulary, like DERIVE_OPS: a kind nothing can enforce must not
+    // be granted. "Granted but unenforceable" is strictly worse than refused.
+    expect(cap({ 'virta:x': { kind: 'mine-bitcoin' } }).join()).toContain(
+      'not a capability this host recognises'
+    )
+  })
+
+  test('a recognised kind passes', () => {
+    expect(cap({ 'virta:files': { kind: 'blob', maxBytes: 10 } })).toEqual([])
+  })
+
+  test('it must be NAMESPACED, like a collection', () => {
+    expect(cap({ notify: { kind: 'email' } }).join()).toContain('un-namespaced')
+    expect(cap({ 'other:notify': { kind: 'email' } }).join()).toContain(
+      'belongs to "other"'
+    )
+  })
+
+  test('NO access is legal — it means nobody, which is the default', () => {
+    // Declared, inert, safe. The upgrade that later adds a rule re-triggers
+    // approval because the declaration changed.
+    expect(cap({ 'virta:files': { kind: 'blob' } })).toEqual([])
+  })
+
+  test('a rule naming an unknown role is refused', () => {
+    expect(
+      cap({
+        'virta:files': { kind: 'blob', access: [{ role: 'wizard', use: 'ALL' }] },
+      }).join()
+    ).toContain('not a role this host defines')
+  })
+
+  test('a rule that grants nothing is a mistake, not a deny', () => {
+    // Silence would read as "I wrote a rule, so something is granted".
+    expect(
+      cap({
+        'virta:files': { kind: 'blob', access: [{ role: 'admin' }] },
+      }).join()
+    ).toContain('use: required')
+  })
+
+  test('an argument constraint is validated like row visibility', () => {
+    expect(
+      cap({
+        'virta:files': {
+          kind: 'blob',
+          access: [
+            { role: 'admin', use: { visible: { field: 'bytes', op: 'nope' } } },
+          ],
+        },
+      }).join()
+    ).toContain('unknown op')
+  })
+
+  test('a CEILING is expressible — the point of lte/gte', () => {
+    // Without these the vocabulary cannot express the most common capability
+    // constraint, which would mean settling a shape already known to be wrong.
+    expect(
+      cap({
+        'virta:files': {
+          kind: 'blob',
+          access: [
+            {
+              role: 'admin',
+              use: { visible: { field: 'bytes', op: 'lte', value: 1000000 } },
+            },
+          ],
+        },
+      })
+    ).toEqual([])
+  })
+})
+
+describe('unenforcedCapabilities', () => {
+  test('every recognised kind is currently unenforced, and says so', () => {
+    // ENFORCED_CAPABILITY_KINDS is deliberately empty: the shape is settled,
+    // enforcement is not built (#11). If this test starts failing, something
+    // began claiming to enforce a capability and the install response's
+    // `unenforced` list needs re-checking.
+    expect(ENFORCED_CAPABILITY_KINDS).toEqual([])
+    expect(
+      unenforcedCapabilities({
+        manifest: 1,
+        name: 'virta',
+        version: '1.0.0',
+        collections: {},
+        capabilities: { 'virta:files': { kind: 'blob' } },
+      })
+    ).toEqual(['virta:files'])
   })
 })

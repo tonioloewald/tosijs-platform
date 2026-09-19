@@ -68,6 +68,17 @@ export function compileVisibility(
         return String(held ?? '').trim() !== ''
       case 'absent':
         return held === undefined || held === null
+      case 'lte':
+      case 'gte': {
+        // Never coerce across types: `'10' <= 9` is a comparison nobody meant,
+        // and for a capability CEILING a surprising true is a granted excess.
+        // Mismatched types deny.
+        if (typeof held !== typeof value) return false
+        if (typeof held !== 'number' && typeof held !== 'string') return false
+        return op === 'lte'
+          ? held <= (value as typeof held)
+          : held >= (value as typeof held)
+      }
       default:
         // Unreachable via the validator, and a DENY if it ever were: an
         // unrecognised predicate must never read as a grant.

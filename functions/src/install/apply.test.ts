@@ -24,8 +24,9 @@ import {
   addedCapabilities,
   type Grant,
   type InstallRecords,
+  type CapabilityEntry,
 } from './apply'
-import type { Manifest, CapabilityRequest } from './manifest'
+import type { Manifest } from './manifest'
 import { ROLES } from '../collections/roles'
 
 const validate = {
@@ -107,7 +108,7 @@ describe('an invalid manifest never reaches the store', () => {
       name: 'other',
       activeVersion: '1.0.0',
       status: 'active',
-      capabilities: [],
+      capabilities: {},
     }
     const d = decideInstall({ ...base, manifest: manifest(), existing })
     expect((d as { problems: string[] }).problems.join()).toContain('is for "other"')
@@ -147,7 +148,7 @@ describe('upgrades must be ADDITIVE — the dangerous path', () => {
     name: 'virta',
     activeVersion: '1.0.0',
     status: 'active',
-    capabilities: [],
+    capabilities: {},
   }
 
   const upgrade = (next: Manifest) =>
@@ -251,69 +252,83 @@ describe('upgrades must be ADDITIVE — the dangerous path', () => {
 })
 
 describe('capabilities re-trigger human approval when they grow', () => {
-  const withCaps = (caps: Array<Record<string, unknown>>, version = '1.0.0') =>
-    manifest({ version, capabilities: caps as never })
+  const BLOB = { kind: 'blob', bucket: 'attachments', maxBytes: 1000 }
+  const OUTBOUND = { kind: 'outbound', host: 'api.github.com' }
+
+  const withCaps = (
+    caps: Record<string, Record<string, unknown>>,
+    version = '1.0.0'
+  ) => manifest({ version, capabilities: caps as never })
 
   const granted: Grant = {
     name: 'virta',
     activeVersion: '1.0.0',
     status: 'active',
-    capabilities: [{ kind: 'blob', bucket: 'attachments', maxBytes: 1000 }],
+    capabilities: { 'virta:files': BLOB } as never,
   }
 
-  test('an upgrade asking for NOTHING new just activates', () => {
-    const d = decideInstall({
+  const upgrade = (
+    caps: Record<string, Record<string, unknown>>,
+    approving?: Record<string, Record<string, unknown>>
+  ) =>
+    decideInstall({
       ...base,
-      manifest: withCaps([{ kind: 'blob', bucket: 'attachments', maxBytes: 1000 }], '1.1.0'),
+      manifest: withCaps(caps, '1.1.0'),
       existing: granted,
       previousManifest: manifest(),
+      ...(approving ? { approving: approving as never } : {}),
     })
-    expect(d.status).toBe('upgraded')
+
+  test('an upgrade asking for NOTHING new just activates', () => {
+    expect(upgrade({ 'virta:files': BLOB }).status).toBe('upgraded')
+  })
+
+  test('key ORDER in a declaration is not a change', () => {
+    // A manifest arrives as JSON from a file nobody treats as ordered.
+    // Spurious re-approval prompts are how people learn to stop reading them.
+    expect(
+      upgrade({
+        'virta:files': { maxBytes: 1000, bucket: 'attachments', kind: 'blob' },
+      }).status
+    ).toBe('upgraded')
   })
 
   test('a NEW capability parks the upgrade as pending', () => {
-    const d = decideInstall({
-      ...base,
-      manifest: withCaps(
-        [
-          { kind: 'blob', bucket: 'attachments', maxBytes: 1000 },
-          { kind: 'outbound', host: 'api.github.com' },
-        ],
-        '1.1.0'
-      ),
-      existing: granted,
-      previousManifest: manifest(),
-    })
+    const d = upgrade({ 'virta:files': BLOB, 'virta:notify': OUTBOUND })
     expect(d.status).toBe('needs-approval')
-    expect((d as { added: unknown[] }).added).toHaveLength(1)
+    expect((d as { added: CapabilityEntry[] }).added).toHaveLength(1)
+    expect((d as { added: CapabilityEntry[] }).added[0].name).toBe('virta:notify')
   })
 
   test('a WIDENED argument counts as new — not the same capability', () => {
-    // The quiet escalation this exists to stop: same `kind`, bigger limit.
-    // Comparing on kind alone would let an upgrade raise a ceiling a human
-    // approved at a lower value.
+    // The quiet escalation this exists to stop: same `kind`, same NAME, bigger
+    // limit. Comparing on kind or name alone would let an upgrade raise a
+    // ceiling a human approved at a lower value.
+    const d = upgrade({ 'virta:files': { ...BLOB, maxBytes: 999999 } })
+    expect(d.status).toBe('needs-approval')
+  })
+
+  test('a WIDENED ACCESS RULE counts as new — the reason access lives inside', () => {
+    // Opening a capability from admin to public is at least as dangerous as
+    // raising a byte limit. If the rules lived beside the declaration instead
+    // of in it, this upgrade would activate silently.
+    const locked = { ...BLOB, access: [{ role: ROLES.admin, use: 'ALL' }] }
+    const opened = { ...BLOB, access: [{ role: ROLES.public, use: 'ALL' }] }
+    const withLocked: Grant = {
+      ...granted,
+      capabilities: { 'virta:files': locked } as never,
+    }
     const d = decideInstall({
       ...base,
-      manifest: withCaps([{ kind: 'blob', bucket: 'attachments', maxBytes: 999999 }], '1.1.0'),
-      existing: granted,
+      manifest: withCaps({ 'virta:files': opened }, '1.1.0'),
+      existing: withLocked,
       previousManifest: manifest(),
     })
     expect(d.status).toBe('needs-approval')
   })
 
   test('a pending upgrade does NOT change what is live', () => {
-    const d = decideInstall({
-      ...base,
-      manifest: withCaps(
-        [
-          { kind: 'blob', bucket: 'attachments', maxBytes: 1000 },
-          { kind: 'outbound', host: 'api.github.com' },
-        ],
-        '1.1.0'
-      ),
-      existing: granted,
-      previousManifest: manifest(),
-    })
+    const d = upgrade({ 'virta:files': BLOB, 'virta:notify': OUTBOUND })
     const grant = (d as { records: { grant: { data: Grant } } }).records.grant.data
     // Still on the old version, still the old capabilities. The new manifest is
     // recorded; nothing it asked for takes effect until a human says so.
@@ -323,66 +338,42 @@ describe('capabilities re-trigger human approval when they grow', () => {
   })
 
   test('approving the exact capability applies the upgrade', () => {
-    const wanted = { kind: 'outbound', host: 'api.github.com' }
-    const d = decideInstall({
-      ...base,
-      manifest: withCaps(
-        [{ kind: 'blob', bucket: 'attachments', maxBytes: 1000 }, wanted],
-        '1.1.0'
-      ),
-      existing: granted,
-      previousManifest: manifest(),
-      approving: [wanted],
-    })
+    const d = upgrade(
+      { 'virta:files': BLOB, 'virta:notify': OUTBOUND },
+      { 'virta:notify': OUTBOUND }
+    )
     expect(d.status).toBe('upgraded')
     const grant = (d as { records: { grant: { data: Grant } } }).records.grant.data
     expect(grant.activeVersion).toBe('1.1.0')
-    expect(grant.capabilities).toHaveLength(2)
+    expect(Object.keys(grant.capabilities)).toHaveLength(2)
   })
 
-  test('approval names CAPABILITIES, so a near-miss does not count', () => {
-    // Approving a version would approve whatever the manifest says when the
-    // approval lands; the manifest is fetched from the network, so between
-    // reading the diff and clicking yes it can say something else. Here the
-    // human approved `api.github.com` and the manifest now asks for a
-    // different host — still parked.
-    const d = decideInstall({
-      ...base,
-      manifest: withCaps(
-        [
-          { kind: 'blob', bucket: 'attachments', maxBytes: 1000 },
-          { kind: 'outbound', host: 'evil.example' },
-        ],
-        '1.1.0'
-      ),
-      existing: granted,
-      previousManifest: manifest(),
-      approving: [{ kind: 'outbound', host: 'api.github.com' }],
-    })
+  test('approval names CONTENT, not a name — a near-miss does not count', () => {
+    // Approving by name would approve whatever that name means when the
+    // approval lands. Here the human approved api.github.com and the manifest
+    // now asks, under the same name, for somewhere else.
+    const d = upgrade(
+      { 'virta:files': BLOB, 'virta:notify': { kind: 'outbound', host: 'evil.example' } },
+      { 'virta:notify': OUTBOUND }
+    )
     expect(d.status).toBe('needs-approval')
-    expect((d as { added: CapabilityRequest[] }).added).toEqual([
-      { kind: 'outbound', host: 'evil.example' },
-    ])
+    expect((d as { added: CapabilityEntry[] }).added[0].capability).toMatchObject({
+      host: 'evil.example',
+    })
   })
 
   test('a PARTIAL approval leaves the rest outstanding, and applies nothing', () => {
-    const d = decideInstall({
-      ...base,
-      manifest: withCaps(
-        [
-          { kind: 'blob', bucket: 'attachments', maxBytes: 1000 },
-          { kind: 'outbound', host: 'a.example' },
-          { kind: 'outbound', host: 'b.example' },
-        ],
-        '1.1.0'
-      ),
-      existing: granted,
-      previousManifest: manifest(),
-      approving: [{ kind: 'outbound', host: 'a.example' }],
-    })
+    const d = upgrade(
+      {
+        'virta:files': BLOB,
+        'virta:a': { kind: 'outbound', host: 'a.example' },
+        'virta:b': { kind: 'outbound', host: 'b.example' },
+      },
+      { 'virta:a': { kind: 'outbound', host: 'a.example' } }
+    )
     expect(d.status).toBe('needs-approval')
-    expect((d as { added: CapabilityRequest[] }).added).toEqual([
-      { kind: 'outbound', host: 'b.example' },
+    expect((d as { added: CapabilityEntry[] }).added.map((e) => e.name)).toEqual([
+      'virta:b',
     ])
     // The approved half is NOT granted in the meantime — approval is all or
     // nothing, so a half-applied upgrade can never be live.
@@ -391,33 +382,26 @@ describe('capabilities re-trigger human approval when they grow', () => {
   })
 
   test('the ledger records the real diff AND what was signed off', () => {
-    const wanted = { kind: 'outbound', host: 'api.github.com' }
-    const d = decideInstall({
-      ...base,
-      manifest: withCaps(
-        [{ kind: 'blob', bucket: 'attachments', maxBytes: 1000 }, wanted],
-        '1.1.0'
-      ),
-      existing: granted,
-      previousManifest: manifest(),
-      approving: [wanted],
-    })
+    const d = upgrade(
+      { 'virta:files': BLOB, 'virta:notify': OUTBOUND },
+      { 'virta:notify': OUTBOUND }
+    )
     const log = (d as { records: { log: { data: Record<string, unknown> } } })
       .records.log.data
-    expect(log.addedCapabilities).toEqual([wanted])
-    expect(log.approvedCapabilities).toEqual([wanted])
+    expect(log.addedCapabilities).toHaveLength(1)
+    expect(log.approvedCapabilities).toEqual({ 'virta:notify': OUTBOUND })
   })
 
-  test('addedCapabilities ignores key ORDER but not values', () => {
+  test('addedCapabilities on its own', () => {
+    expect(addedCapabilities({ a: BLOB } as never, { a: BLOB } as never)).toEqual([])
     expect(
-      addedCapabilities(
-        [{ kind: 'blob', maxBytes: 1 }],
-        [{ maxBytes: 1, kind: 'blob' }]
-      )
-    ).toEqual([])
-    expect(
-      addedCapabilities([{ kind: 'blob', maxBytes: 1 }], [{ kind: 'blob', maxBytes: 2 }])
+      addedCapabilities({ a: BLOB } as never, {
+        a: { ...BLOB, maxBytes: 2 },
+      } as never)
     ).toHaveLength(1)
+    // A capability that DISAPPEARS is not an addition — losing power needs no
+    // approval.
+    expect(addedCapabilities({ a: BLOB } as never, {} as never)).toEqual([])
   })
 })
 
@@ -426,7 +410,7 @@ describe('revoking never drops rows', () => {
     name: 'virta',
     activeVersion: '1.0.0',
     status: 'active',
-    capabilities: [],
+    capabilities: {},
   }
 
   test('it writes NO manifest record — the diff basis must survive', () => {

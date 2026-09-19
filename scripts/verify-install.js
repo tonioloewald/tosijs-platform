@@ -141,7 +141,22 @@ const wipeRolesFor = async (subject) => {
     }
   }
 }
+/**
+ * Manifests are append-only AND a version's content is immutable, so a previous
+ * run's `verify@1.2.0` makes this run's `verify@1.2.0` a 409 the moment the
+ * test manifest changes at all. That is the rule working — it caught exactly
+ * this when the capability shape changed — but it makes the script
+ * non-repeatable unless it clears its own history.
+ */
+const wipeManifests = async () => {
+  const listed = await firestore('GET', 'manifest?pageSize=300')
+  for (const d of listed.json?.documents ?? []) {
+    const id = d.name.split('/documents/')[1]
+    if (id.startsWith('manifest/verify@')) await firestore('DELETE', id)
+  }
+}
 await wipeRolesFor(uid)
+await wipeManifests()
 await firestore('DELETE', 'grant/verify')
 await firestore('DELETE', 'system%3Aclaim/current')
 
@@ -353,7 +368,13 @@ const wants = await call('POST', '/install', {
     manifest: {
       ...MANIFEST,
       version: '1.2.0',
-      capabilities: [{ kind: 'outbound', host: 'api.example.com' }],
+      capabilities: {
+        'verify:notify': {
+          kind: 'outbound',
+          host: 'api.example.com',
+          access: [{ role: 'configurator', use: 'ALL' }],
+        },
+      },
     },
   },
 })
@@ -367,7 +388,10 @@ const stillOld = await call('GET', '/install', { bearer: idToken })
 ok(
   'and changes NOTHING live — still 1.0.0, still no capabilities',
   stillOld.json?.installed?.some(
-    (i) => i.name === 'verify' && i.version === '1.0.0' && i.capabilities.length === 0
+    (i) =>
+      i.name === 'verify' &&
+      i.version === '1.0.0' &&
+      Object.keys(i.capabilities ?? {}).length === 0
   ),
   stillOld.text.slice(0, 200)
 )
@@ -390,15 +414,74 @@ const approved = await call('POST', '/install', {
     manifest: {
       ...MANIFEST,
       version: '1.2.0',
-      capabilities: [{ kind: 'outbound', host: 'api.example.com' }],
+      capabilities: {
+        'verify:notify': {
+          kind: 'outbound',
+          host: 'api.example.com',
+          access: [{ role: 'configurator', use: 'ALL' }],
+        },
+      },
     },
-    approving: [{ kind: 'outbound', host: 'api.example.com' }],
+    approving: {
+      'verify:notify': {
+        kind: 'outbound',
+        host: 'api.example.com',
+        access: [{ role: 'configurator', use: 'ALL' }],
+      },
+    },
   },
 })
 ok(
   'approving exactly that capability applies the upgrade',
   approved.status === 200 && approved.json?.status === 'upgraded',
   `${approved.status} ${approved.text.slice(0, 160)}`
+)
+ok(
+  'and the response SAYS the capability is not yet enforced',
+  // An approval prompt that overstates what it is asking about is how people
+  // learn to stop reading them. Nothing enforces `outbound` yet; say so.
+  approved.json?.unenforced?.includes('verify:notify'),
+  JSON.stringify(approved.json?.unenforced ?? null)
+)
+
+// A capability kind nothing can enforce must be REFUSED, not granted.
+const madeUp = await call('POST', '/install', {
+  bearer: idToken,
+  body: {
+    manifest: {
+      ...MANIFEST,
+      version: '1.3.0',
+      capabilities: { 'verify:evil': { kind: 'mine-bitcoin' } },
+    },
+  },
+})
+ok(
+  'an unrecognised capability kind is refused, not silently granted',
+  madeUp.status === 400 && /not a capability this host recognises/.test(madeUp.text),
+  `${madeUp.status} ${madeUp.text.slice(0, 160)}`
+)
+
+// The escalation the whole in-the-declaration placement exists to stop.
+const widened = await call('POST', '/install', {
+  bearer: idToken,
+  body: {
+    manifest: {
+      ...MANIFEST,
+      version: '1.4.0',
+      capabilities: {
+        'verify:notify': {
+          kind: 'outbound',
+          host: 'api.example.com',
+          access: [{ role: 'public', use: 'ALL' }],
+        },
+      },
+    },
+  },
+})
+ok(
+  'WIDENING a capability from configurator to public re-triggers approval',
+  widened.status === 202 && widened.json?.status === 'needs-approval',
+  `${widened.status} ${widened.text.slice(0, 160)}`
 )
 
 // --- 10. revoke --------------------------------------------------------------
@@ -429,6 +512,7 @@ ok(
 // --- cleanup ----------------------------------------------------------------
 await firestore('DELETE', 'verify%3Atask/t1')
 await firestore('DELETE', 'grant/verify')
+await wipeManifests()
 await wipeRolesFor(uid)
 
 console.log(
