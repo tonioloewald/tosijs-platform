@@ -185,6 +185,43 @@ describe('the epoch document is unreachable by design', () => {
   })
 })
 
+describe('/doc and /docs resolve through the registry', () => {
+  // Installing writes records; this is what makes them mean anything. Without
+  // it /install succeeds, reports success, and changes nothing observable —
+  // the worst possible failure for the endpoint virta is waiting on.
+  const docTs = src('doc.ts')
+  const docsTs = src('docs.ts')
+
+  test('both handlers build a per-request map', () => {
+    expect(docTs.match(/collectionsFor\(_collectionPath\)/g)).toHaveLength(2)
+    expect(
+      docsTs.match(/collectionsFor\(collectionPath\(path\)\)/g)
+    ).toHaveLength(2)
+  })
+
+  test('the access gate consults that map, not the compiled one', () => {
+    for (const source of [docTs, docsTs]) {
+      expect(source).toMatch(/getMethodAccess\(\s*collections,/)
+      expect(source).not.toMatch(/getMethodAccess\(\s*COLLECTIONS,/)
+    }
+  })
+
+  test('COLLECTIONS survives only as the default argument', () => {
+    // Any remaining `COLLECTIONS[...]` lookup is a path that would deny every
+    // installed collection while the rest of the handler thinks it resolved.
+    expect(docTs).not.toMatch(/COLLECTIONS\[/)
+    expect(docsTs).not.toMatch(/COLLECTIONS\[/)
+  })
+
+  test('the store is built per request, carrying that map', () => {
+    // A module-level store resolves an installed collection's unique key
+    // against the platform map — which has no entry — and rejects every
+    // `field=value` path as "not an allowed key".
+    expect(docTs).toMatch(/const store = storeFor\(collections\)/)
+    expect(docTs).not.toMatch(/const store = new FirestoreStore/)
+  })
+})
+
 describe('both endpoints are actually exported', () => {
   test('index.ts exports them, or they do not deploy at all', () => {
     expect(indexTs).toMatch(/export \{ claim \} from '\.\/claim'/)

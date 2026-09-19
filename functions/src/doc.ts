@@ -29,8 +29,10 @@ import {
   ALL,
   hasPrivilegedRole,
   opaqueStatus,
+  type CollectionMap,
 } from './collections/access'
 import { COLLECTIONS } from './collections'
+import { collectionsFor } from './install/installed'
 import { UserRoles } from './collections/roles'
 import {
   runWritePipeline,
@@ -96,7 +98,12 @@ function isDocRef(ref: FirestoreRef): ref is FirestoreDocRef {
 
 export const getRef = async (
   path: string,
-  isCollection = false
+  isCollection = false,
+  // Which configs to resolve `field=value` against. Defaults to the compiled
+  // platform map; a namespaced request passes the merged map so an installed
+  // collection's own `unique`/`tagFields` are honoured. NOT a global read: see
+  // `collectionsFor`, which short-circuits bare names to exactly this default.
+  collections: CollectionMap = COLLECTIONS
 ): Promise<FirestoreRef | Error> => {
   const pathParts = path.split('/')
 
@@ -123,7 +130,7 @@ export const getRef = async (
       ref = ref.collection(collection).doc(docSpecifier)
     } else {
       const [field, value] = docSpecifier.split('=', 2)
-      const config = COLLECTIONS[collectionStack.join('/')]
+      const config = collections[collectionStack.join('/')]
       const isUnique = config?.unique?.includes(field)
       const isTagField = config?.tagFields?.includes(field)
       if (!isUnique && !isTagField) {
@@ -202,8 +209,18 @@ const isUnique = async (
  * keeps the dependency acyclic and — more importantly — means the ported code
  * runs the exact same resolution and uniqueness logic it did before. The port
  * changes who the endpoint talks to, not what it says.
+ *
+ * Built PER REQUEST rather than once at module load, because `getRef` now has
+ * to resolve `field=value` against the collection map for that request — and a
+ * module-level store would silently resolve an installed collection's unique
+ * key against the platform map, which has no entry for it, and reject every
+ * such path as "not an allowed key".
  */
-const store = new FirestoreStore({ getRef, isUnique })
+const storeFor = (collections: CollectionMap) =>
+  new FirestoreStore({
+    getRef: (path, isCollection) => getRef(path, isCollection, collections),
+    isUnique,
+  })
 
 export const getDoc = async (
   req: AuthenticatedRequest,
@@ -214,9 +231,10 @@ export const getDoc = async (
 
   try {
     const _collectionPath = collectionPath(path)
-    const config = COLLECTIONS[_collectionPath]
+    const collections = await collectionsFor(_collectionPath)
+    const config = collections[_collectionPath]
     const access = getMethodAccess(
-      COLLECTIONS,
+      collections,
       _collectionPath,
       req.method as REST_METHOD,
       userRoles
@@ -237,7 +255,7 @@ export const getDoc = async (
       }
     }
 
-    const ref = await getRef(path)
+    const ref = await getRef(path, false, collections)
     if (ref instanceof Error) {
       return opaqueError(userRoles, ref.message, 404)
     }
@@ -309,7 +327,8 @@ export const doc = onRequest({}, async (req, res) => {
   }
 
   const _collectionPath = collectionPath(path)
-  const config = COLLECTIONS[_collectionPath]
+  const collections = await collectionsFor(_collectionPath)
+  const config = collections[_collectionPath]
 
   if (!config) {
     res.status(404).send('not found')
@@ -317,7 +336,7 @@ export const doc = onRequest({}, async (req, res) => {
   }
 
   const access = getMethodAccess(
-    COLLECTIONS,
+    collections,
     _collectionPath,
     req.method as REST_METHOD,
     userRoles
@@ -343,13 +362,14 @@ export const doc = onRequest({}, async (req, res) => {
   // GET still uses `getRef` below — `docs.ts` and the read path are the
   // remaining half of #7, and porting them together with the query semantics
   // (filter-before-limit, D7) is a separate change.
+  const store = storeFor(collections)
   const canonicalPath = await store.resolve(path)
   if (canonicalPath instanceof Error) {
     res.status(404).send(canonicalPath.message)
     return
   }
 
-  const ref = await getRef(path)
+  const ref = await getRef(path, false, collections)
   if (ref instanceof Error) {
     res.status(404).send(ref.message)
     return

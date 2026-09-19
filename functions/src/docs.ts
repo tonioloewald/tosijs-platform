@@ -30,8 +30,10 @@ import {
   getMethodAccess,
   ALL,
   opaqueStatus,
+  type CollectionMap,
 } from './collections/access'
 import { COLLECTIONS } from './collections'
+import { collectionsFor } from './install/installed'
 import { getRef } from './doc'
 import { Response } from 'express'
 
@@ -58,9 +60,11 @@ export async function getRecords(
    * (possibly narrowed) to keep it, or an Error to hide it — the AccessFilterFunc
    * contract.
    */
-  filter?: (rec: Record<string, unknown>) => Promise<Error | Record<string, unknown>>
+  filter?: (rec: Record<string, unknown>) => Promise<Error | Record<string, unknown>>,
+  /** Configs to resolve `field=value` against — see getRef in doc.ts. */
+  collections: CollectionMap = COLLECTIONS
 ): Promise<Record<string, unknown>[]> {
-  const refResult = await getRef(path, true)
+  const refResult = await getRef(path, true, collections)
   if (refResult instanceof Error) {
     return []
   }
@@ -151,8 +155,9 @@ export const getDocs = async (
   order = ''
 ): Promise<Record<string, unknown>[]> => {
   const userRoles = await getUserRoles(req)
+  const collections = await collectionsFor(collectionPath(path))
   const access = getMethodAccess(
-    COLLECTIONS,
+    collections,
     collectionPath(path),
     'LIST',
     userRoles,
@@ -160,11 +165,16 @@ export const getDocs = async (
   )
 
   if (access === ALL) {
-    return await getRecords(path, limit, order, fields)
+    return await getRecords(path, limit, order, fields, undefined, collections)
   } else if (typeof access === 'function') {
     // Filter is applied INSIDE the query loop, before the limit — see getRecords.
-    return await getRecords(path, limit, order, fields, (rec) =>
-      access(rec, userRoles)
+    return await getRecords(
+      path,
+      limit,
+      order,
+      fields,
+      (rec) => access(rec, userRoles),
+      collections
     )
   } else {
     return []
@@ -182,8 +192,9 @@ export const docs = onRequest({}, async (req, res) => {
   const userRoles = await getUserRoles(req)
   const order = (req.query.o as string) || ''
   // const query = req.body.q as string
+  const collections = await collectionsFor(collectionPath(path))
   const access = getMethodAccess(
-    COLLECTIONS,
+    collections,
     collectionPath(path),
     'LIST',
     userRoles,
@@ -191,7 +202,14 @@ export const docs = onRequest({}, async (req, res) => {
   )
 
   if (access === ALL) {
-    const found = await getRecords(path, limit, order, fields)
+    const found = await getRecords(
+      path,
+      limit,
+      order,
+      fields,
+      undefined,
+      collections
+    )
     compressResponse(req, res, () => {
       res.json(found)
     })
@@ -199,8 +217,13 @@ export const docs = onRequest({}, async (req, res) => {
     // Same filter-before-limit path as getDocs — this handler had its own copy
     // of the post-filter, so fixing only one call site would have left the HTTP
     // endpoint returning short pages.
-    const found = await getRecords(path, limit, order, fields, (rec) =>
-      access(rec, userRoles)
+    const found = await getRecords(
+      path,
+      limit,
+      order,
+      fields,
+      (rec) => access(rec, userRoles),
+      collections
     )
     compressResponse(req, res, () => {
       res.json(found)
