@@ -64,5 +64,6 @@ export { stored } from './stored'
 export { claim } from './claim'
 export { install } from './install/endpoint'
 export { token } from './auth/endpoint'
+export { authorize } from './auth/authorize-endpoint'
 
 export { gen } from './gen'

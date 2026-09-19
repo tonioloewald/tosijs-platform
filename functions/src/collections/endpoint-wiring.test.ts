@@ -281,3 +281,56 @@ describe('capability tokens are actually wired (B2, #6)', () => {
     expect(endpoint).toMatch(/viaToken/)
   })
 })
+
+describe('/authorize never hands the browser a credential (B2, #6)', () => {
+  const authz = src('auth/authorize-endpoint.ts')
+  const page = src('auth/consent-page.ts')
+  const pure = src('auth/authorize.ts')
+
+  test('approval records WHO and does not mint', () => {
+    // Minting at approval would mean storing a secret until collection, and a
+    // revocation in between would not take effect.
+    const approve = authz.slice(
+      authz.indexOf("if (action === 'approve')"),
+      authz.indexOf("if (action === 'exchange')")
+    )
+    expect(approve).not.toMatch(/newTokenSecret\(/)
+    expect(approve).not.toMatch(/decideMint\(/)
+  })
+
+  test('minting happens at exchange, from LIVE roles', () => {
+    expect(authz).toMatch(/const principal = await rolesOf\(decision\.principalUid\)/)
+    expect(authz).toMatch(/principalRoles: principal/)
+  })
+
+  test('the request is consumed in the SAME batch as the token', () => {
+    // A crash between them would leave a request still exchangeable for a
+    // second credential.
+    expect(authz).toMatch(/batch\.update\(ref, \{ usedAt/)
+    expect(authz).toMatch(/await batch\.commit\(\)/)
+  })
+
+  test('a token may not approve an authorization', () => {
+    expect(authz).toMatch(/if \(!user \|\| userRoles\.token\)/)
+  })
+
+  test('the verifier is checked before status is revealed', () => {
+    const exchange = pure.slice(pure.indexOf('export function decideExchange'))
+    const verifierCheck = exchange.indexOf('bad-verifier')
+    const statusRead = exchange.indexOf("record.status === 'pending'")
+    expect(verifierCheck).toBeGreaterThan(-1)
+    expect(verifierCheck).toBeLessThan(statusRead)
+  })
+
+  test('the consent page escapes everything it renders', () => {
+    // The label and caveats are attacker-supplied: whoever starts a request
+    // chooses them, and a human reads the result.
+    expect(page).toMatch(/escape\(record\.label\)/)
+    expect(page).toMatch(/replace\(\s*\n?\s*\/\[&<>"'\]\/g/)
+  })
+
+  test('poll mode carries the phishing warning on the page itself', () => {
+    expect(page).toMatch(/record\.mode === 'poll'/)
+    expect(page).toMatch(/Check you started this/)
+  })
+})
