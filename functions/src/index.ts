@@ -40,6 +40,7 @@ export const helloWorld = onRequest((request, response) => {
 import './collections/module'
 import './collections/config'
 import './collections/role'
+import './collections/install-records'
 import './blog'
 import './page'
 import * as functions from 'firebase-functions'
