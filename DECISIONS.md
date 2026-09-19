@@ -24,6 +24,11 @@ time, carry the entry with the code.
 | [D11](#d11) | One definition of "published" | tosijs-blog |
 | [D12](#d12) | Endpoints self-gate on their own tests | this repo |
 | [D13](#d13) | Build on demand; validate the design against what is unbuilt | all |
+| [D14](#d14) | Collections are data; no compiled authority, not even for owner | this repo |
+| [D15](#d15) | Namespaces use `:`; a manifest may declare only its own | this repo |
+| [D16](#d16) | Bootstrap by proving datastore access, not by a first-run secret | this repo |
+| [D17](#d17) | Install v1 is declarative; `functions` is refused, not ignored | this repo |
+| [D18](#d18) | Consumer order: virta, then the tjs-lang platform, then loewald.com | all |
 
 ---
 
@@ -264,6 +269,8 @@ checked against them *now*, while a change costs a paragraph rather than a migra
 migrations, stored procedures and third-party capabilities. Two gaps and one defect found:
 
 **(a) `COLLECTIONS` registers only at import time, so ephemeral collections are unrepresentable.**
+*(Closed by [D14](#d14), 2026-09-19 — the registry resolves configs from data, and [D15](#d15) gives
+the access model the namespace this paragraph asks for. The prediction was exact.)*
 Every collection is a module-scope assignment (`COLLECTIONS.post = {…}`). Rooms (§D-games) and
 §7.4's test fixtures both need *runtime* registration. The access model itself is fine; the
 **registry** is not — and B3 proved registration is security-relevant, since a demo collection with
@@ -300,3 +307,162 @@ separately.*
 **Also noticed:** the join over *constraints* is one open question wearing two hats — schema
 projection union (D6) and capability-argument union (b) are the same problem. Solve once.
 **Lands in:** all repos (the discipline); this repo (the three findings).
+
+
+---
+
+## D14
+**Collection configuration is DATA, resolved through the privileges model. Nothing about what a host
+can do is fixed outside the system — except owner authority, which is outside our control anyway.**
+*(2026-09-19, owner)*
+
+`COLLECTIONS` was a module-level map populated by import-time side effects, so a host's capabilities
+were fixed at build time. An install system cannot exist on top of that: a collection has to be
+definable by writing a document.
+
+Consequences, in order of how much they change:
+
+**There are no platform collections, only installed ones.** The registry makes no distinction
+between `post` and `virta:task`; bare names simply belong to the platform's own namespace. This
+collapses "dogfood the blog as a manifest" from a milestone into the normal case — there is no other
+case.
+
+**No compiled authority, including for `owner`.** There is deliberately no `owner ⇒ ALL` escape
+hatch anywhere. Owner's real power is datastore access (D3), which lives outside anything this code
+can grant or revoke, and this ledger already retracted one design (Firebase custom claims) for
+inventing an in-system second root. A compiled bypass would be exactly that. So an empty or
+unreadable config store **fails closed**: every collection undefined, `/doc` denies everything, and
+the only way back is the datastore — which is the recovery story D3 already describes.
+
+**The bootstrap is not circular.** Reading configs is a privileged *internal* read, not a `/doc`
+request, so it is not governed by the configs it fetches. Not a new mechanism: `getUserRoles` has
+always read `role` this way. Internal reads are infrastructure; the access model governs external
+requests.
+
+**One bad config must not take down the host.** Configs compile independently and a failure is
+isolated to its own collection. Otherwise a typo becomes an outage — and anyone who could get one
+malformed document stored could deny the entire service.
+
+**Invalidation has to actually take effect.** `invalidate()` alone clears only the instance that
+handled the request; every other instance keeps serving the old rules until its TTL expires, which
+for a revocation is precisely the wrong failure. Hence a cheap `epoch()` probe: each instance
+re-checks one small value every few seconds and reloads only when it moved. Rules propagate in
+seconds. **Identity revocation does not** — `verifyIdToken` is still called without
+`checkRevoked: true`, so an already-issued token outlives a revoked role by up to an hour. You can
+change what anyone may do almost instantly; you cannot yet instantly stop being someone.
+
+Still outside the data model and still to move: `ROLES` is a closed const, and `PRIVILEGED_ROLES`
+(who sees real errors rather than opaque 404s) is a hardcoded list that is already stale —
+`configurator` is missing from it.
+
+---
+
+## D15
+**A namespace is separated by `:`, and a manifest may declare only its own.** *(2026-09-18)*
+
+`/` was the obvious separator and is wrong: it is already the sub-collection separator.
+`collectionPath()` splits document paths on `/` and keeps the even segments, so `virta/task` is
+indistinguishable from "sub-collection `task` of collection `virta`" — pinned as a test, because the
+collision is silent rather than an error. `:` rides inside one segment, so path parsing, `/doc?p=`,
+`/docs?p=` and sub-collections all work unchanged, and it is legal in a Firestore collection id and
+in a query value.
+
+The gate has two independent rules: **any bare name belongs to the platform** — not merely the names
+on a known list, so adding a platform collection later needs no edit here — and a namespaced name
+must match the declaring manifest. Near-miss namespaces (`virta` vs `virta2`) are refused explicitly,
+since prefix confusion is how such checks usually leak.
+
+`role` and `module` are the ones that matter: whoever writes `role` rewrites the input to their own
+authorization (D4), and `module` documents are served as executable JavaScript by `/esm`. Either
+claimed by a manifest is a site takeover, not a name clash.
+
+Logical→physical mapping is the identity function today and exists anyway, so a substrate whose
+naming rules differ (Postgres table names cannot contain `:`) is a change in one file.
+
+---
+
+## D16
+**A fresh host bootstraps by proving datastore access, not by holding a first-run secret.**
+*(2026-09-19)*
+
+The obvious design hands the deployer a secret at first boot. It has a leak window, a
+who-holds-it-in-CI problem, and no recovery story once lost.
+
+Instead: the endpoint publishes a **nonce** at an unauthenticated GET; the claimant writes it into a
+designated document **directly in the datastore** (console, gcloud, psql); the endpoint compares,
+mints `configurator`, rotates the nonce and clears the proof.
+
+Nothing secret is published. The proof is not *knowing* the nonce — it is being able to **write** it
+where only the datastore holder can write, and `firestore.rules` is deny-all so no API path reaches
+that document. It is therefore re-runnable, which doubles as break-glass recovery, and
+substrate-portable, since "console access" becomes "a psql prompt" without changing the ceremony. It
+is D3 made operational rather than an authority we invented.
+
+**Rotation is load-bearing.** Without it the proof stays in the datastore and the next authenticated
+caller claims for free, converting a one-time ceremony into a standing back door.
+
+Failure directions chosen deliberately: an absent or unparseable `issuedAt` counts as **expired**
+rather than fresh; an empty proof does not match an empty nonce; an unauthenticated claim is refused
+because a grant must be attributable. Comparison is a plain `===` on purpose — a timing oracle leaks
+the nonce, and the nonce is published.
+
+`configurator` is a separate role, not folded into `owner`: a host can then delegate "may install
+libraries" without handing over the data, and an install appears in the ledger as its own act. It
+cannot appoint another configurator, because `role` is owner-only (D4).
+
+---
+
+## D17
+**Install v1 is declarative. A manifest carrying `functions` is REFUSED, not ignored.** *(2026-09-18)*
+
+A manifest carries schemas, an access lattice, unique constraints, derive ops and capability
+requests — all serializable. No stored ajs: tjs-lang is a validated but unwired dependency, and
+tjs-lang#52/#54 corrupt transforms *and* predicates silently while upstream coerces a corrupted
+result to a GRANT. Shipping caller-authored code on that is not a trade worth making.
+
+Refusing rather than ignoring matters: silently dropping the executable half of someone's manifest
+and reporting success is the worst available outcome.
+
+Two measured tosijs-schema defects shape the format, and neither is guessable by a manifest author:
+
+- **`$predicate` fails OPEN and is invisible to the gate.** With no evaluator registered it accepts
+  anything, and because it is *in* the enforced keyword set `unenforcedKeywords()` returns `[]` for
+  it. Refused by name, at any depth. This is the one that could be weaponised deliberately: a schema
+  that looks validated and validates nothing.
+- **`contains` is accepted but not enforced**, which is precisely the rule `page` and `module` use
+  for row visibility. So visibility **cannot** be a schema; it is a small closed predicate vocabulary
+  instead. That one *is* caught generically.
+
+Transforms are a closed registry of parameterised ops (`slug`, `shortId`, `now`, `principal`,
+`constant`) plus `envelope.version.bumpOn`. The manifest *selects* a transform; it never carries
+code. `bumpOn` removes a bug class rather than a bug: the caller cannot send the revision field, so
+the hand-written branch that once erased a module's history has nowhere to live.
+
+An unknown visibility op **denies**, and `all: []` is refused — a predicate nobody understands, or a
+vacuously true one, must never read as permission.
+
+---
+
+## D18
+**Consumer order: virta first, then the tjs-lang platform backend, then loewald.com.** *(2026-09-19,
+owner)*
+
+Supersedes the earlier "blog first" ordering, which argued the blog is the better first customer
+because it has a known-correct oracle and cannot be bent to fit a weak format.
+
+That reasoning was about *format validation*; it ignored *risk*. loewald.com is a live site with a
+decade of real data, so it is the worst place to learn what the install system gets wrong.
+**tosijs-virta is greenfield — there is nothing to lose.** It is the guinea pig: unblock it
+completely, let it try to get real work rolling, expect immediate adoption pain, and patch rapidly.
+
+The **tjs-lang platform backend** is then the second consumer — languages-as-a-service,
+blueprints/components-as-a-service, libraries-as-a-service, unbundled development. It is *lower risk
+and higher demand* than loewald.com, which makes it a better second adopter than the blog on both
+counts.
+
+loewald.com comes last, after two consumers have shaken the design out, and is migrated to discrete
+pieces rather than converted in place.
+
+Immediate consequence: **the `/doc` swap for platform collections is NOT on virta's critical path.**
+Installed collections are what virta needs; `post`/`page`/`module` can stay compiled until their
+turn. A production-touching migration was about to be done for a consumer that does not require it.
