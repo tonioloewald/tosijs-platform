@@ -61,11 +61,34 @@ export interface StoredCollectionConfig {
  */
 export interface ConfigSource {
   load(): Promise<StoredCollectionConfig[]>
+  /**
+   * A cheap "has anything changed?" probe — one tiny read, not the whole set.
+   *
+   * WITHOUT this, cache invalidation does not actually work in production.
+   * `invalidate()` clears the instance that handled the request; every OTHER
+   * instance keeps serving the old rules until its TTL expires. For a
+   * revocation that is precisely the wrong failure: the grant you just removed
+   * stays live, on machines you are not looking at, for up to a minute.
+   *
+   * With it, each instance re-checks a single epoch value on a short interval
+   * and reloads only when it actually moved. Steady state costs one small read
+   * every few seconds per warm instance; a real change propagates within that
+   * interval everywhere at once.
+   *
+   * Optional: a source without one falls back to TTL-only, which is correct for
+   * a static source and honest about being weaker for a live one.
+   */
+  epoch?(): Promise<string | number>
 }
 
 export interface RegistryOptions {
-  /** How long a loaded snapshot stays usable, ms. */
+  /** How long a loaded snapshot stays usable without ANY check, ms. */
   ttlMs?: number
+  /**
+   * How often to re-check the epoch, ms. This is the real staleness bound for a
+   * rule change, so it is deliberately short — the check is one small read.
+   */
+  epochTtlMs?: number
   /** Injected clock, so cache behaviour is testable without waiting. */
   now?: () => number
   /** Where compile failures go. Never throws the host down. */
@@ -77,9 +100,14 @@ export interface RegistrySnapshot {
   /** Names whose stored config could not be compiled. */
   failed: string[]
   loadedAt: number
+  /** The epoch this snapshot was built from, when the source reports one. */
+  epoch?: string | number
+  /** When the epoch was last confirmed unchanged. */
+  checkedAt: number
 }
 
 const DEFAULT_TTL_MS = 60_000
+const DEFAULT_EPOCH_TTL_MS = 5_000
 
 /**
  * Compile a set of stored configs into a `CollectionMap`.
@@ -132,6 +160,10 @@ export class CollectionRegistry {
     return this.options.ttlMs ?? DEFAULT_TTL_MS
   }
 
+  private get epochTtl(): number {
+    return this.options.epochTtlMs ?? DEFAULT_EPOCH_TTL_MS
+  }
+
   private get clock(): () => number {
     return this.options.now ?? Date.now
   }
@@ -143,8 +175,31 @@ export class CollectionRegistry {
 
   async current(): Promise<RegistrySnapshot> {
     const now = this.clock()
-    if (this.snapshot && now - this.snapshot.loadedAt < this.ttl) {
-      return this.snapshot
+    const snap = this.snapshot
+
+    if (snap && now - snap.loadedAt < this.ttl) {
+      // Inside the hard TTL. Still confirm nothing changed, cheaply, so an
+      // invalidation on ANOTHER instance reaches this one.
+      if (now - snap.checkedAt < this.epochTtl) return snap
+      if (this.source.epoch) {
+        try {
+          const current = await this.source.epoch()
+          if (current === snap.epoch) {
+            // Unchanged: extend the confirmation without reloading anything.
+            snap.checkedAt = now
+            return snap
+          }
+          // Changed — fall through to a full reload.
+        } catch (e) {
+          // An epoch we cannot read is an epoch we cannot trust. Reload rather
+          // than keep serving rules whose freshness is unknown.
+          this.options.onError?.(`registry: epoch check failed: ${String(e)}`)
+        }
+      } else {
+        // No epoch support: TTL is all there is.
+        snap.checkedAt = now
+        return snap
+      }
     }
     // Collapse concurrent refreshes: a cold instance serving a burst should do
     // ONE load, not one per request.
@@ -153,21 +208,33 @@ export class CollectionRegistry {
     this.inFlight = (async () => {
       try {
         const stored = await this.source.load()
+        const epoch = this.source.epoch
+          ? await this.source.epoch().catch(() => undefined)
+          : undefined
         const { collections, failed } = compileStored(
           stored,
           this.options.onError
         )
-        this.snapshot = { collections, failed, loadedAt: this.clock() }
+        const at = this.clock()
+        this.snapshot = {
+          collections,
+          failed,
+          loadedAt: at,
+          checkedAt: at,
+          epoch,
+        }
         return this.snapshot
       } catch (e) {
         this.options.onError?.(`registry: load failed: ${String(e)}`)
         // FAIL CLOSED. An unreadable config store yields no collections, so
         // /doc denies everything, rather than serving whatever happened to be
         // cached from before a revocation.
+        const at = this.clock()
         this.snapshot = {
           collections: {},
           failed: [],
-          loadedAt: this.clock(),
+          loadedAt: at,
+          checkedAt: at,
         }
         return this.snapshot
       } finally {

@@ -360,3 +360,112 @@ describe('CROSS-ARCHITECTURE: same data, same behaviour, any substrate', () => {
     expect(outcomes[0]).toEqual(['rejected:schema', 'write:'])
   })
 })
+
+/**
+ * Cross-instance invalidation — the requirement that if rules are updated, any
+ * in-memory or cached copy is invalidated.
+ *
+ * `invalidate()` alone does NOT satisfy that: it clears the instance that
+ * handled the request, while every other instance keeps serving the old rules
+ * until its TTL expires. For a revocation that is the wrong failure — the grant
+ * you just removed stays live on machines you are not looking at.
+ *
+ * These model two instances sharing one store, which is what production is.
+ */
+describe('a rule change reaches OTHER instances', () => {
+  const sharedStore = () => {
+    const state = { entries: STORED, epoch: 1, loads: 0, epochReads: 0 }
+    const source = (): ConfigSource => ({
+      load: async () => {
+        state.loads++
+        return state.entries
+      },
+      epoch: async () => {
+        state.epochReads++
+        return state.epoch
+      },
+    })
+    return { state, source }
+  }
+
+  test('instance B picks up a change made by instance A', async () => {
+    const { state, source } = sharedStore()
+    let clock = 1000
+    const opts = { now: () => clock, epochTtlMs: 100, ttlMs: 60_000 }
+    const a = new CollectionRegistry(source(), opts)
+    const b = new CollectionRegistry(source(), opts)
+
+    expect(await a.resolve('post')).toBeDefined()
+    expect(await b.resolve('post')).toBeDefined()
+
+    // Instance A installs a change: the store is rewritten and the epoch moves.
+    state.entries = STORED.filter((e) => e.name !== 'post')
+    state.epoch = 2
+    a.invalidate()
+
+    // A sees it immediately — it did the write.
+    expect(await a.resolve('post')).toBeUndefined()
+
+    // B is still inside its hard TTL and has NOT been told anything. Without an
+    // epoch check it would keep serving the removed collection.
+    clock += 101
+    expect(await b.resolve('post')).toBeUndefined()
+  })
+
+  test('an unchanged epoch does NOT trigger a reload', async () => {
+    // The check has to be cheap in the steady state, or it is just a shorter TTL.
+    const { state, source } = sharedStore()
+    let clock = 1000
+    const reg = new CollectionRegistry(source(), {
+      now: () => clock,
+      epochTtlMs: 100,
+    })
+    await reg.collections()
+    expect(state.loads).toBe(1)
+    for (let i = 0; i < 5; i++) {
+      clock += 101
+      await reg.collections()
+    }
+    expect(state.loads).toBe(1)
+    expect(state.epochReads).toBeGreaterThan(1)
+  })
+
+  test('an unreadable epoch forces a reload rather than trusting the cache', async () => {
+    // Freshness we cannot confirm is freshness we do not have.
+    const state = { epoch: 1, loads: 0, fail: false }
+    const source: ConfigSource = {
+      load: async () => {
+        state.loads++
+        return STORED
+      },
+      epoch: async () => {
+        if (state.fail) throw new Error('unreachable')
+        return state.epoch
+      },
+    }
+    let clock = 1000
+    const reg = new CollectionRegistry(source, {
+      now: () => clock,
+      epochTtlMs: 100,
+    })
+    await reg.collections()
+    expect(state.loads).toBe(1)
+    state.fail = true
+    clock += 101
+    await reg.collections()
+    expect(state.loads).toBe(2)
+  })
+
+  test('a source with no epoch falls back to TTL — weaker, and honest about it', async () => {
+    const counter = { n: 0 }
+    let clock = 1000
+    const reg = new CollectionRegistry(
+      { load: async () => { counter.n++; return STORED } },
+      { now: () => clock, ttlMs: 500, epochTtlMs: 100 }
+    )
+    await reg.collections()
+    clock += 200
+    await reg.collections()
+    expect(counter.n).toBe(1)
+  })
+})
