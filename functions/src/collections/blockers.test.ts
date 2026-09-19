@@ -11,6 +11,12 @@ import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { COLLECTIONS } from './index'
+// Register the full set explicitly. Relying on another test file's imports is
+// how the public-list assertion below went unchecked for months.
+import './module'
+import './config'
+import './role'
+import './install-records'
 import { accessMap, getMethodAccess, ALL } from './access'
 import type { UserRoles } from './roles'
 import { ROLES } from './roles'
@@ -60,12 +66,33 @@ describe('B3: the demo `test` collection is emulator-only', () => {
     }
   })
 
+  /**
+   * `config` is a DELIBERATE exception: it holds public site settings and the
+   * blog cache marker, which the unauthenticated client reads on every page.
+   *
+   * Named explicitly rather than tolerated, because this assertion was
+   * previously passing for the wrong reason — `blockers.test.ts` never imported
+   * `./config`, so COLLECTIONS was incompletely populated here and the rule was
+   * never actually tested against the one collection that breaks it. Importing
+   * the full set in a sibling test surfaced that (2026-09-19). An allowlist that
+   * must be edited deliberately is the point; silence was not.
+   */
+  const PUBLIC_LIST_ALLOWED = new Set(['config', 'post/comment'])
+
   test('no registered collection grants the public role list: ALL', () => {
     for (const [name, config] of Object.entries(COLLECTIONS)) {
+      if (PUBLIC_LIST_ALLOWED.has(name)) continue
       const list = config.access?.[ROLES.public]?.list
       // A filter function is fine (it strains rows); blanket ALL is what leaks.
       expect(list === ALL, `${name} grants public list: ALL`).toBe(false)
     }
+  })
+
+  test('the allowlist is exercised — COLLECTIONS is fully populated here', () => {
+    // Guards the vacuity that hid the above: if the registrations are missing,
+    // the loop iterates over almost nothing and proves almost nothing.
+    expect(Object.keys(COLLECTIONS).length).toBeGreaterThanOrEqual(5)
+    expect(COLLECTIONS.config).toBeDefined()
   })
 })
 
@@ -121,12 +148,12 @@ describe('F1: non-ALL write configs fail closed', () => {
   const withWrite = (write: unknown) =>
     ({
       test1: { access: { [ROLES.admin]: { write } } },
-    }) as unknown as Parameters<typeof getMethodAccess>[0]
+    } as unknown as Parameters<typeof getMethodAccess>[0])
 
   test('write: ALL is permitted (the only supported form)', () => {
-    expect(
-      getMethodAccess(withWrite(ALL), 'test1', 'PUT', admin, false)
-    ).toBe(ALL)
+    expect(getMethodAccess(withWrite(ALL), 'test1', 'PUT', admin, false)).toBe(
+      ALL
+    )
   })
 
   test('a FIELD MAP write config denies instead of granting unrestricted write', () => {

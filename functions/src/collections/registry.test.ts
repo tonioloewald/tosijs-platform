@@ -161,7 +161,7 @@ describe('caching — the part most likely to bite', () => {
         counter.n++
         return entries
       },
-    }) as ConfigSource
+    } as ConfigSource)
 
   test('repeated reads hit the cache, not the store', async () => {
     const counter = { n: 0 }
@@ -353,7 +353,12 @@ describe('CROSS-ARCHITECTURE: same data, same behaviour, any substrate', () => {
           deps
         )
       )
-      outcomes.push(results.map((r) => `${r.status}:${(r as never as {reason?: string}).reason ?? ''}`))
+      outcomes.push(
+        results.map(
+          (r) =>
+            `${r.status}:${(r as never as { reason?: string }).reason ?? ''}`
+        )
+      )
     }
     expect(outcomes[1]).toEqual(outcomes[0])
     // …and it is actually exercising something, not two empty arrays.
@@ -460,7 +465,12 @@ describe('a rule change reaches OTHER instances', () => {
     const counter = { n: 0 }
     let clock = 1000
     const reg = new CollectionRegistry(
-      { load: async () => { counter.n++; return STORED } },
+      {
+        load: async () => {
+          counter.n++
+          return STORED
+        },
+      },
       { now: () => clock, ttlMs: 500, epochTtlMs: 100 }
     )
     await reg.collections()
