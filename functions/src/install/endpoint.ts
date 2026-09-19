@@ -1,0 +1,248 @@
+/**
+# /install endpoint — putting a library onto a host
+
+## methods
+- `GET` lists what is installed (grants, versions, capabilities)
+- `POST` installs or upgrades; body `{ manifest, approving? }`
+- `DELETE ?name=<namespace>` revokes
+
+Requires the `configurator` role — and specifically NOT `owner`. Owner's power
+is the datastore (D3), not an in-system bypass; an owner who wants to install
+grants themselves `configurator` through `role`, and that grant is visible in
+the collection everyone can audit.
+
+Every decision is in `apply.ts` and is pure. This file authenticates, reads what
+the decision needs, and commits what it returns. The rule for anything added
+here later: if it is a judgement, it belongs in `apply.ts` where it can be
+tested without Firebase.
+
+## Why the commit is one batch
+
+The three records are not independent. The grant is what takes effect; the
+manifest is the diff basis every FUTURE upgrade's additive-only check reads;
+the epoch is how other instances find out. A partial commit is worse than a
+failed one in each direction — a grant without a manifest means the next
+upgrade has nothing to compare against and sails through, and a config change
+without an epoch bump means warm instances enforce the old rules indefinitely
+rather than for a few seconds.
+*/
+
+import { onRequest } from 'firebase-functions/v2/https'
+import * as admin from 'firebase-admin'
+import * as functions from 'firebase-functions'
+import { unenforcedKeywords } from 'tosijs-schema'
+
+import {
+  optionsResponse,
+  getUserRoles,
+  AuthenticatedRequest,
+} from '../utilities'
+import { Response } from 'express'
+import { ROLES } from '../collections/roles'
+import {
+  decideInstall,
+  decideRevoke,
+  type Grant,
+  type InstallRecords,
+} from './apply'
+import type { Manifest, CapabilityRequest } from './manifest'
+import { bumpEpochIn } from './epoch'
+
+const MANIFESTS = 'manifest'
+const GRANTS = 'grant'
+const LOG = 'install-log'
+
+const db = () => admin.firestore()
+
+const validateOptions = {
+  unenforced: (schema: unknown) =>
+    unenforcedKeywords(schema as never) as string[],
+  knownRoles: Object.values(ROLES),
+}
+
+const readGrant = async (name: string): Promise<Grant | null> => {
+  const snapshot = await db().collection(GRANTS).doc(name).get()
+  return snapshot.exists ? (snapshot.data() as Grant) : null
+}
+
+const readManifest = async (
+  name: string,
+  version: string | null
+): Promise<Manifest | null> => {
+  if (!version) return null
+  const snapshot = await db().collection(MANIFESTS).doc(`${name}@${version}`).get()
+  return snapshot.exists ? (snapshot.data() as Manifest) : null
+}
+
+/** Commit the decided records, plus the epoch bump, atomically. */
+async function commit(records: InstallRecords): Promise<void> {
+  const batch = db().batch()
+  if (records.manifest) {
+    // `create`, not `set`: manifests are append-only, and a re-POST of a
+    // version that already exists must fail loudly rather than silently
+    // rewrite the history the additive check depends on.
+    batch.create(
+      db().collection(MANIFESTS).doc(records.manifest.id),
+      records.manifest.data
+    )
+  }
+  batch.set(db().collection(GRANTS).doc(records.grant.id), records.grant.data)
+  batch.set(db().collection(LOG).doc(records.log.id), records.log.data)
+  bumpEpochIn(batch)
+  await batch.commit()
+}
+
+export const install = onRequest({}, async (request, response: Response) => {
+  const req = request as AuthenticatedRequest
+  if (optionsResponse(req, response, ['OPTIONS', 'GET', 'POST', 'DELETE'])) {
+    return
+  }
+
+  const userRoles = await getUserRoles(req)
+  if (!userRoles.roles.includes(ROLES.configurator)) {
+    // Checked here so the HTTP status is honest, and again inside
+    // `decideInstall` so the invariant holds for every caller of the decision,
+    // including tests and any future non-HTTP path.
+    response.status(403).send('installing requires the `configurator` role')
+    return
+  }
+  const uid = userRoles.userIds[0]
+  const principal = { uid, roles: userRoles.roles as readonly string[] }
+
+  try {
+    switch (req.method) {
+      case 'GET': {
+        const snapshot = await db().collection(GRANTS).get()
+        response.json({
+          installed: snapshot.docs.map((d) => {
+            const g = d.data() as Grant
+            return {
+              name: g.name,
+              version: g.activeVersion,
+              status: g.status,
+              capabilities: g.capabilities ?? [],
+            }
+          }),
+        })
+        return
+      }
+
+      case 'POST': {
+        const manifest = req.body?.manifest as unknown
+        const approving = req.body?.approving as CapabilityRequest[] | undefined
+        if (!manifest) {
+          response.status(400).send('expected { manifest } in the body')
+          return
+        }
+
+        // Read the grant BEFORE trusting the manifest's own name for anything
+        // else — `decideInstall` refuses a grant/manifest namespace mismatch.
+        const name = (manifest as Manifest).name
+        if (typeof name !== 'string') {
+          response.status(400).json({
+            status: 'refused',
+            problems: ['manifest has no name'],
+          })
+          return
+        }
+        const existing = await readGrant(name)
+        const previousManifest = await readManifest(
+          name,
+          existing?.activeVersion ?? null
+        )
+
+        const decision = decideInstall({
+          manifest,
+          existing,
+          previousManifest,
+          principal,
+          nowIso: new Date().toJSON(),
+          logId: db().collection(LOG).doc().id,
+          validate: validateOptions,
+          approving,
+        })
+
+        if (decision.status === 'refused') {
+          response.status(400).json({
+            status: 'refused',
+            problems: decision.problems,
+          })
+          return
+        }
+
+        await commit(decision.records)
+
+        if (decision.status === 'needs-approval') {
+          functions.logger.info(
+            `install: ${name} parked pending approval of ` +
+              `${decision.added.length} capability request(s)`
+          )
+          // 202: recorded, deliberately not applied. The grant still names the
+          // OLD version with the OLD capabilities.
+          response.status(202).json({
+            status: 'needs-approval',
+            name,
+            added: decision.added,
+            note:
+              'nothing changed. re-POST with `approving` set to exactly these ' +
+              'capabilities to apply the upgrade.',
+          })
+          return
+        }
+
+        functions.logger.info(
+          `install: ${decision.status} ${name}@${(manifest as Manifest).version} by ${uid}`
+        )
+        response.json({
+          status: decision.status,
+          name,
+          version: (manifest as Manifest).version,
+        })
+        return
+      }
+
+      case 'DELETE': {
+        const name = String(req.query.name ?? '')
+        if (!name) {
+          response.status(400).send('expected ?name=<namespace>')
+          return
+        }
+        const existing = await readGrant(name)
+        if (!existing) {
+          response.status(404).send(`nothing installed as "${name}"`)
+          return
+        }
+
+        const decision = decideRevoke(
+          existing,
+          principal,
+          new Date().toJSON(),
+          db().collection(LOG).doc().id
+        )
+        if (decision.status === 'refused') {
+          response
+            .status(403)
+            .json({ status: 'refused', problems: decision.problems })
+          return
+        }
+
+        await commit(decision.records)
+        functions.logger.info(`install: revoked ${name} by ${uid}`)
+        // Says what it did NOT do, because "uninstall" reads as "delete my
+        // data" and this deliberately is not that.
+        response.json({
+          status: 'revoked',
+          name,
+          note: `collections are no longer reachable; no documents were deleted`,
+        })
+        return
+      }
+
+      default:
+        response.status(400).send('bad request type')
+    }
+  } catch (e) {
+    functions.logger.error(`install: ${req.method} failed`, e)
+    response.status(500).send('install failed')
+  }
+})

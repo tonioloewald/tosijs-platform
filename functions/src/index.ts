@@ -60,5 +60,7 @@ export { user } from './user'
 export { esm } from './esm'
 export { cachedQuery } from './cached-query'
 export { stored } from './stored'
+export { claim } from './claim'
+export { install } from './install/endpoint'
 
 export { gen } from './gen'

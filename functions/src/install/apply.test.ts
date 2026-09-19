@@ -23,8 +23,9 @@ import {
   additiveProblems,
   addedCapabilities,
   type Grant,
+  type InstallRecords,
 } from './apply'
-import type { Manifest } from './manifest'
+import type { Manifest, CapabilityRequest } from './manifest'
 import { ROLES } from '../collections/roles'
 
 const validate = {
@@ -321,6 +322,92 @@ describe('capabilities re-trigger human approval when they grow', () => {
     expect(grant.capabilities).toEqual(granted.capabilities)
   })
 
+  test('approving the exact capability applies the upgrade', () => {
+    const wanted = { kind: 'outbound', host: 'api.github.com' }
+    const d = decideInstall({
+      ...base,
+      manifest: withCaps(
+        [{ kind: 'blob', bucket: 'attachments', maxBytes: 1000 }, wanted],
+        '1.1.0'
+      ),
+      existing: granted,
+      previousManifest: manifest(),
+      approving: [wanted],
+    })
+    expect(d.status).toBe('upgraded')
+    const grant = (d as { records: { grant: { data: Grant } } }).records.grant.data
+    expect(grant.activeVersion).toBe('1.1.0')
+    expect(grant.capabilities).toHaveLength(2)
+  })
+
+  test('approval names CAPABILITIES, so a near-miss does not count', () => {
+    // Approving a version would approve whatever the manifest says when the
+    // approval lands; the manifest is fetched from the network, so between
+    // reading the diff and clicking yes it can say something else. Here the
+    // human approved `api.github.com` and the manifest now asks for a
+    // different host — still parked.
+    const d = decideInstall({
+      ...base,
+      manifest: withCaps(
+        [
+          { kind: 'blob', bucket: 'attachments', maxBytes: 1000 },
+          { kind: 'outbound', host: 'evil.example' },
+        ],
+        '1.1.0'
+      ),
+      existing: granted,
+      previousManifest: manifest(),
+      approving: [{ kind: 'outbound', host: 'api.github.com' }],
+    })
+    expect(d.status).toBe('needs-approval')
+    expect((d as { added: CapabilityRequest[] }).added).toEqual([
+      { kind: 'outbound', host: 'evil.example' },
+    ])
+  })
+
+  test('a PARTIAL approval leaves the rest outstanding, and applies nothing', () => {
+    const d = decideInstall({
+      ...base,
+      manifest: withCaps(
+        [
+          { kind: 'blob', bucket: 'attachments', maxBytes: 1000 },
+          { kind: 'outbound', host: 'a.example' },
+          { kind: 'outbound', host: 'b.example' },
+        ],
+        '1.1.0'
+      ),
+      existing: granted,
+      previousManifest: manifest(),
+      approving: [{ kind: 'outbound', host: 'a.example' }],
+    })
+    expect(d.status).toBe('needs-approval')
+    expect((d as { added: CapabilityRequest[] }).added).toEqual([
+      { kind: 'outbound', host: 'b.example' },
+    ])
+    // The approved half is NOT granted in the meantime — approval is all or
+    // nothing, so a half-applied upgrade can never be live.
+    const grant = (d as { records: { grant: { data: Grant } } }).records.grant.data
+    expect(grant.capabilities).toEqual(granted.capabilities)
+  })
+
+  test('the ledger records the real diff AND what was signed off', () => {
+    const wanted = { kind: 'outbound', host: 'api.github.com' }
+    const d = decideInstall({
+      ...base,
+      manifest: withCaps(
+        [{ kind: 'blob', bucket: 'attachments', maxBytes: 1000 }, wanted],
+        '1.1.0'
+      ),
+      existing: granted,
+      previousManifest: manifest(),
+      approving: [wanted],
+    })
+    const log = (d as { records: { log: { data: Record<string, unknown> } } })
+      .records.log.data
+    expect(log.addedCapabilities).toEqual([wanted])
+    expect(log.approvedCapabilities).toEqual([wanted])
+  })
+
   test('addedCapabilities ignores key ORDER but not values', () => {
     expect(
       addedCapabilities(
@@ -342,8 +429,18 @@ describe('revoking never drops rows', () => {
     capabilities: [],
   }
 
+  test('it writes NO manifest record — the diff basis must survive', () => {
+    // A handler given `{id, data: {}}` would write that over the stored
+    // manifest and erase it. The next install of the same library would then
+    // have nothing to run the additive-only check against, and would be waved
+    // through. Null is the only shape that cannot be committed by accident.
+    const d = decideRevoke(granted, configurator, NOW, 'log-2')
+    expect((d as { records: InstallRecords }).records.manifest).toBeNull()
+  })
+
   test('it tombstones the grant and keeps it enumerable', () => {
     const d = decideRevoke(granted, configurator, NOW, 'log-2')
+    expect(d.status).toBe('revoked')
     const grant = (d as { records: { grant: { data: Grant } } }).records.grant.data
     expect(grant.status).toBe('revoked')
     expect(grant.revokedAt).toBe(NOW)

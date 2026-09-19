@@ -33,8 +33,12 @@
  * means a re-install restores the same library to the same collections.
  */
 
-import { validateManifest, type Manifest, type CapabilityRequest } from './manifest'
-import type { ValidateManifestOptions } from './manifest'
+import {
+  validateManifest,
+  type Manifest,
+  type CapabilityRequest,
+  type ValidateManifestOptions,
+} from './manifest'
 
 export interface Grant {
   /** Namespace this grant governs. */
@@ -48,8 +52,15 @@ export interface Grant {
 }
 
 export interface InstallRecords {
-  /** `manifest/<name>@<version>` — append-only, never edited. */
-  manifest: { id: string; data: Record<string, unknown> }
+  /**
+   * `manifest/<name>@<version>` — append-only, never edited.
+   *
+   * NULL when there is no new manifest to record (a revoke). Deliberately null
+   * rather than an empty object: a handler that wrote `{}` to the manifest id
+   * would ERASE the stored manifest, and the additive-only check on the next
+   * upgrade would then have nothing to diff against and wave it through.
+   */
+  manifest: { id: string; data: Record<string, unknown> } | null
   /** `grant/<name>` — the only record an install rewrites. */
   grant: { id: string; data: Grant }
   /** `install-log/<id>` — append-only ledger. */
@@ -59,9 +70,13 @@ export interface InstallRecords {
 export type InstallDecision =
   | { status: 'installed'; records: InstallRecords }
   | { status: 'upgraded'; records: InstallRecords }
+  | { status: 'revoked'; records: InstallRecords }
   | {
       status: 'needs-approval'
-      /** Capabilities that are new or wider than what was already granted. */
+      /**
+       * Still outstanding: new or wider than what was already granted, and not
+       * covered by `approving`. This is the list to put in front of a human.
+       */
       added: CapabilityRequest[]
       records: InstallRecords
     }
@@ -79,6 +94,20 @@ export interface InstallInput {
   /** Injected id for the ledger entry, so this stays pure. */
   logId: string
   validate: ValidateManifestOptions
+  /**
+   * Capabilities the human is approving, right now, by listing them.
+   *
+   * This is how a parked upgrade gets unparked, and it names CAPABILITIES
+   * rather than a version on purpose. Approving "version 1.1.0" would approve
+   * whatever that manifest says at the moment the approval lands — and the
+   * manifest is fetched from the network, so between reading the diff and
+   * clicking yes it can say something else. Approving a list means the thing
+   * that takes effect is the thing that was read.
+   *
+   * Matched exactly, by the same whole-request key as the diff, so approving
+   * `maxBytes: 1000` does not approve `maxBytes: 999999`.
+   */
+  approving?: CapabilityRequest[]
 }
 
 /**
@@ -212,9 +241,11 @@ export function decideInstall(input: InstallInput): InstallDecision {
 
   const requested = m.capabilities ?? []
   const added = addedCapabilities(existing?.capabilities ?? [], requested)
+  // Whatever the human did not explicitly approve is still outstanding.
+  const outstanding = addedCapabilities(input.approving ?? [], added)
   // A new install is always an approval event; an upgrade only when it asks for
   // something new. This is the clause that lets routine upgrades be routine.
-  const needsApproval = !isUpgrade ? false : added.length > 0
+  const needsApproval = !isUpgrade ? false : outstanding.length > 0
 
   const grant: Grant = {
     name: m.name,
@@ -247,12 +278,19 @@ export function decideInstall(input: InstallInput): InstallDecision {
           : isUpgrade
             ? 'upgrade'
             : 'install',
+        // The real diff, not the outstanding remainder — the ledger records
+        // what changed, and separately what a human signed off on.
         addedCapabilities: added,
+        ...(input.approving?.length
+          ? { approvedCapabilities: input.approving }
+          : {}),
       },
     },
   }
 
-  if (needsApproval) return { status: 'needs-approval', added, records }
+  if (needsApproval) {
+    return { status: 'needs-approval', added: outstanding, records }
+  }
   return { status: isUpgrade ? 'upgraded' : 'installed', records }
 }
 
@@ -275,10 +313,12 @@ export function decideRevoke(
     }
   }
   return {
-    status: 'upgraded',
+    status: 'revoked',
     records: {
-      // Nothing new to record — the manifest history is already append-only.
-      manifest: { id: `${existing.name}@${existing.activeVersion}`, data: {} },
+      // Nothing new to record — the manifest history is already append-only,
+      // and writing an empty record over it would destroy the diff basis for a
+      // future re-install. See InstallRecords.manifest.
+      manifest: null,
       grant: {
         id: existing.name,
         data: { ...existing, status: 'revoked', revokedAt: nowIso },
