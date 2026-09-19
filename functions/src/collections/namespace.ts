@@ -56,6 +56,7 @@ export const PLATFORM_COLLECTIONS = [
   'manifest',
   'grant',
   'install-log',
+  'token',
 ] as const
 
 /** `^[a-z][a-z0-9-]{1,31}$` — npm-ish, and safe in a URL and a table name. */

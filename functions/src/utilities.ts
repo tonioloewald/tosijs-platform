@@ -7,6 +7,12 @@ import { DecodedIdToken } from 'firebase-admin/auth'
 
 import { UserRoles, anonymousUser } from './collections/roles'
 import { joinRoleDocs, MAX_ROLE_DOCS } from './collections/join-roles'
+import {
+  TOKEN_PREFIX,
+  hashToken,
+  tokenAuthority,
+  type TokenRecord,
+} from './auth/token'
 
 admin.initializeApp()
 
@@ -313,7 +319,77 @@ async function findRoleDocs(uid: string, email?: string): Promise<RoleDoc[]> {
   return rolesByEmail(email)
 }
 
+/**
+ * Resolve a capability token to what it can do RIGHT NOW (B2, #6).
+ *
+ * The principal's roles are read live, on every request — never cached on the
+ * token, never trusted from mint time. That is the single choice that makes
+ * revoking a human revoke every agent they authorised, with no revocation list
+ * to maintain and nothing to remember to do.
+ *
+ * Lookup is by uid only, deliberately: the token names a uid, so the email
+ * fallback has nothing to add and would let a token outlive the uid it was
+ * minted against.
+ */
+async function rolesForToken(secret: string): Promise<UserRoles> {
+  const found = await getRecords<TokenRecord & FirestoreDoc>(
+    'token',
+    'hash',
+    '==',
+    hashToken(secret),
+    2
+  )
+  const record = found[0] ?? null
+  if (!record) {
+    functions.logger.warn('rejected an unknown capability token')
+    return anonymousUser
+  }
+
+  const principal = joinRoleDocs(
+    await getRecords<RoleDoc>(
+      'role',
+      'userIds',
+      'array-contains',
+      record.principalUid,
+      MAX_ROLE_DOCS
+    )
+  )
+
+  const authority = tokenAuthority(record, principal.roles, Date.now())
+  if (authority.status === 'refused') {
+    // Specific in the log, anonymous on the wire — the caller learns only that
+    // they are nobody, which is all a rejected credential should reveal.
+    functions.logger.warn(
+      `token ${record._id} refused: ${authority.reason}`
+    )
+    return anonymousUser
+  }
+
+  return {
+    ...principal,
+    // ATTENUATED. Never `principal.roles` — that would hand the agent the
+    // human's full authority, which is the entire thing this design exists to
+    // prevent.
+    roles: authority.roles,
+    token: {
+      id: authority.tokenId,
+      label: authority.label,
+      methods: authority.methods,
+      ...(authority.collections ? { collections: authority.collections } : {}),
+    },
+  }
+}
+
 async function getUserRoles(req: AuthenticatedRequest): Promise<UserRoles> {
+  // A capability token is self-identifying by prefix, so the two credential
+  // kinds never have to be told apart by trying one and falling back — a
+  // fallback that, on a malformed token, would silently try it as a Firebase
+  // ID token and log a confusing verification error instead of the real one.
+  const bearer = req.headers.authorization?.split('Bearer ')[1]
+  if (bearer?.startsWith(TOKEN_PREFIX)) {
+    return rolesForToken(bearer)
+  }
+
   const user = await getUser(req)
   if (!user) {
     return anonymousUser

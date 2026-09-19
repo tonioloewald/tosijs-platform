@@ -36,6 +36,23 @@ export interface UserContact {
   value: string
 }
 
+/**
+ * The caveats of the token a request arrived on, if it arrived on one.
+ *
+ * Carried on `UserRoles` so the restriction reaches the ONE place that already
+ * decides authorization (`getMethodAccess`). The alternative — checking it in
+ * each endpoint — is a list that has to stay complete forever, and the failure
+ * mode of forgetting one is a token reaching somewhere it was scoped out of.
+ */
+export interface TokenContext {
+  id: string
+  /** Agent context: machine x repo. This is the provenance (#6). */
+  label: string
+  methods: readonly string[]
+  /** Absent means every collection. */
+  collections?: string[]
+}
+
 export interface UserRoles {
   _id?: string
   _collection?: string
@@ -43,6 +60,8 @@ export interface UserRoles {
   contacts: UserContact[]
   roles: RoleName[]
   userIds: string[]
+  /** Present only when the caller authenticated with a capability token. */
+  token?: TokenContext
 }
 
 export const anonymousUser: UserRoles = Object.freeze({

@@ -220,3 +220,64 @@ describe('/state stays retired', () => {
     expect(index).not.toMatch(/from '\.\/state'/)
   })
 })
+
+describe('capability tokens are actually wired (B2, #6)', () => {
+  // Call forms only, never prose.
+  const utilities = src('utilities.ts')
+  const access = src('collections/access.ts')
+  const endpoint = src('auth/endpoint.ts')
+  const records = src('collections/token-records.ts')
+
+  test('getUserRoles routes a token bearer to the token path', () => {
+    expect(utilities).toMatch(/bearer\?\.startsWith\(TOKEN_PREFIX\)/)
+    expect(utilities).toMatch(/return rolesForToken\(bearer\)/)
+  })
+
+  test('it ATTENUATES — the agent never gets the human authority', () => {
+    // `roles: principal.roles` here would hand every agent its human's full
+    // authority, which is the entire thing this design exists to prevent.
+    expect(utilities).toMatch(/roles: authority\.roles/)
+    expect(utilities).not.toMatch(/roles: principal\.roles/)
+  })
+
+  test('the principal is read LIVE, not trusted from the record', () => {
+    // `record.caveats.roles` used directly would mean a token keeps working
+    // after its human is revoked.
+    expect(utilities).toMatch(/tokenAuthority\(record, principal\.roles/)
+  })
+
+  test('only a HASH is ever looked up, never a stored secret', () => {
+    expect(utilities).toMatch(/hashToken\(secret\)/)
+    expect(endpoint).toMatch(/hash: hashToken\(secret\)/)
+    // The secret must never be written next to the hash.
+    expect(endpoint).not.toMatch(/secret,\s*\n\s*hash:/)
+    expect(endpoint).not.toMatch(/\bsecret: secret\b/)
+  })
+
+  test('caveats are enforced in getMethodAccess — the single gate', () => {
+    // Per-endpoint checks would be a list that has to stay complete forever.
+    expect(access).toMatch(/caveatsAllow\(userRoles\.token, method, collectionPath\)/)
+    expect(access).toMatch(/return undefined/)
+  })
+
+  test('the caveat check runs BEFORE any grant is collected', () => {
+    const gate = access.indexOf('caveatsAllow(')
+    const grants = access.indexOf('const grants:')
+    expect(gate).toBeGreaterThan(-1)
+    expect(gate).toBeLessThan(grants)
+  })
+
+  test('the token collection is reachable by nobody through /doc', () => {
+    expect(records).toMatch(/access: \{\}/)
+    expect(records).not.toMatch(/ROLES\./)
+  })
+
+  test('revoking tombstones — provenance outlives the credential', () => {
+    expect(endpoint).toMatch(/revokedAt: new Date\(\)\.toJSON\(\)/)
+    expect(endpoint).not.toMatch(/ref\.delete\(\)/)
+  })
+
+  test('a token may not mint another token, at the endpoint too', () => {
+    expect(endpoint).toMatch(/viaToken/)
+  })
+})

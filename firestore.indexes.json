@@ -4,16 +4,42 @@
       "collectionGroup": "role",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "userIds", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "_created", "order": "DESCENDING" }
+        {
+          "fieldPath": "userIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "_created",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "role",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "contacts", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "_created", "order": "DESCENDING" }
+        {
+          "fieldPath": "contacts",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "_created",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "token",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "hash",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "_created",
+          "order": "DESCENDING"
+        }
       ]
     }
   ],

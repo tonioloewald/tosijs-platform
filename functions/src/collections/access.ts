@@ -133,6 +133,7 @@ COLLECTIONS['post/comment'] = {
 */
 
 import { ROLES, UserRoles } from './roles'
+import { caveatsAllow } from '../auth/caveats'
 import type { Base } from 'tosijs-schema'
 
 /**
@@ -371,6 +372,19 @@ export const getMethodAccess = (
   const accessType = accessMap[method] as 'read' | 'write' | 'list' | undefined
 
   if (accessType === undefined) {
+    return undefined
+  }
+
+  // Token caveats, FIRST — before any grant is collected (B2, #6).
+  //
+  // Here rather than in each endpoint because this is the one function every
+  // authorization already goes through. Checking it per endpoint would be a
+  // list that has to stay complete forever, and forgetting one entry means a
+  // token reaching somewhere it was explicitly scoped out of.
+  //
+  // Undefined, not an error: a caveat miss is indistinguishable from "no such
+  // collection", which is what the caller of a scoped credential should see.
+  if (userRoles.token && !caveatsAllow(userRoles.token, method, collectionPath)) {
     return undefined
   }
 
