@@ -107,8 +107,18 @@ describe('the commit is one batch, epoch included', () => {
   test('the manifest is created, never set — history is append-only', () => {
     // `set` would let a re-POST of an existing version rewrite the manifest the
     // NEXT upgrade's additive-only check diffs against.
-    expect(commitFn).toMatch(/batch\.create\(\s*db\(\)\.collection\(MANIFESTS\)/)
+    expect(commitFn).toMatch(/batch\.create\(ref,/)
     expect(commitFn).not.toMatch(/batch\.set\(\s*db\(\)\.collection\(MANIFESTS\)/)
+    expect(commitFn).not.toMatch(/ref\.set\(/)
+  })
+
+  test('re-submitting a version is checked for CONTENT, not just existence', () => {
+    // Approving a parked upgrade re-POSTs the same version, so "already on
+    // file" cannot simply fail — but it must not be waved through either, or a
+    // reviewed 1.2.0 can be swapped before the human clicks approve.
+    expect(commitFn).toMatch(/sameManifest\(existing\.data\(\)/)
+    expect(commitFn).toMatch(/throw new ManifestConflict/)
+    expect(endpointTs).toMatch(/response\.status\(409\)/)
   })
 
   test('a null manifest record is guarded, not committed', () => {

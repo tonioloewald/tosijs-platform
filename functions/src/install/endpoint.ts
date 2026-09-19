@@ -48,6 +48,7 @@ import {
 } from './apply'
 import type { Manifest, CapabilityRequest } from './manifest'
 import { bumpEpochIn } from './epoch'
+import { sameManifest, ManifestConflict } from './manifest-identity'
 
 const MANIFESTS = 'manifest'
 const GRANTS = 'grant'
@@ -75,17 +76,41 @@ const readManifest = async (
   return snapshot.exists ? (snapshot.data() as Manifest) : null
 }
 
-/** Commit the decided records, plus the epoch bump, atomically. */
+/**
+ * Commit the decided records, plus the epoch bump, atomically.
+ *
+ * ## A version's CONTENT is immutable
+ *
+ * Manifests are append-only, so a version already on file is never rewritten.
+ * But re-submitting one is normal: approving a parked upgrade means POSTing the
+ * same manifest again with `approving` set. So the rule is not "you may only
+ * send a version once", it is "a version always means the same thing":
+ *
+ *   - not on file  → written
+ *   - on file, identical → nothing to write, proceed
+ *   - on file, DIFFERENT → refused, 409
+ *
+ * That last case is the one worth having. Without it, a library could be
+ * reviewed at 1.2.0, parked pending approval, and then have 1.2.0's collections
+ * and access rules swapped before the human clicks approve — so what takes
+ * effect is not what was read. `approving` already pins the capabilities; this
+ * pins everything else.
+ */
 async function commit(records: InstallRecords): Promise<void> {
   const batch = db().batch()
   if (records.manifest) {
-    // `create`, not `set`: manifests are append-only, and a re-POST of a
-    // version that already exists must fail loudly rather than silently
-    // rewrite the history the additive check depends on.
-    batch.create(
-      db().collection(MANIFESTS).doc(records.manifest.id),
-      records.manifest.data
-    )
+    const ref = db().collection(MANIFESTS).doc(records.manifest.id)
+    const existing = await ref.get()
+    if (!existing.exists) {
+      // `create`, not `set` — so a concurrent install of the same version
+      // loses the race loudly instead of silently overwriting.
+      batch.create(ref, records.manifest.data)
+    } else if (!sameManifest(existing.data(), records.manifest.data)) {
+      throw new ManifestConflict(
+        `${records.manifest.id} is already on file with different content — ` +
+          `a published version may not change. Publish a new version.`
+      )
+    }
   }
   batch.set(db().collection(GRANTS).doc(records.grant.id), records.grant.data)
   batch.set(db().collection(LOG).doc(records.log.id), records.log.data)
@@ -253,6 +278,11 @@ export const install = onRequest({}, async (request, response: Response) => {
         response.status(400).send('bad request type')
     }
   } catch (e) {
+    if (e instanceof ManifestConflict) {
+      functions.logger.warn(`install: ${e.message}`)
+      response.status(409).json({ status: 'conflict', problems: [e.message] })
+      return
+    }
     functions.logger.error(`install: ${req.method} failed`, e)
     response.status(500).send('install failed')
   }

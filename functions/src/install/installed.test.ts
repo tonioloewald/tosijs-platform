@@ -143,6 +143,23 @@ describe('a broken install fails closed, and only for itself', () => {
     expect(problems.join()).toContain('manifest is missing')
   })
 
+  test('a PENDING grant stays live at its active version', () => {
+    // A pending grant is a live install whose UPGRADE is parked waiting on a
+    // human. Treating it as uninstalled means asking for one new capability
+    // takes the library offline until somebody clicks approve — a safety
+    // prompt that causes an outage teaches operators to approve without
+    // reading. The query in `load()` is what enforces this; here we pin that
+    // the shape carries no additional filter.
+    const configs = configsFromInstalled([
+      {
+        grant: grant({ status: 'pending' }),
+        manifest: manifest({ 'virta:task': TASK }),
+      },
+    ])
+    expect(configs.map((c) => c.name)).toEqual(['virta:task'])
+    expect(configs[0].version).toBe('1.0.0')
+  })
+
   test('a grant with no active version contributes nothing', () => {
     // The shape a parked upgrade leaves behind on a first install that was
     // never approved: status is set, activeVersion is null.

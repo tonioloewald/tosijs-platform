@@ -105,12 +105,19 @@ export function configsFromInstalled(
 export class InstalledConfigSource implements ConfigSource {
   async load(): Promise<StoredCollectionConfig[]> {
     const db = admin.firestore()
-    // Only ACTIVE grants. A revoked grant is a tombstone — the row survives so
+    // Everything except a revoked tombstone. A revoked grant's row survives so
     // a re-install restores the same library to the same collections, but it
     // must not contribute config.
+    //
+    // `pending` MUST be included. A pending grant is a live install whose
+    // UPGRADE is parked waiting on a human — it still names `activeVersion`,
+    // and that version is still in force. Filtering to `active` alone meant
+    // asking for one new capability took the whole library offline until
+    // somebody clicked approve, which turns a safety prompt into an outage and
+    // would teach every operator to approve without reading.
     const grants = await db
       .collection('grant')
-      .where('status', '==', 'active')
+      .where('status', 'in', ['active', 'pending'])
       .get()
 
     const pairs: InstalledPair[] = await Promise.all(
