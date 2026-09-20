@@ -45,7 +45,7 @@ export {
   type WriteOutcome,
   type WritePipelineDeps,
   type WritePipelineInput,
-} from '../functions/src/collections/write-pipeline'
+} from '../functions/src/collections/write-pipeline.js'
 
 export {
   ALL,
@@ -63,7 +63,7 @@ export {
   type CollectionMap,
   type FieldAccessMap,
   type REST_METHOD,
-} from '../functions/src/collections/access'
+} from '../functions/src/collections/access.js'
 
 export {
   ROLES,
@@ -72,4 +72,4 @@ export {
   type RoleName,
   type UserContact,
   type UserRoles,
-} from '../functions/src/collections/roles'
+} from '../functions/src/collections/roles.js'

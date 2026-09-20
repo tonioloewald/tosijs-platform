@@ -132,8 +132,8 @@ COLLECTIONS['post/comment'] = {
 
 */
 
-import { ROLES, UserRoles } from './roles'
-import { caveatsAllow } from '../auth/caveats'
+import { ROLES, UserRoles } from './roles.js'
+import { caveatsAllow } from '../auth/caveats.js'
 import type { Base } from 'tosijs-schema'
 
 /**

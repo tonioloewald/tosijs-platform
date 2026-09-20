@@ -35,8 +35,8 @@
  * dot-path returns. Pinned in `tjs-lang.baseline.test.ts` §5-§6.
  */
 import { validate as schemaValidate } from 'tosijs-schema'
-import type { CollectionConfig } from './access'
-import type { UserRoles } from './roles'
+import type { CollectionConfig } from './access.js'
+import type { UserRoles } from './roles.js'
 
 /** Envelope fields the endpoint owns; a body may never set them (§5). */
 export const ENVELOPE_FIELDS = ['_id', '_collection', '_path'] as const

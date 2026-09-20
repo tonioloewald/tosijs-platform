@@ -11,7 +11,7 @@
  * somewhere specific.
  */
 
-import type { TokenContext } from '../collections/roles'
+import type { TokenContext } from '../collections/roles.js'
 
 export function caveatsAllow(
   token: TokenContext,

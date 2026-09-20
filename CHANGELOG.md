@@ -40,6 +40,17 @@ ceremonies (`scripts/verify-install.js` 27, `verify-token.js` 17,
 
 ### Fixed
 
+- **The published package could not be imported at all.** `service-compris@0.1.0`
+  is `"type": "module"`, and TypeScript under `moduleResolution: "bundler"`
+  emitted relative specifiers with no `.js` extension — which Node's ESM loader
+  refuses. Installing 0.1.0 and importing it by name fails with
+  `ERR_MODULE_NOT_FOUND`. It type-checked, built, tested green, and `npm pack`
+  listed every file; nothing exercised the artifact the way a consumer would.
+  Fixed by writing `.js` in the source specifiers, and guarded by
+  `scripts/verify-package.js`, which packs the tarball, installs it into a
+  scratch project, imports it **by package name**, and calls something —
+  now part of `prepublishOnly`.
+
 - **`getUserRoles` scanned only the 100 newest role documents** for its email
   fallback, matching client-side. On a host with more roles, a principal whose
   grant fell outside that window silently resolved to anonymous —

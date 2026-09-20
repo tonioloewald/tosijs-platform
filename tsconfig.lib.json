@@ -2,6 +2,16 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
+    // "bundler", not "NodeNext" — NodeNext cannot resolve tosijs-schema's
+    // types. That means the COMPILER will not object to an extensionless
+    // relative import, while the package is `"type": "module"` and Node's ESM
+    // loader refuses one outright. That combination is how 0.1.0 shipped a
+    // tarball nobody could import.
+    //
+    // TypeScript never rewrites import specifiers, so the fix is to write
+    // `.js` in the source — and the guard is `scripts/verify-package.js`,
+    // which imports the real tarball. A compiler flag would only catch this
+    // one failure mode; packing and importing catches any of them.
     "moduleResolution": "bundler",
     "strict": true,
     "declaration": true,
