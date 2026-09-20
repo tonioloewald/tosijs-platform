@@ -1,7 +1,7 @@
 {
   "name": "service-compris",
-  "version": "0.1.0",
-  "description": "Service compris \u2014 the decision layer of a backend: RBAC, a write pipeline, and role resolution, with no I/O and no vendor.",
+  "version": "0.2.0-beta.1",
+  "description": "Service compris — the decision layer of a backend: RBAC, a write pipeline, and role resolution, with no I/O and no vendor.",
   "keywords": [
     "rbac",
     "access-control",

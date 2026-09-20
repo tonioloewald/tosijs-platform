@@ -8,7 +8,14 @@ without a cloud.
 npm install service-compris
 ```
 
-## What 0.1.0 actually is
+> **Beta, 2026-09-20 — a host you can install onto.** The npm package below is
+> still the pure decision kernel. What is new is the *repository*: deploy it to
+> a blank Firebase project, claim it without anyone handing you a secret,
+> install a library from a JSON manifest, and give an agent its own scoped
+> identity. Start at **[BETA.md](BETA.md)** — including its list of what is
+> deliberately not ready yet. Changes: [CHANGELOG.md](CHANGELOG.md).
+
+## What the npm package actually is
 
 **The decision kernel of a backend, not a server.** It does not talk to a database, serve HTTP, or
 authenticate anyone. Given a principal, a collection config, and a proposed write, it tells you what
