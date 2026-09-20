@@ -1,0 +1,95 @@
+# service-compris
+
+> A Firebase backend you **install libraries onto** rather than deploy features into.
+> A JSON manifest becomes collections, schemas and access rules on a running host —
+> no function deployment, no code review, no redeploy. Agents authenticate with
+> scoped tokens that attenuate their human's authority and die when it does.
+
+Status: **0.2.0-beta.1**, cut 2026-09-20 to be broken. Verified end to end against
+a real deployed host on every change (64 assertions, `scripts/verify-*.js`), which
+is not the same as *used*.
+
+## Start here
+
+- [BETA.md](BETA.md): the walkthrough — stand up a host, claim it, write a manifest,
+  install it, give an agent an identity. Also lists what is deliberately not ready.
+- [CHANGELOG.md](CHANGELOG.md): what changed and, for each fix, what the bug actually was.
+- [DECISIONS.md](DECISIONS.md): dated, append-only architectural decisions. Read before
+  proposing changes to RBAC, the access model, or the endpoint surface — several of
+  those questions are settled and the reasoning matters more than the conclusion.
+
+## The five things that will save you the most time
+
+1. **A `404` usually means "not allowed", not "not there".** Denials are opaque to
+   non-privileged callers on purpose — a protected document and a missing one must be
+   indistinguishable, or the status code enumerates what exists. Only
+   `admin`/`developer`/`owner` see the real `403`.
+2. **Collections must be namespaced**: `yourlib:thing`. A bare name is the platform's,
+   always. The separator is `:` — `/` already separates sub-collections.
+3. **Mutating requests put the path in the BODY.** `GET`/`DELETE` use `?p=`;
+   `POST`/`PUT`/`PATCH` send `{"p": "...", "data": {...}}`.
+4. **`access` is an array, not a role-keyed object.** Grants join as a lattice, so
+   order is meaningless and holding more roles never grants less.
+5. **A fresh function may answer `401` with HTML from *Google*, not from us.** It needs
+   an `allUsers` run.invoker binding. Ours carry CORS and rate-limit headers; that is
+   the tell. `provision-sandbox.js` grants them.
+
+## Endpoints
+
+- `/doc` — single document CRUD. `GET`/`DELETE` take `?p=collection/id`;
+  `POST`/`PUT`/`PATCH` take `{p, data}` in the body. `?p=coll/field=value` resolves
+  by a field in `unique` or `tagFields`.
+- `/docs` — collection queries. `?p=` collection, `c=` limit, `f=` fields, `o=` order.
+- `/install` — `POST {manifest, approving?}` installs or upgrades; `GET` lists;
+  `DELETE ?name=` revokes. Requires `configurator`, and specifically **not** `owner`.
+- `/claim` — `GET` publishes a nonce; write it into the datastore by hand to prove
+  ownership, then `POST` (authenticated) to mint the first `configurator`.
+- `/token` — `POST` mints a scoped token, `GET` lists your own, `DELETE ?id=` revokes.
+- `/authorize` — the browser loop that gives a CLI its first token.
+  `?action=start|approve|exchange|config`; `GET ?request=<id>` is the consent page.
+- `/esm`, `/stored`, `/gen`, `/prefetch`, `/cachedQuery`, `/user`, `/sitemap` — the
+  older surface. See `docs/`, but trust the code over the file paths in it: they
+  predate the `collections/` reorganisation.
+
+## Rules a manifest lives by
+
+- **Upgrades are additive-only.** Removing a collection or field, newly *requiring* a
+  field, or changing a unique constraint are refused as migrations rather than
+  guessed at. A newly-required field would invalidate every stored document.
+- **A published version's content is immutable.** Re-POSTing the same version is
+  normal; re-POSTing different content under the same version is a `409`.
+- **Revoking never drops rows.** Collections become unreachable; documents stay.
+- **v1 is declarative only.** A `functions` key is a hard failure, not an ignored
+  field. Stored ajs is install v2.
+- **Capabilities are shape-only so far.** The format is settled and validated, but
+  nothing consults `grant.capabilities` yet. The install response reports
+  `unenforced: [...]` so you are never told you hold a power you do not.
+
+## What a token is
+
+`(principal, caveats)`. Effective authority is recomputed **on every request** as
+`rolesOf(principal) ∩ caveats.roles`. So a token never holds what its principal does
+not hold right now, and revoking a human revokes every agent they authorised —
+instantly, with no revocation list. `owner`, `configurator` and `developer` can never
+be carried by one. A token cannot mint another. `DELETE` is not a default method. The
+secret is shown once and never stored, only hashed.
+
+## Repository shape
+
+- `functions/src/collections/` — the portable decision kernel. No Firebase imports;
+  this is what the `service-compris` npm package publishes.
+- `functions/src/install/`, `functions/src/auth/` — install and auth, each split into
+  pure decisions plus a thin HTTP handler. If it is a judgement, it belongs in the
+  pure half where it runs without a cloud.
+- `scripts/verify-install.js`, `verify-token.js`, `verify-authorize.js` — acceptance
+  against a live host. `--alias <name>` targets a project.
+- `src/` — client code, which is **leaving**. Do not build on it; see ROADMAP.md.
+
+## Where to push hardest
+
+The manifest format. It was designed against three consumers and validated against
+one. If it cannot express something your design needs, **that is the bug** — say so
+rather than bending your design around it. A weakness found now is an issue comment;
+the same weakness after adoption is a migration.
+
+Issues: https://github.com/tonioloewald/tosijs-platform/issues

@@ -16,9 +16,22 @@ which is what this beta is for.
 ```bash
 git clone https://github.com/tonioloewald/tosijs-platform
 cd tosijs-platform && bun install
-# point .firebaserc at YOUR project, then:
-bun run initial-deploy
+
+# Dry run first — it changes nothing and reports exactly what it would do.
+bun scripts/provision-sandbox.js --alias mine --project <your-project-id>
+bun scripts/provision-sandbox.js --alias mine --apply
 ```
+
+This links billing, enables the APIs, creates Firestore and a web app,
+generates the client config, deploys, grants the public invoker bindings, and
+seeds. It is idempotent — re-running is safe.
+
+**One step it cannot do:** enabling Google sign-in needs an OAuth client that
+Firebase only provisions through console flows. The script prints the exact URL
+and stops rather than pretending. Until you click it, nobody can sign in.
+
+(`bun run initial-deploy` is the older path. It predates the invoker-binding
+step below, so prefer the provisioner.)
 
 Two operational things that will bite you otherwise, both learned the hard way:
 
@@ -66,7 +79,17 @@ Write that nonce into `system:claim/current` in the `proof` field — Firebase
 console, `gcloud`, or admin credentials. `firestore.rules` is deny-all, so there
 is no path to that document through the API for anyone.
 
-Then, authenticated with a Google sign-in:
+Then, authenticated with a Google sign-in.
+
+**Getting `$ID_TOKEN`.** This has to be a real Firebase ID token — a platform
+token (below) will not do, deliberately: claiming is how authority begins, and
+it needs a human at a browser. The provisioner deploys hosting, so:
+
+1. open `https://<your-project>.web.app` and sign in with Google;
+2. in the browser console: `await fb.auth.currentUser.getIdToken()`
+
+(`fb` is exposed on `window` for exactly this kind of poking.) The token lasts
+about an hour.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $ID_TOKEN" .../claim
@@ -165,6 +188,35 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 Your schema and access rules are enforced from the moment the install commits.
 Rule changes propagate to every warm instance within seconds, via an epoch
 counter — a revocation does not wait for a cache to expire.
+
+### Read this before you debug a 404
+
+**A `404` usually means "not allowed", not "not there".** Denials are opaque to
+non-privileged callers by design: a protected document and a missing one must
+be indistinguishable, or the error code itself becomes a way to enumerate what
+exists. Only `admin`/`developer`/`owner` see the real `403`.
+
+So if a request 404s and you are sure the document exists, check in this order:
+
+1. does your token's `collections` caveat cover that path?
+2. does the method fall inside its `methods` caveat?
+3. does any `access` rule in your manifest grant that role that method?
+4. is the collection actually installed — `GET /install`?
+
+Post-authorization errors are *not* opaque, because by then you have already
+proved access: `403 document already exists`, `403 cannot update non-existent
+document`, and `400` with schema details all say what they mean.
+
+### The rest of the request surface
+
+| | |
+|---|---|
+| `/docs?p=…` | `c` limit (default 10), `f` comma-separated fields, `o` order — `o=date(desc)` |
+| `field=value` lookups | `/doc?p=virta:task/slug=ship-it` — only for fields in `unique` or `tagFields` |
+| sub-collections | `virta:task/abc/comment/xyz` works; declaring one in a manifest does not yet |
+| reserved fields | `_id`, `_collection`, `_path` are stripped from writes; `_created`/`_modified` are endpoint-managed. Do not put them in your schema expecting to set them. |
+| rate limit | 100 requests/minute per IP, `429` with `Retry-After`. A bulk import needs to pace itself. |
+| unchanged writes | a PUT whose content matches returns `200 unchanged …` and does **not** re-stamp `_modified` |
 
 ---
 

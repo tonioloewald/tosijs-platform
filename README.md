@@ -13,7 +13,8 @@ npm install service-compris
 > a blank Firebase project, claim it without anyone handing you a secret,
 > install a library from a JSON manifest, and give an agent its own scoped
 > identity. Start at **[BETA.md](BETA.md)** — including its list of what is
-> deliberately not ready yet. Changes: [CHANGELOG.md](CHANGELOG.md).
+> deliberately not ready yet. Orientation for agents: [llms.txt](llms.txt).
+> Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## What the npm package actually is
 
