@@ -32,14 +32,18 @@ firebase deploy --only firestore:indexes   # first
 firebase deploy --only functions           # then
 ```
 
-**New functions are not publicly invocable by default.** A freshly deployed
-`claim`, `install`, `token` or `authorize` answers `401` with an HTML body from
-Google — not from us. Grant each one:
+**New functions may not be publicly invocable.** A freshly deployed `claim`,
+`install`, `token` or `authorize` can answer `401` with an HTML body from
+Google — before our code runs at all. `provision-sandbox.js` now grants the
+bindings for you (step 5b, idempotent). If you deployed some other way:
 
 ```bash
 gcloud run services add-iam-policy-binding <fn> \
   --region=us-central1 --member=allUsers --role=roles/run.invoker --project=<id>
 ```
+
+Note the Cloud Run service name is **lowercase** — `prefetchdata`, not
+`prefetchData`.
 
 "Publicly invocable" is not "publicly authorized" — the function's own RBAC
 still runs. The tell that you are looking at *our* 401 rather than Google's:

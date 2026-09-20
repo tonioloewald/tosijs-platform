@@ -32,6 +32,10 @@ ceremonies (`scripts/verify-install.js` 27, `verify-token.js` 17,
   by the function so it cannot desync from the code that processes it.
 - `scripts/cli-login.js`, a readable reference client for the above.
 - Composite indexes for `role.contacts` and `token.hash`.
+- `provision-sandbox.js` grants `allUsers` the `run.invoker` role on the public
+  endpoints (step 5b), so a freshly provisioned host is reachable without four
+  manual `gcloud` calls. Idempotent, grant-only, and it reads even on a dry run
+  so the dry run reports what would actually change.
 
 ### Fixed
 

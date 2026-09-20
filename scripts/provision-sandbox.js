@@ -17,6 +17,7 @@
  *      cannot be derived from the project id, so this is the step that makes
  *      the whole thing automatable rather than a console copy-paste
  *   5. deploy functions, hosting, firestore rules and storage rules
+ *   5b. grant `allUsers` the run.invoker role on the public endpoints
  *   6. seed from initial_state/
  *
  * ## What it CANNOT do
@@ -74,6 +75,13 @@ const BILLING = val('billing')
 // 403 "Permission denied on 'locations/us-central' (or it may not exist)".
 // Valid ids here are nam5/nam7/eur3 or regional ones like us-central1.
 const LOCATION = val('location') ?? 'nam5'
+/**
+ * Cloud Run region for the deployed functions — NOT `LOCATION`, which is the
+ * Firestore multi-region (`nam5`). They are different namespaces that both get
+ * called "location", and using the Firestore one here 404s every service, which
+ * this script would have reported as a harmless "skipped".
+ */
+const FUNCTIONS_REGION = val('functions-region') ?? 'us-central1'
 
 const dry = !APPLY
 const step = (n, title) => console.log(`\n[${n}] ${title}`)
@@ -336,6 +344,26 @@ async function main() {
   // images that otherwise accrue a small monthly bill forever.
   run(`${FIREBASE} deploy -P ${ALIAS} --force`, { dryRun: dry })
 
+  // --- 5b. Make the public endpoints actually reachable --------------------
+  //
+  // A freshly created Cloud Run service does NOT necessarily get the allUsers
+  // invoker binding, and when it does not the endpoint answers 401 with an
+  // HTML body from GOOGLE — before our code runs at all. That reads exactly
+  // like an auth bug in the platform, and it cost four separate debugging
+  // detours in one week (`claim`, `install`, `token`, `authorize`). The tell
+  // is the headers: our own 401 carries CORS and rate-limit headers.
+  //
+  // "Publicly invocable" is not "publicly authorized" — every one of these
+  // enforces its own RBAC from the Firebase ID token or capability token. The
+  // binding only decides whether the request reaches that code.
+  //
+  // Done over REST rather than through `gcloud`, for the same reason billing
+  // and Firestore are: an older gcloud (or one broken by a system Python)
+  // still works. Idempotent — the policy is read, merged and written back, so
+  // re-running changes nothing and nothing else in the policy is clobbered.
+  step('5b', 'Public invoker bindings')
+  await grantPublicInvokers(projectId, dry)
+
   // --- 6. Seed ------------------------------------------------------------
   step(6, 'Seed from initial_state/')
   run(`bun scripts/seed-production.js --project ${projectId}`, { dryRun: dry })
@@ -356,6 +384,93 @@ async function main() {
       `\nThen:  bun run use ${ALIAS}     # point this checkout at it\n` +
       `       bun run sandbox:reset    # wipe + reseed whenever you want a clean slate\n`
   )
+}
+
+/**
+ * Endpoints meant to be reachable by anyone, each of which authorizes its own
+ * callers. `stored` is deliberately ABSENT: it is reachable only through
+ * `storage.rules`, which currently allows world reads on user-scoped paths
+ * (tosijs-platform#3), so making it publicly invocable would propagate a known
+ * hazard to every new host. Add it here when #3 is fixed, not before.
+ *
+ * Note this only ever GRANTS. It will not revoke a binding somebody added
+ * deliberately — removing access is not something a provisioning script should
+ * do behind your back.
+ */
+const PUBLIC_FUNCTIONS = [
+  'doc',
+  'docs',
+  'hello',
+  'prefetch',
+  'prefetchData',
+  'sitemap',
+  'user',
+  'esm',
+  'cachedQuery',
+  'gen',
+  'claim',
+  'install',
+  'token',
+  'authorize',
+]
+
+async function grantPublicInvokers(projectId, dry) {
+  const base = `https://run.googleapis.com/v2/projects/${projectId}/locations/${FUNCTIONS_REGION}/services`
+  for (const name of PUBLIC_FUNCTIONS) {
+    // Cloud Run service names are lowercase, so a camelCase export deploys as
+    // `prefetchdata`, not `prefetchData`. Looking it up under the export name
+    // finds nothing and reports "not deployed" — which is how this very check,
+    // on its first honest dry run, found that two endpoints would have been
+    // left unreachable on every freshly provisioned host.
+    const service = name.toLowerCase()
+    // The READS happen even on a dry run. A dry run that reports fourteen
+    // pending changes when the real answer is zero is how people learn to
+    // stop reading dry runs; only the write below is suppressed.
+    // Existence is checked on the SERVICE, not on its policy: `getIamPolicy`
+    // answers 200 with an empty policy for a service that does not exist, so
+    // testing that instead would try to grant on nothing and report a failure
+    // for a function that is simply not deployed. The set of exports changes
+    // over time and a missing one must not look like a problem.
+    const exists = await api('GET', `${base}/${service}`)
+    if (!exists.ok) {
+      console.log(`   ${name}: not deployed, skipped`)
+      continue
+    }
+    const current = await api('GET', `${base}/${service}:getIamPolicy`)
+    if (!current.ok) {
+      console.log(`   ${name}: could not read policy (${current.status})`)
+      continue
+    }
+    const policy = current.json ?? {}
+    const bindings = policy.bindings ?? []
+    const invoker = bindings.find((b) => b.role === 'roles/run.invoker')
+    if (invoker?.members?.includes('allUsers')) {
+      console.log(`   ${name}: already public`)
+      continue
+    }
+    // Merge rather than replace: setIamPolicy overwrites, and blowing away an
+    // unrelated binding would be a quiet way to break something else.
+    const next = invoker
+      ? bindings.map((b) =>
+          b.role === 'roles/run.invoker'
+            ? { ...b, members: [...(b.members ?? []), 'allUsers'] }
+            : b
+        )
+      : [...bindings, { role: 'roles/run.invoker', members: ['allUsers'] }]
+
+    if (dry) {
+      console.log(`   ${name}: WOULD GRANT allUsers run.invoker`)
+      continue
+    }
+    const set = await api('POST', `${base}/${service}:setIamPolicy`, {
+      policy: { ...policy, bindings: next },
+    })
+    console.log(
+      set.ok
+        ? `   ${name}: granted`
+        : `   ${name}: FAILED (${set.status}) ${JSON.stringify(set.json).slice(0, 120)}`
+    )
+  }
 }
 
 main().catch((e) => {
