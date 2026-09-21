@@ -44,7 +44,7 @@
     "test": "bun test src scripts && cd functions && bun test",
     "typecheck": "tsc --noEmit",
     "build:lib": "tsc -p tsconfig.lib.json",
-    "prepublishOnly": "bun run build:lib && bun run test && bun scripts/verify-package.js",
+    "prepublishOnly": "bun scripts/preflight.js",
     "deploy:sandbox": "firebase deploy -P sandbox",
     "deploy:sandbox-functions": "firebase deploy -P sandbox --only functions",
     "use": "bun scripts/use-project.js",
@@ -59,7 +59,8 @@
     "backup:run": "bun scripts/backup-run.js",
     "backup:check": "bun scripts/backup-check.js",
     "verify:sandbox:auth": "VERIFY_ID_TOKEN=$(bun scripts/sandbox-token.js --grant owner 2>/dev/null) bun --cwd functions test src/collections/live-site.integration.test.ts",
-    "verify:package": "bun scripts/verify-package.js"
+    "verify:package": "bun scripts/verify-package.js",
+    "preflight": "bun scripts/preflight.js"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.0",
