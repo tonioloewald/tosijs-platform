@@ -120,6 +120,15 @@ export interface InstalledCollection {
      * and it should be made by someone who has seen the number.
      */
     seq?: boolean
+    /**
+     * Refuse a write that cannot be attributed to a principal.
+     *
+     * The complement to the `_by` stamp: provenance is recorded whenever there
+     * is a principal, and this says the collection will not accept a document
+     * without one. Worth declaring on anything that is a record of who did
+     * what — an event log, an audit trail, a comment thread.
+     */
+    requireAttribution?: boolean
   }
   /**
    * An ARRAY, not a role-keyed object. Object key order decided precedence
@@ -413,8 +422,12 @@ export function validateManifest(
       const env = c.envelope as Record<string, unknown>
       if (env === null || typeof env !== 'object') {
         fail(`${where}.envelope: must be an object`)
-      } else if (env.seq !== undefined && typeof env.seq !== 'boolean') {
-        fail(`${where}.envelope.seq: must be true or false`)
+      } else {
+        for (const flag of ['seq', 'requireAttribution'] as const) {
+          if (env[flag] !== undefined && typeof env[flag] !== 'boolean') {
+            fail(`${where}.envelope.${flag}: must be true or false`)
+          }
+        }
       }
     }
 

@@ -122,9 +122,18 @@ describe('doc.ts denial branches do not disclose existence', () => {
     // access, so hiding existence only degrades an author's error messages
     // (review F5). Pinned because nothing else would notice the change.
     const write = docTs.slice(docTs.indexOf("case 'POST':"))
-    expect(write).toMatch(
-      /reason === 'exists' \|\| outcome\.reason === 'missing'[\s\S]{0,120}status\(403\)/
+    // Widened when `unattributed` joined the branch (#18). The property is
+    // unchanged — post-authorization refusals are 403, not the opaque 404 —
+    // so the assertion is on the branch's membership and its status, not on
+    // the exact shape of the condition.
+    const branch = write.slice(
+      write.indexOf("outcome.status === 'rejected'"),
+      write.indexOf("outcome.status === 'noop'")
     )
+    for (const reason of ['exists', 'missing', 'unattributed']) {
+      expect(branch).toContain(`outcome.reason === '${reason}'`)
+    }
+    expect(branch).toMatch(/\)\s*\{\s*\n\s*res\.status\(403\)/)
   })
 
   test('doc.ts is wired to the pipeline and keeps no second write path', () => {

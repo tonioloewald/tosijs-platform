@@ -198,6 +198,15 @@ export interface CollectionConfig {
    */
   seq?: boolean
 
+  /**
+   * Refuse any write the endpoint cannot attribute to a principal (#18).
+   *
+   * Opt-in. A collection that grants `public` write and does not set this
+   * accepts anonymous documents, which is occasionally what somebody means —
+   * it should just be a decision rather than a default.
+   */
+  requireAttribution?: boolean
+
   schema?: Base<any> // tosijs-schema for automatic validation
   unique?: string[]
   tagFields?: string[] // fields that support array-contains queries via tagField=<value> syntax

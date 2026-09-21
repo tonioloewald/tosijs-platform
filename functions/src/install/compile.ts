@@ -138,7 +138,16 @@ export interface DeriveContext {
   now: () => string
   /** Injected randomness, so `shortId` is deterministic under test. */
   random: () => number
-  principal: { uid?: string; name?: string; roleId?: string }
+  /**
+   * NOT captured at compile time.
+   *
+   * A collection is compiled once and cached across every request, so a
+   * principal baked in here would be whoever happened to trigger the compile.
+   * It used to be `{}` — hardcoded — so `derive: { op: 'principal' }` silently
+   * produced `''` for everyone, a declared feature wired to nothing. The
+   * principal now arrives with the call.
+   */
+  principal?: { uid?: string; name?: string; roleId?: string }
 }
 
 /**
@@ -156,8 +165,11 @@ export interface DeriveContext {
 export function compileDerive(
   ops: DeriveOp[],
   ctx: DeriveContext
-): (data: Record<string, unknown>) => Record<string, unknown> {
-  return (data) => {
+): (
+  data: Record<string, unknown>,
+  principal?: { uid?: string; name?: string; roleId?: string }
+) => Record<string, unknown> {
+  return (data, principal = ctx.principal ?? {}) => {
     const out = { ...data }
     for (const op of ops) {
       switch (op.op) {
@@ -190,10 +202,19 @@ export function compileDerive(
           if (!out[op.to]) out[op.to] = ctx.now()
           break
         case 'principal':
+          // Only when the caller did not supply one — a derived field is a
+          // DEFAULT, not an override. A caller who names an author is taken at
+          // their word here; `_by` is the record of who actually wrote it, and
+          // that one cannot be influenced at all.
           if (!out[op.to]) {
-            out[op.to] =
-              (ctx.principal as Record<string, string | undefined>)[op.field] ??
-              ''
+            const value = (principal as Record<string, string | undefined>)[
+              op.field
+            ]
+            // Absent rather than empty string: `author: ''` is a value that
+            // passes a `type: string` schema and means nothing, and it would
+            // then block the default on a later write because the field is
+            // already set.
+            if (value) out[op.to] = value
           }
           break
         case 'constant':
@@ -277,12 +298,14 @@ export function compileCollection(
   // sequence is assigned inside the same transaction as the document write, so
   // nothing the pipeline could compute would be atomic with it.
   if (collection.envelope?.seq === true) config.seq = true
+  if (collection.envelope?.requireAttribution === true) {
+    config.requireAttribution = true
+  }
 
   const derive = collection.derive?.length
     ? compileDerive(collection.derive, {
         now: options.now ?? (() => new Date().toJSON()),
         random: options.random ?? Math.random,
-        principal: {},
       })
     : null
   const bump = collection.envelope?.version?.bumpOn?.length
@@ -292,11 +315,25 @@ export function compileCollection(
   if (derive || bump) {
     config.validate = async (
       data: Record<string, unknown>,
-      _roles: unknown,
+      roles: unknown,
       existing: Record<string, unknown>
     ) => {
+      // The principal comes from the REQUEST, through the argument the write
+      // pipeline already passes. A collection is compiled once and cached, so
+      // anything captured at compile time would be whoever triggered it.
+      const r = roles as {
+        userIds?: string[]
+        name?: string
+        _id?: string
+      } | null
       let out = data
-      if (derive) out = derive(out)
+      if (derive) {
+        out = derive(out, {
+          uid: r?.userIds?.[0],
+          name: r?.name,
+          roleId: r?._id,
+        })
+      }
       if (bump) out = bump(out, existing ?? {})
       return out
     }

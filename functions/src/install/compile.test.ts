@@ -316,3 +316,56 @@ describe('envelope.seq compiles to the commit-path flag (#14)', () => {
     expect(typeof c.validate).toBe('function')
   })
 })
+
+describe('derive: principal reads the REQUEST principal (#18)', () => {
+  // It was compiled with `principal: {}` hardcoded, so it produced `''` for
+  // everyone — a declared feature wired to nothing. A collection is compiled
+  // once and cached across requests, so anything captured at compile time
+  // would be whoever happened to trigger the compile.
+  const config = compileCollection({
+    schema: { type: 'object' },
+    derive: [{ op: 'principal', to: 'author', field: 'uid' }],
+    access: [{ role: 'author', write: 'ALL' }],
+  } as never)
+
+  const who = (over = {}) =>
+    ({ name: 'Ada', userIds: ['uid-9'], _id: 'role-3', roles: [], contacts: [], ...over }) as never
+
+  test('it fills from the caller', async () => {
+    const out = await config.validate!({ t: 'x' }, who(), {})
+    expect((out as Record<string, unknown>).author).toBe('uid-9')
+  })
+
+  test('two callers get two answers — the whole point', async () => {
+    const a = await config.validate!({ t: 'x' }, who(), {})
+    const b = await config.validate!({ t: 'x' }, who({ userIds: ['uid-2'] }), {})
+    expect((a as Record<string, unknown>).author).toBe('uid-9')
+    expect((b as Record<string, unknown>).author).toBe('uid-2')
+  })
+
+  test('a value the caller SUPPLIED wins — a derive is a default', async () => {
+    const out = await config.validate!({ t: 'x', author: 'chosen' }, who(), {})
+    expect((out as Record<string, unknown>).author).toBe('chosen')
+  })
+
+  test('an unattributable caller leaves it ABSENT, not empty-string', async () => {
+    // `author: ''` passes a `type: string` schema, means nothing, and then
+    // blocks the default on every later write because the field is set.
+    const out = await config.validate!({ t: 'x' }, { userIds: [] } as never, {})
+    expect('author' in (out as Record<string, unknown>)).toBe(false)
+  })
+
+  test('name and roleId resolve too', async () => {
+    const byName = compileCollection({
+      schema: { type: 'object' },
+      derive: [
+        { op: 'principal', to: 'who', field: 'name' },
+        { op: 'principal', to: 'roleRef', field: 'roleId' },
+      ],
+      access: [{ role: 'author', write: 'ALL' }],
+    } as never)
+    const out = (await byName.validate!({ t: 'x' }, who(), {})) as Record<string, unknown>
+    expect(out.who).toBe('Ada')
+    expect(out.roleRef).toBe('role-3')
+  })
+})

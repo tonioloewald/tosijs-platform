@@ -100,7 +100,13 @@ export type WriteOutcome =
   | { status: 'noop' }
   | {
       status: 'rejected'
-      reason: 'schema' | 'validate' | 'unique' | 'exists' | 'missing'
+      reason:
+        | 'schema'
+        | 'validate'
+        | 'unique'
+        | 'exists'
+        | 'missing'
+        | 'unattributed'
       message: string
       details?: Array<{ path: string; message: string }>
     }
@@ -114,7 +120,51 @@ export type WriteOutcome =
  * exist only *after* any strip — and must be hidden from the caller's schema
  * rather than removed from the document.
  */
-export const STAMPED_FIELDS = ['_created', '_modified', '_seq'] as const
+export const STAMPED_FIELDS = ['_created', '_modified', '_seq', '_by'] as const
+
+/**
+ * Who made this write, as the endpoint knows it — not as the writer said (#18).
+ *
+ * BETA.md promised "the token is the provenance … answerable from the record
+ * rather than from a field the writer chose to populate honestly", and nothing
+ * was stamped, so it was answerable only from exactly such a field. This is
+ * that promise made true.
+ *
+ * **A token is NOT always present.** Three shapes reach a write:
+ *
+ *   - a capability token — uid, role document, token id and label;
+ *   - a human's Firebase ID token — uid and role document, no token;
+ *   - nobody, if an installed collection grants `public` write — no `_by` at
+ *     all, which is the honest record of an unattributable write rather than
+ *     an empty object pretending to be an identity.
+ *
+ * Kept small on purpose: it is paid on every document, forever. The id and the
+ * label are what make a write attributable without a join; anything else can
+ * be looked up from them.
+ */
+export function provenanceOf(
+  userRoles: UserRoles
+): Record<string, unknown> | undefined {
+  const uid = userRoles.userIds?.[0]
+  const token = userRoles.token
+  if (!uid && !token) return undefined
+  return {
+    ...(uid ? { uid } : {}),
+    ...(userRoles._id ? { role: userRoles._id } : {}),
+    // A DISPLAY name, snapshotted deliberately. `uid`/`role` are the stable
+    // references; this is what the principal was called at the time, so a
+    // later rename does not rewrite history. That is the behaviour an audit
+    // record wants, and the opposite of what a foreign key wants — hence
+    // both are here.
+    ...(userRoles.name && userRoles.name !== 'unknown'
+      ? { name: userRoles.name }
+      : {}),
+    // The agent's own identity. Every token a person mints attenuates THEIR
+    // authority, so `uid` is identical across all of them — the label is the
+    // only thing that tells one agent from another, and from its human.
+    ...(token ? { token: token.id, label: token.label } : {}),
+  }
+}
 
 /** A document as its author wrote it: no envelope, no endpoint stamps. */
 export function withoutStamps(
@@ -192,10 +242,31 @@ export async function runWritePipeline(
   const created = (existing._created as string) || modified
 
   // PATCH merges over stored content; POST/PUT replace.
+  // Provenance is stamped like the timestamps: endpoint-written, never taken
+  // from the body, and hidden from the caller's schema (#16, #18).
+  const by = provenanceOf(userRoles)
+
+  // A collection may REQUIRE that every document be attributable.
+  //
+  // Checked here rather than at the access gate because it is not a question
+  // about permission — a collection can legitimately grant `public` write and
+  // still refuse an unattributable one. Opt-in, because "anyone may write,
+  // anonymously" is a real and sometimes correct configuration; the point is
+  // that it should be chosen rather than arrived at.
+  if (config.requireAttribution && !by) {
+    return {
+      status: 'rejected',
+      reason: 'unattributed',
+      message: 'this collection requires an attributable principal',
+    }
+  }
+
   let data: Record<string, unknown> =
     method === 'PATCH'
       ? { ...existing, ...body, _created: created, _modified: modified }
       : { ...body, _created: created, _modified: modified }
+  if (by) data._by = by
+  else delete data._by
 
   // Envelope fields are endpoint-owned: strip so they are never stored back as
   // caller content.

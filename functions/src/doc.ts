@@ -470,7 +470,11 @@ export const doc = onRequest({}, async (req, res) => {
         // AFTER the access gate, so the caller already holds write access and
         // telling them a document exists is not a disclosure. 404-ing them would
         // degrade an author's error messages for no security gain (review F5).
-        if (outcome.reason === 'exists' || outcome.reason === 'missing') {
+        if (
+          outcome.reason === 'exists' ||
+          outcome.reason === 'missing' ||
+          outcome.reason === 'unattributed'
+        ) {
           res.status(403).send(outcome.message)
         } else if (outcome.reason === 'schema') {
           res

@@ -560,3 +560,100 @@ describe('a CLOSED schema accepts a valid write (#16)', () => {
     expect((outcome as { data: Record<string, unknown> }).data._created).toBe(NOW)
   })
 })
+
+describe('provenance is stamped, not claimed (#18)', () => {
+  const withToken: UserRoles = {
+    ...roles,
+    _id: 'role-1',
+    token: { id: 'tok-1', label: 'ci × virta', methods: ['POST'] },
+  } as UserRoles
+  const human: UserRoles = { ...roles, _id: 'role-1' } as UserRoles
+  const nobody: UserRoles = {
+    name: 'unknown',
+    contacts: [],
+    roles: [],
+    userIds: [],
+  } as UserRoles
+
+  const write = (userRoles: UserRoles, config: CollectionConfig = bare, body = { t: 'x' }) =>
+    runWritePipeline(
+      { method: 'POST', body, existing: {}, exists: false, config, userRoles },
+      deps()
+    )
+
+  test('a token write records the token AND its label', async () => {
+    const o = await write(withToken)
+    expect((o as { data: Record<string, unknown> }).data._by).toEqual({
+      uid: 'u1',
+      role: 'role-1',
+      name: 'tester',
+      token: 'tok-1',
+      label: 'ci × virta',
+    })
+  })
+
+  test('a human write records the principal, with no token', async () => {
+    // A token is NOT always present — a browser session carries a Firebase ID
+    // token and no capability token at all.
+    const o = await write(human)
+    expect((o as { data: Record<string, unknown> }).data._by).toEqual({
+      uid: 'u1',
+      role: 'role-1',
+      name: 'tester',
+    })
+  })
+
+  test('two agents of ONE human are distinguishable', async () => {
+    // The case that matters here: a token attenuates its human's authority, so
+    // every agent a person mints shares their `uid`. The label is the only
+    // thing that tells one from another — and from the human.
+    const ci = { ...withToken, token: { id: 't1', label: 'ci × virta', methods: [] } } as UserRoles
+    const laptop = { ...withToken, token: { id: 't2', label: 'macbook × virta', methods: [] } } as UserRoles
+    const a = (await write(ci)) as { data: Record<string, Record<string, unknown>> }
+    const b = (await write(laptop)) as { data: Record<string, Record<string, unknown>> }
+    expect(a.data._by.uid).toBe(b.data._by.uid as string)
+    expect(a.data._by.label).not.toBe(b.data._by.label as string)
+    expect(a.data._by.token).not.toBe(b.data._by.token as string)
+  })
+
+  test('an unattributable write records NOTHING rather than an empty identity', async () => {
+    // `_by: {}` would be a shape that looks like provenance and carries none.
+    const o = await write(nobody)
+    expect((o as { data: Record<string, unknown> }).data._by).toBeUndefined()
+  })
+
+  test('a caller cannot forge it', async () => {
+    const o = await write(human, bare, { t: 'x', _by: { uid: 'someone-else' } } as never)
+    expect((o as { data: Record<string, unknown> }).data._by).toEqual({
+      uid: 'u1',
+      role: 'role-1',
+      name: 'tester',
+    })
+  })
+
+  test('it is hidden from a CLOSED schema, like the other stamps', async () => {
+    const closed: CollectionConfig = {
+      schema: {
+        type: 'object',
+        properties: { t: { type: 'string' } },
+        required: ['t'],
+        additionalProperties: false,
+      } as never,
+    }
+    expect((await write(withToken, closed)).status).toBe('write')
+  })
+
+  test('requireAttribution refuses an anonymous write', async () => {
+    const strict: CollectionConfig = { requireAttribution: true }
+    const o = await write(nobody, strict)
+    expect(o).toMatchObject({ status: 'rejected', reason: 'unattributed' })
+    // …and accepts an attributable one.
+    expect((await write(human, strict)).status).toBe('write')
+  })
+
+  test('without it, an anonymous write is still allowed', async () => {
+    // Opt-in: "anyone may write, anonymously" is a real configuration. The
+    // point is that it should be chosen rather than arrived at.
+    expect((await write(nobody)).status).toBe('write')
+  })
+})
