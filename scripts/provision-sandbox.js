@@ -52,6 +52,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import { execSync } from 'child_process'
 import {
   projectRoot,
   FIREBASE,
@@ -64,6 +65,36 @@ import {
   capture,
   parseArgs,
 } from './sandbox-lib.js'
+
+/**
+ * Fail on a missing gcloud token BEFORE printing anything (#17).
+ *
+ * Everything here authenticates with one `gcloud auth print-access-token`.
+ * When gcloud cannot start — on this machine it refuses under the system
+ * Python 3.9 — the failure surfaced several sections into the report, which
+ * reads as "the provisioner broke" rather than "gcloud is not working". And
+ * the message said only that a command failed, when the entire fix is one
+ * environment variable.
+ */
+const requireGcloud = () => {
+  try {
+    execSync('gcloud auth print-access-token', { stdio: ['ignore', 'pipe', 'pipe'] })
+  } catch (e) {
+    const detail = String(e.stderr ?? e.message ?? '')
+    console.error('\nCannot get a Google access token — gcloud is not usable.\n')
+    if (/Python/i.test(detail)) {
+      console.error(
+        'gcloud refused to start under this machine\'s Python. Point it at any\n' +
+          '  Python 3.10+ and re-run:\n\n' +
+          '    export CLOUDSDK_PYTHON=$(which python3.12)   # or any >= 3.10\n'
+      )
+    } else {
+      console.error('  Run `gcloud auth login`, then try again.\n')
+    }
+    console.error(detail.split('\n').slice(0, 3).join('\n'))
+    process.exit(1)
+  }
+}
 
 const { has, val } = parseArgs(process.argv)
 const APPLY = has('apply')
@@ -87,6 +118,11 @@ const dry = !APPLY
 const step = (n, title) => console.log(`\n[${n}] ${title}`)
 
 async function main() {
+  // BEFORE anything is printed. A token failure reported three sections into
+  // the report reads as "the provisioner broke"; reported first, it reads as
+  // what it is (#17).
+  requireGcloud()
+
   // --- Alias registration -------------------------------------------------
   const rc = readRc()
   rc.projects = rc.projects ?? {}
@@ -343,6 +379,36 @@ async function main() {
   // the finish line. The policy is also worth having: it expires old container
   // images that otherwise accrue a small monthly bill forever.
   run(`${FIREBASE} deploy -P ${ALIAS} --force`, { dryRun: dry })
+
+  // --- 4b. Email/password sign-in, the scripted-test affordance ------------
+  //
+  // `sandbox-token.js` mints tokens with email/password precisely so
+  // automation needs no human at a browser — and `provision-sandbox` enabled
+  // the Identity Toolkit API but never turned the provider ON, so the very
+  // first scripted step failed with OPERATION_NOT_ALLOWED. A fresh consumer
+  // was left with only the browser path, which is the path the sandbox exists
+  // to avoid (#17).
+  //
+  // Google sign-in still cannot be enabled from here — that needs an OAuth
+  // client only the console flows create — so the manual step below stays.
+  step('4b', 'Email/password sign-in (test affordance)')
+  console.log(
+    '   enabling password sign-in so scripted tests can authenticate' +
+      (dry ? ' [dry-run]' : '')
+  )
+  if (!dry) {
+    const signIn = await api(
+      'PATCH',
+      `https://identitytoolkit.googleapis.com/admin/v2/projects/${projectId}/config` +
+        '?updateMask=signIn.email',
+      { signIn: { email: { enabled: true, passwordRequired: true } } }
+    )
+    console.log(
+      signIn.ok
+        ? '   password sign-in enabled'
+        : `   FAILED (${signIn.status}) ${JSON.stringify(signIn.json).slice(0, 140)}`
+    )
+  }
 
   // --- 5b. Make the public endpoints actually reachable --------------------
   //

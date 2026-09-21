@@ -130,6 +130,40 @@ export const install = onRequest({}, async (request, response: Response) => {
   }
 
   const userRoles = await getUserRoles(req)
+
+  // `GET ?name=<namespace>` — "is this library installed, and at which
+  // version?" (#19).
+  //
+  // Answerable by ANY authenticated principal, tokens included, because the
+  // alternative leaves an agent with no way to ask. `configurator` can never
+  // be carried by a token (rightly), so the full listing is closed to one —
+  // and a collection that is missing and a collection outside the token's
+  // caveats both answer an opaque 404, so the agent cannot tell "not
+  // installed" from "not mine". That is a diagnosis it has to be able to
+  // make: the alternative is a schema rejection three requests later.
+  //
+  // It discloses only what a caller could already infer by writing to the
+  // collection: name, version, status. Nothing about capabilities, nothing
+  // about other libraries.
+  if (req.method === 'GET' && req.query.name) {
+    if (!userRoles.roles.length) {
+      fail(response, 401, 'unauthenticated', 'authentication required')
+      return
+    }
+    const name = String(req.query.name)
+    const grant = await readGrant(name)
+    if (!grant || grant.status === 'revoked') {
+      fail(response, 404, 'not-found', `nothing installed as "${name}"`)
+      return
+    }
+    response.json({
+      name: grant.name,
+      version: grant.activeVersion,
+      status: grant.status,
+    })
+    return
+  }
+
   if (!userRoles.roles.includes(ROLES.configurator)) {
     // Checked here so the HTTP status is honest, and again inside
     // `decideInstall` so the invariant holds for every caller of the decision,
