@@ -450,3 +450,113 @@ describe('DIVERGENCE: §3 no-op check (doc.ts does NOT do this)', () => {
     expect(isUnchanged({ a: 1 }, {})).toBe(false)
   })
 })
+
+describe('a CLOSED schema accepts a valid write (#16)', () => {
+  // Reported by the first consumer to try `additionalProperties: false`. The
+  // pipeline stamps `_created`/`_modified` and then validated the STAMPED
+  // document against the caller's schema, so the envelope it had just added
+  // tripped the caller's own closed schema: every write failed with
+  // "Unexpected _created".
+  //
+  // It also broke a promise larger than the feature — the same JSON Schema
+  // validated locally accepted a document the host refused.
+  const closed: CollectionConfig = {
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        kind: { type: 'string' },
+      },
+      required: ['id', 'kind'],
+      additionalProperties: false,
+    } as never,
+  }
+
+  const event = { id: 'e1', kind: 'created' }
+
+  test('POST is accepted', async () => {
+    const outcome = await runWritePipeline(
+      { method: 'POST', body: event, existing: {}, exists: false, config: closed, userRoles: roles },
+      deps()
+    )
+    expect(outcome.status).toBe('write')
+  })
+
+  test('PUT is accepted', async () => {
+    const outcome = await runWritePipeline(
+      {
+        method: 'PUT',
+        body: { ...event, kind: 'tagged' },
+        existing: { ...event, _created: EARLIER, _modified: EARLIER },
+        exists: true,
+        config: closed,
+        userRoles: roles,
+      },
+      deps()
+    )
+    expect(outcome.status).toBe('write')
+  })
+
+  test('PATCH is accepted — the merge pulls stored stamps in, too', async () => {
+    const outcome = await runWritePipeline(
+      {
+        method: 'PATCH',
+        body: { kind: 'tagged' },
+        existing: { ...event, _created: EARLIER, _modified: EARLIER },
+        exists: true,
+        config: closed,
+        userRoles: roles,
+      },
+      deps()
+    )
+    expect(outcome.status).toBe('write')
+  })
+
+  test('the stamps are still STORED — hidden from the schema, not dropped', async () => {
+    const outcome = await runWritePipeline(
+      { method: 'POST', body: event, existing: {}, exists: false, config: closed, userRoles: roles },
+      deps()
+    )
+    expect((outcome as { data: Record<string, unknown> }).data).toMatchObject({
+      id: 'e1',
+      _created: NOW,
+      _modified: NOW,
+    })
+  })
+
+  test('and a genuinely unexpected field is STILL rejected', async () => {
+    // The fix must not turn a closed schema into an open one.
+    const outcome = await runWritePipeline(
+      {
+        method: 'POST',
+        body: { ...event, sneaky: true },
+        existing: {},
+        exists: false,
+        config: closed,
+        userRoles: roles,
+      },
+      deps()
+    )
+    expect(outcome.status).toBe('rejected')
+    expect((outcome as { reason: string }).reason).toBe('schema')
+    expect(JSON.stringify((outcome as { details: unknown }).details)).toContain('sneaky')
+  })
+
+  test('a caller CANNOT smuggle a stamp past the schema', async () => {
+    // `_created` sent by a caller must not become a way to write a field the
+    // schema would otherwise refuse, nor to forge provenance.
+    const outcome = await runWritePipeline(
+      {
+        method: 'POST',
+        body: { ...event, _created: '1999-01-01T00:00:00.000Z' },
+        existing: {},
+        exists: false,
+        config: closed,
+        userRoles: roles,
+      },
+      deps()
+    )
+    expect(outcome.status).toBe('write')
+    expect((outcome as { data: Record<string, unknown> }).data._created).toBe(NOW)
+  })
+})

@@ -106,6 +106,25 @@ export type WriteOutcome =
     }
 
 /** Strip endpoint-owned envelope fields from a body (§5). */
+/**
+ * Fields the ENDPOINT writes, which a caller neither sends nor declares.
+ *
+ * Distinct from `ENVELOPE_FIELDS`, which a caller might send and which are
+ * stripped from storage. These are stamped by the pipeline itself, so they
+ * exist only *after* any strip — and must be hidden from the caller's schema
+ * rather than removed from the document.
+ */
+export const STAMPED_FIELDS = ['_created', '_modified'] as const
+
+/** A document as its author wrote it: no envelope, no endpoint stamps. */
+export function withoutStamps(
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  const content = { ...data }
+  for (const field of STAMPED_FIELDS) delete content[field]
+  return content
+}
+
 export function stripEnvelope(
   data: Record<string, unknown>
 ): Record<string, unknown> {
@@ -180,17 +199,31 @@ export async function runWritePipeline(
       ? { ...existing, ...body, _created: created, _modified: modified }
       : { ...body, _created: created, _modified: modified }
 
-  // Envelope fields are endpoint-owned: strip before validation so a strict
-  // schema doesn't reject them, and never store them back as content.
+  // Envelope fields are endpoint-owned: strip so they are never stored back as
+  // caller content.
   data = stripEnvelope(data)
 
   if (config.schema) {
+    // Validate the CALLER'S CONTENT, not the document we just stamped.
+    //
+    // This comment used to claim the strip above covered it. It did not:
+    // `stripEnvelope` removes `_id`/`_collection`/`_path`, which a caller might
+    // SEND, but `_created`/`_modified` are written by the two lines above it,
+    // after any strip could reach them. So every closed schema
+    // (`additionalProperties: false`) rejected every write with
+    // "Unexpected _created" — reported by the first consumer to try one
+    // (tosijs-platform#16), and it makes a closed schema unusable, which is
+    // precisely the schema an append-only log wants.
+    //
+    // It also broke a promise that matters more than the feature: the same
+    // JSON Schema validated locally accepted a document the host refused.
+    const content = withoutStamps(data)
     const errors: Array<{ path: string; message: string }> = []
     // `strict: true` — see the identical note in `doc.ts`'s validateWithSchema.
     // Without it tosijs-schema stride-samples arrays past ~100 entries, so the
     // write gate would only spot-check long arrays. Kept in lockstep with
     // `doc.ts` deliberately: a divergence here is a shadow-mode false match.
-    const valid = schemaValidate(data, config.schema, {
+    const valid = schemaValidate(content, config.schema, {
       onError: (path: string, message: string) => {
         errors.push({ path, message })
       },
