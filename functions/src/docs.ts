@@ -36,6 +36,11 @@ import { COLLECTIONS } from './collections'
 import { collectionsFor } from './install/installed'
 import { getRef } from './doc'
 import { Response } from 'express'
+import * as admin from 'firebase-admin'
+import { runWritePipeline, type WriteMethod } from './collections/write-pipeline'
+import { validateWriteSet } from './collections/write-set'
+import { SEQ_COLLECTION } from './collections/sequence'
+import { physicalPath } from './collections/namespace'
 
 const compressResponse = compression()
 
@@ -221,15 +226,202 @@ async function sequencedDelta(
   }
 }
 
+/**
+ * Commit several documents atomically (#15).
+ *
+ * ## The transaction's shape is the whole design
+ *
+ * Firestore requires every READ in a transaction to precede every WRITE. The
+ * write pipeline reads — it needs the stored document for its existence guard
+ * and no-op check, and it calls `isUnique`, which is a query. So the pipelines
+ * all run first, to completion, and only then is anything written. Interleaving
+ * them would look correct and fail the moment a batch contained two documents.
+ *
+ * ## Why all-or-nothing matters here specifically
+ *
+ * A retry heals the documents that did not land. It does not heal the readers
+ * who saw a half-applied commit in between — which for a folded event log is a
+ * state that never legally existed.
+ */
+async function commitWriteSet(
+  req: AuthenticatedRequest,
+  res: Response,
+  collections: CollectionMap,
+  userRoles: Awaited<ReturnType<typeof getUserRoles>>
+): Promise<void> {
+  const decision = validateWriteSet(req.body)
+  if (decision.status === 'refused') {
+    res.status(400).json({ error: 'refused', problems: decision.problems })
+    return
+  }
+  const writes = decision.writes
+
+  // Authorization over the WHOLE SET, before anything is read or written. A
+  // commit that is atomic in its writes but not in its access checks would let
+  // a caller learn which of several collections they may write by watching
+  // which request failed.
+  for (const w of writes) {
+    const cp = collectionPath(w.p)
+    // POST/PUT/PATCH all map to the same `write` access type, so the answer
+    // does not depend on which — but it must be A method: an unnamed upsert
+    // passed through as `undefined` resolves to no access type at all, and
+    // every commit is denied.
+    const access = getMethodAccess(
+      collections,
+      cp,
+      (w.method ?? 'PUT') as never,
+      userRoles
+    )
+    if (access === undefined) {
+      // Opaque, matching /doc: the caller learns the commit failed, not which
+      // collection they were not allowed to touch.
+      res.status(opaqueStatus(userRoles, 403)).json({ error: 'forbidden' })
+      return
+    }
+  }
+
+  const db = admin.firestore()
+  const now = new Date().toJSON()
+
+  try {
+    const results = await db.runTransaction(async (tx) => {
+      const prepared: Array<{
+        w: (typeof writes)[number]
+        ref: FirebaseFirestore.DocumentReference
+        data: Record<string, unknown>
+      }> = []
+
+      // ── PHASE 1: every read. ────────────────────────────────────────────
+      for (const w of writes) {
+        const ref = admin.firestore().doc(physicalPath(w.p))
+        const snapshot = await tx.get(ref)
+        const config = collections[collectionPath(w.p)]
+        // UPSERT when no method was named: dispatch on the existence we just
+        // read, so a first push creates and a retry is a free no-op. Naming a
+        // method keeps the strict guard — POST asserts "not yet", PUT asserts
+        // "already" — which is worth being able to say, just not by default in
+        // a batch where the caller usually cannot know.
+        const method = (w.method ?? (snapshot.exists ? 'PUT' : 'POST')) as WriteMethod
+        const outcome = await runWritePipeline(
+          {
+            method,
+            body: w.data,
+            existing: snapshot.data() ?? {},
+            exists: snapshot.exists,
+            config,
+            userRoles,
+          },
+          {
+            now: () => now,
+            // Uniqueness inside the transaction, so a concurrent writer
+            // cannot slip a colliding document in between the check and the
+            // commit — the exact race a batch makes more likely.
+            isUnique: async (field, value) => {
+              const collection = collectionPath(w.p)
+              const found = await tx.get(
+                admin
+                  .firestore()
+                  .collection(physicalPath(collection))
+                  .where(field, '==', value)
+                  .limit(2)
+              )
+              return found.docs.every((d) => d.ref.path === ref.path)
+            },
+          }
+        )
+
+        if (outcome.status === 'rejected') {
+          // Thrown, not returned: the transaction must not commit a partial
+          // set, and naming the document is safe here because the access gate
+          // above has already passed.
+          throw Object.assign(new Error(outcome.message), {
+            refusal: { p: w.p, reason: outcome.reason, message: outcome.message,
+              details: (outcome as { details?: unknown }).details },
+          })
+        }
+        if (outcome.status === 'noop') continue
+        prepared.push({ w, ref, data: outcome.data })
+      }
+
+      // Sequenced collections take a CONTIGUOUS range from ONE counter read,
+      // so a replica never observes a torn commit: either every document in it
+      // is at or below the cursor, or none is.
+      const counters = new Map<string, { ref: FirebaseFirestore.DocumentReference; next: number }>()
+      for (const { w } of prepared) {
+        const cp = collectionPath(w.p)
+        if (!collections[cp]?.seq || counters.has(cp)) continue
+        const ref = admin.firestore().collection(SEQ_COLLECTION).doc(cp)
+        const snapshot = await tx.get(ref)
+        counters.set(cp, { ref, next: ((snapshot.data()?.value as number) ?? 0) + 1 })
+      }
+
+      // ── PHASE 2: every write. ───────────────────────────────────────────
+      const out: Array<{ p: string; seq?: number }> = []
+      for (const { w, ref, data } of prepared) {
+        const cp = collectionPath(w.p)
+        const counter = counters.get(cp)
+        if (counter) {
+          const seq = counter.next++
+          tx.set(ref, { ...data, _seq: seq })
+          out.push({ p: w.p, seq })
+        } else {
+          tx.set(ref, data)
+          out.push({ p: w.p })
+        }
+      }
+      for (const { ref, next } of counters.values()) {
+        tx.set(ref, { value: next - 1, at: now }, { merge: true })
+      }
+      return out
+    })
+
+    res.json({ status: 'committed', written: results.length, results })
+  } catch (e) {
+    const refusal = (e as { refusal?: Record<string, unknown> }).refusal
+    if (refusal) {
+      res.status(refusal.reason === 'schema' ? 400 : 403).json({
+        error: refusal.reason,
+        message: refusal.message,
+        p: refusal.p,
+        ...(refusal.details ? { details: refusal.details } : {}),
+        note: 'nothing was written — a commit is all or nothing',
+      })
+      return
+    }
+    functions.logger.error('batch commit failed', e)
+    res.status(500).json({ error: 'internal', message: 'commit failed' })
+  }
+}
+
 export const docs = onRequest({}, async (req, res) => {
-  if (optionsResponse(req, res, ['GET'])) {
+  if (optionsResponse(req, res, ['GET', 'POST'])) {
+    return
+  }
+
+  const userRoles = await getUserRoles(req)
+
+  // POST /docs is the ATOMIC multi-document commit (#15). It shares this
+  // route because it is the plural-document endpoint; a separate function
+  // would need its own invoker binding, which is a documented footgun.
+  if (req.method === 'POST') {
+    const paths = Array.isArray(req.body?.writes)
+      ? (req.body.writes as Array<{ p?: string }>).map((w) => String(w?.p ?? ''))
+      : []
+    // Resolve the collection map over EVERY collection the commit touches, not
+    // just the first — a batch may legitimately span two installed libraries.
+    const maps = await Promise.all(
+      [...new Set(paths.map((p) => collectionPath(p)))].map((c) =>
+        collectionsFor(c)
+      )
+    )
+    const merged: CollectionMap = Object.assign({}, ...maps)
+    await commitWriteSet(req as AuthenticatedRequest, res, merged, userRoles)
     return
   }
 
   const path = req.query.p as string
   const limit = Number(req.query.c) || 10
   const fields = req.query.f ? (req.query.f as string).split(',') : false
-  const userRoles = await getUserRoles(req)
   const order = (req.query.o as string) || ''
   // const query = req.body.q as string
   const collections = await collectionsFor(collectionPath(path))
