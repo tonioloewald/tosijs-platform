@@ -29,7 +29,7 @@ import {
   collectionPath,
   getMethodAccess,
   ALL,
-  opaqueStatus,
+  hasPrivilegedRole,
   type CollectionMap,
 } from './collections/access'
 import { COLLECTIONS } from './collections'
@@ -41,6 +41,7 @@ import { runWritePipeline, type WriteMethod } from './collections/write-pipeline
 import { validateWriteSet } from './collections/write-set'
 import { SEQ_COLLECTION } from './collections/sequence'
 import { physicalPath } from './collections/namespace'
+import { fail, notFound } from './errors'
 
 const compressResponse = compression()
 
@@ -251,7 +252,9 @@ async function commitWriteSet(
 ): Promise<void> {
   const decision = validateWriteSet(req.body)
   if (decision.status === 'refused') {
-    res.status(400).json({ error: 'refused', problems: decision.problems })
+    fail(res, 400, 'refused', 'the write set was refused', {
+      problems: decision.problems,
+    })
     return
   }
   const writes = decision.writes
@@ -275,7 +278,11 @@ async function commitWriteSet(
     if (access === undefined) {
       // Opaque, matching /doc: the caller learns the commit failed, not which
       // collection they were not allowed to touch.
-      res.status(opaqueStatus(userRoles, 403)).json({ error: 'forbidden' })
+      if (hasPrivilegedRole(userRoles)) {
+        fail(res, 403, 'forbidden', 'forbidden')
+      } else {
+        notFound(res)
+      }
       return
     }
   }
@@ -379,17 +386,21 @@ async function commitWriteSet(
   } catch (e) {
     const refusal = (e as { refusal?: Record<string, unknown> }).refusal
     if (refusal) {
-      res.status(refusal.reason === 'schema' ? 400 : 403).json({
-        error: refusal.reason,
-        message: refusal.message,
-        p: refusal.p,
-        ...(refusal.details ? { details: refusal.details } : {}),
-        note: 'nothing was written — a commit is all or nothing',
-      })
+      fail(
+        res,
+        refusal.reason === 'schema' ? 400 : 403,
+        refusal.reason as never,
+        refusal.message as string,
+        {
+          p: refusal.p,
+          ...(refusal.details ? { details: refusal.details } : {}),
+          note: 'nothing was written — a commit is all or nothing',
+        }
+      )
       return
     }
     functions.logger.error('batch commit failed', e)
-    res.status(500).json({ error: 'internal', message: 'commit failed' })
+    fail(res, 500, 'internal', 'commit failed')
   }
 }
 
@@ -440,12 +451,9 @@ export const docs = onRequest({}, async (req, res) => {
   if (since !== undefined && access !== undefined) {
     const config = collections[collectionPath(path)]
     if (!config?.seq) {
-      res.status(400).json({
-        error: 'not-sequenced',
-        message:
+      fail(res, 400, 'not-sequenced',
           `"${collectionPath(path)}" does not assign _seq; ` +
-          'declare `envelope: { seq: true }` in its manifest to replicate it',
-      })
+          'declare `envelope: { seq: true }` in its manifest to replicate it')
       return
     }
     const delta = await sequencedDelta(path, Number(since) || 0, limit)
@@ -499,6 +507,10 @@ export const docs = onRequest({}, async (req, res) => {
     // which defeats the point of `/doc` answering 404 for the same resource:
     // GET role/owner-role hid the collection while LIST role announced it.
     // Privileged callers (admin/developer/owner) still get the real 403.
-    res.status(opaqueStatus(userRoles, 403)).send()
+    if (hasPrivilegedRole(userRoles)) {
+      fail(res, 403, 'forbidden', 'forbidden')
+    } else {
+      notFound(res)
+    }
   }
 })

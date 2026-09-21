@@ -69,24 +69,29 @@ describe('getUserRoles: the B1 defects stay fixed (#6)', () => {
   })
 })
 
-describe('docs.ts routes LIST denials through opaqueStatus', () => {
-  test('it imports the shared helper', () => {
-    expect(docsTs).toMatch(/opaqueStatus/)
-  })
-
-  test('the denial branch uses it rather than a bare 403', () => {
-    // The exact regression: `res.status(403).send()` for a non-listable
+describe('docs.ts LIST denials stay opaque', () => {
+  test('the denial branch is privilege-gated, not a bare 403', () => {
+    // The original regression: `res.status(403).send()` for a non-listable
     // collection, which confirmed the collection exists while /doc hid it.
-    expect(docsTs).toContain('opaqueStatus(userRoles, 403)')
+    // Since #20 the opacity is expressed by `notFound` rather than by
+    // `opaqueStatus`, but the property is identical — and the second
+    // assertion is what actually guards it.
+    expect(docsTs).toMatch(/hasPrivilegedRole\(userRoles\)/)
+    expect(docsTs).toMatch(/notFound\(res\)/)
     expect(docsTs).not.toMatch(/res\.status\(403\)/)
   })
 })
 
 describe('doc.ts denial branches do not disclose existence', () => {
   test('the access-gate denial is privilege-gated, not a bare 403', () => {
-    // Non-privileged callers must get 404 there.
+    // Non-privileged callers must get 404 there. Since #20 the body is the
+    // shared shape, so the assertion is on the helper rather than the literal
+    // — `notFound` is the ONLY thing that emits an opaque denial, and it
+    // carries no detail by construction.
     expect(docTs).toMatch(/hasPrivilegedRole\(userRoles\)/)
-    expect(docTs).toMatch(/status\(404\)\.send\('not found'\)/)
+    expect(docTs).toMatch(/notFound\(res\)/)
+    // A bare 404 built by hand would bypass the shared shape.
+    expect(docTs).not.toMatch(/status\(404\)\.send/)
   })
 
   test('the DELETE denial is opaque', () => {
@@ -94,7 +99,10 @@ describe('doc.ts denial branches do not disclose existence', () => {
       docTs.indexOf("case 'DELETE':"),
       docTs.indexOf("case 'POST':")
     )
-    expect(del).toContain('opaqueStatus(userRoles, 403)')
+    // A non-privileged caller gets the opaque shape; only a privileged one is
+    // told the document is simply not there.
+    expect(del).toMatch(/hasPrivilegedRole\(userRoles\)/)
+    expect(del).toMatch(/notFound\(res\)/)
   })
 
   test('no DENIAL response reflects the caller-supplied path back', () => {
@@ -133,7 +141,9 @@ describe('doc.ts denial branches do not disclose existence', () => {
     for (const reason of ['exists', 'missing', 'unattributed']) {
       expect(branch).toContain(`outcome.reason === '${reason}'`)
     }
-    expect(branch).toMatch(/\)\s*\{\s*\n\s*res\.status\(403\)/)
+    // The pipeline's own reason becomes the stable error CODE (#20), so a
+    // client switches on it rather than on the prose.
+    expect(branch).toMatch(/fail\(res, 403, outcome\.reason, outcome\.message\)/)
   })
 
   test('doc.ts is wired to the pipeline and keeps no second write path', () => {

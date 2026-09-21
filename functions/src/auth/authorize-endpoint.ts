@@ -53,6 +53,7 @@ import {
 } from './authorize'
 import { decideMint, hashToken, newTokenSecret } from './token'
 import { consentPage } from './consent-page'
+import { fail } from '../errors'
 
 const db = () => admin.firestore()
 const requests = () => db().collection(AUTHORIZE_COLLECTION)
@@ -119,9 +120,9 @@ export const authorize = onRequest({}, async (request, response: Response) => {
         nowIso: new Date().toJSON(),
       })
       if (decision.status === 'refused') {
-        response
-          .status(400)
-          .json({ status: 'refused', problems: decision.problems })
+        fail(response, 400, 'refused', 'the request was refused', {
+          problems: decision.problems,
+        })
         return
       }
       const ref = requests().doc()
@@ -147,7 +148,7 @@ export const authorize = onRequest({}, async (request, response: Response) => {
         // A token may not approve an authorization: that would let one agent
         // credential manufacture another, which is the loop `decideMint`
         // already refuses directly.
-        response.status(401).send('a signed-in human is required')
+        fail(response, 401, 'unauthenticated', 'a signed-in human is required')
         return
       }
 
@@ -168,7 +169,9 @@ export const authorize = onRequest({}, async (request, response: Response) => {
       const decision = decideApprove(record, user.uid, now.getTime(), now.toJSON())
       if (decision.status === 'refused') {
         functions.logger.warn(`authorize: approve refused (${decision.reason})`)
-        response.status(400).json({ status: 'refused', reason: decision.reason })
+        fail(response, 400, 'refused', `authorization ${decision.reason}`, {
+          reason: decision.reason,
+        })
         return
       }
       await ref.update(decision.patch)
@@ -205,7 +208,7 @@ export const authorize = onRequest({}, async (request, response: Response) => {
         // Specific in the log, generic on the wire — the four reasons together
         // describe the state of a request to somebody who does not hold the
         // verifier for it.
-        response.status(403).json({ status: 'refused' })
+        fail(response, 403, 'refused', 'refused')
         return
       }
 
@@ -224,7 +227,7 @@ export const authorize = onRequest({}, async (request, response: Response) => {
       if (mint.status === 'refused') {
         response
           .status(403)
-          .json({ status: 'refused', problems: mint.problems })
+          .json({ error: 'refused', message: 'the mint was refused', problems: mint.problems })
         return
       }
 
@@ -258,10 +261,10 @@ export const authorize = onRequest({}, async (request, response: Response) => {
       return
     }
 
-    response.status(400).send('unknown action')
+    fail(response, 400, 'bad-request', 'unknown action')
   } catch (e) {
     functions.logger.error(`authorize: ${req.method} failed`, e)
-    response.status(500).send('authorization failed')
+    fail(response, 500, 'internal', 'authorization failed')
   }
 })
 

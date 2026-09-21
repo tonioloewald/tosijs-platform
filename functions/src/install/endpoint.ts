@@ -53,6 +53,7 @@ import {
 } from './manifest'
 import { bumpEpochIn } from './epoch'
 import { sameManifest, ManifestConflict } from './manifest-identity'
+import { fail } from '../errors'
 
 const MANIFESTS = 'manifest'
 const GRANTS = 'grant'
@@ -133,7 +134,7 @@ export const install = onRequest({}, async (request, response: Response) => {
     // Checked here so the HTTP status is honest, and again inside
     // `decideInstall` so the invariant holds for every caller of the decision,
     // including tests and any future non-HTTP path.
-    response.status(403).send('installing requires the `configurator` role')
+    fail(response, 403, 'forbidden', 'installing requires the `configurator` role')
     return
   }
   // The uid comes from the TOKEN, never from the role document. A role
@@ -143,7 +144,7 @@ export const install = onRequest({}, async (request, response: Response) => {
   // The ledger's entire value is saying who did it.
   const user = await getUser(req)
   if (!user) {
-    response.status(401).send('authentication required')
+    fail(response, 401, 'unauthenticated', 'authentication required')
     return
   }
   const uid = user.uid
@@ -173,7 +174,7 @@ export const install = onRequest({}, async (request, response: Response) => {
           | Record<string, CapabilityDeclaration>
           | undefined
         if (!manifest) {
-          response.status(400).send('expected { manifest } in the body')
+          fail(response, 400, 'bad-request', 'expected { manifest } in the body')
           return
         }
 
@@ -181,8 +182,7 @@ export const install = onRequest({}, async (request, response: Response) => {
         // else — `decideInstall` refuses a grant/manifest namespace mismatch.
         const name = (manifest as Manifest).name
         if (typeof name !== 'string') {
-          response.status(400).json({
-            status: 'refused',
+          fail(response, 400, 'refused', 'manifest has no name', {
             problems: ['manifest has no name'],
           })
           return
@@ -205,8 +205,7 @@ export const install = onRequest({}, async (request, response: Response) => {
         })
 
         if (decision.status === 'refused') {
-          response.status(400).json({
-            status: 'refused',
+          fail(response, 400, 'refused', 'the manifest was refused', {
             problems: decision.problems,
           })
           return
@@ -251,12 +250,12 @@ export const install = onRequest({}, async (request, response: Response) => {
       case 'DELETE': {
         const name = String(req.query.name ?? '')
         if (!name) {
-          response.status(400).send('expected ?name=<namespace>')
+          fail(response, 400, 'bad-request', 'expected ?name=<namespace>')
           return
         }
         const existing = await readGrant(name)
         if (!existing) {
-          response.status(404).send(`nothing installed as "${name}"`)
+          fail(response, 404, 'not-found', `nothing installed as "${name}"`)
           return
         }
 
@@ -267,9 +266,9 @@ export const install = onRequest({}, async (request, response: Response) => {
           db().collection(LOG).doc().id
         )
         if (decision.status === 'refused') {
-          response
-            .status(403)
-            .json({ status: 'refused', problems: decision.problems })
+          fail(response, 403, 'refused', 'the revoke was refused', {
+            problems: decision.problems,
+          })
           return
         }
 
@@ -286,15 +285,15 @@ export const install = onRequest({}, async (request, response: Response) => {
       }
 
       default:
-        response.status(400).send('bad request type')
+        fail(response, 400, 'bad-request', 'bad request type')
     }
   } catch (e) {
     if (e instanceof ManifestConflict) {
       functions.logger.warn(`install: ${e.message}`)
-      response.status(409).json({ status: 'conflict', problems: [e.message] })
+      fail(response, 409, 'conflict', e.message)
       return
     }
     functions.logger.error(`install: ${req.method} failed`, e)
-    response.status(500).send('install failed')
+    fail(response, 500, 'internal', 'install failed')
   }
 })

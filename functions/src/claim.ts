@@ -46,6 +46,7 @@ import {
   type ClaimState,
 } from './install/claim'
 import { ROLES } from './collections/roles'
+import { fail } from './errors'
 
 /** `system:claim/current`, split. Not a registered collection — see epoch.ts. */
 const CLAIM = { collection: 'system:claim', doc: 'current' }
@@ -122,7 +123,7 @@ export const claim = onRequest({}, async (request, response: Response) => {
       })
     } catch (e) {
       functions.logger.error('claim: failed to publish nonce', e)
-      response.status(500).send('claim unavailable')
+      fail(response, 500, 'internal', 'claim unavailable')
     }
     return
   }
@@ -130,7 +131,7 @@ export const claim = onRequest({}, async (request, response: Response) => {
   // POST — authenticated, because a claim must be attributable.
   const user = await getUser(req)
   if (!user) {
-    response.status(401).send('authentication required')
+    fail(response, 401, 'unauthenticated', 'authentication required')
     return
   }
 
@@ -207,7 +208,7 @@ export const claim = onRequest({}, async (request, response: Response) => {
       functions.logger.warn(
         `claim refused for ${user.uid}: ${outcome.reason}`
       )
-      response.status(403).send('claim refused')
+      fail(response, 403, 'refused', 'claim refused')
       return
     }
 
@@ -223,6 +224,6 @@ export const claim = onRequest({}, async (request, response: Response) => {
     })
   } catch (e) {
     functions.logger.error('claim: transaction failed', e)
-    response.status(500).send('claim unavailable')
+    fail(response, 500, 'internal', 'claim unavailable')
   }
 })

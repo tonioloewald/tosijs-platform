@@ -39,6 +39,7 @@ import {
   type WriteMethod,
 } from './collections/write-pipeline'
 import { FirestoreStore } from './firestore-store'
+import { fail, notFound } from './errors'
 import { commitWithSeq } from './collections/sequence'
 
 // Schema validation moved into `runWritePipeline` at the 2026-09-16 cutover —
@@ -316,14 +317,14 @@ export const doc = onRequest({}, async (req, res) => {
   const path = req.method.match(/GET|DELETE/) ? req.query.p : req.body.p
 
   if (!path) {
-    res.status(400).send('missing path')
+    fail(res, 400, 'bad-request', 'missing path')
     return
   }
 
   const pathParts = path.split('/')
 
   if (pathParts.length % 2 !== 0) {
-    res.status(400).send('bad path')
+    fail(res, 400, 'bad-request', 'bad path')
     return
   }
 
@@ -332,7 +333,7 @@ export const doc = onRequest({}, async (req, res) => {
   const config = collections[_collectionPath]
 
   if (!config) {
-    res.status(404).send('not found')
+    notFound(res)
     return
   }
 
@@ -348,9 +349,9 @@ export const doc = onRequest({}, async (req, res) => {
     // indistinguishable from a missing one (matches getDoc/opaqueError). Only
     // admin/developer/owner see the real 403.
     if (hasPrivilegedRole(userRoles)) {
-      res.status(403).send('forbidden')
+      fail(res, 403, 'forbidden', 'forbidden')
     } else {
-      res.status(404).send('not found')
+      notFound(res)
     }
     return
   }
@@ -366,17 +367,17 @@ export const doc = onRequest({}, async (req, res) => {
   const store = storeFor(collections)
   const canonicalPath = await store.resolve(path)
   if (canonicalPath instanceof Error) {
-    res.status(404).send(canonicalPath.message)
+    notFound(res)
     return
   }
 
   const ref = await getRef(path, false, collections)
   if (ref instanceof Error) {
-    res.status(404).send(ref.message)
+    notFound(res)
     return
   }
   if (!isDocRef(ref)) {
-    res.status(400).send('invalid path')
+    fail(res, 400, 'bad-request', 'invalid path')
     return
   }
   const doc = await store.get(canonicalPath)
@@ -396,7 +397,7 @@ export const doc = onRequest({}, async (req, res) => {
         })
         // this is exhaustive!
       } else {
-        res.status(404).send('')
+        notFound(res)
       }
       return
 
@@ -418,10 +419,16 @@ export const doc = onRequest({}, async (req, res) => {
           res.status(200).send('')
         } catch (e) {
           functions.logger.error(`Error deleting ${path}:`, e)
-          res.status(500).send('Delete failed')
+          fail(res, 500, 'internal', 'delete failed')
         }
       } else {
-        res.status(opaqueStatus(userRoles, 403)).send(`no doc at ${path}`)
+        // Opaque for a non-privileged caller; the path is not echoed back
+        // either way.
+        if (hasPrivilegedRole(userRoles)) {
+          fail(res, 403, 'missing', 'no such document')
+        } else {
+          notFound(res)
+        }
       }
       break
     case 'POST':
@@ -475,17 +482,17 @@ export const doc = onRequest({}, async (req, res) => {
           outcome.reason === 'missing' ||
           outcome.reason === 'unattributed'
         ) {
-          res.status(403).send(outcome.message)
+          fail(res, 403, outcome.reason, outcome.message)
         } else if (outcome.reason === 'schema') {
-          res
-            .status(400)
-            .json({ error: outcome.message, details: outcome.details })
+          fail(res, 400, 'schema', outcome.message, {
+            details: outcome.details,
+          })
         } else {
           // `validate` and `unique`. Note this now surfaces the validator's own
           // message where the inline path sent a fixed 'validation failed' and
           // discarded it — a deliberate improvement, and the reason a rejected
           // write is finally debuggable.
-          res.status(400).send(outcome.message)
+          fail(res, 400, outcome.reason, outcome.message)
         }
         return
       }
@@ -529,11 +536,11 @@ export const doc = onRequest({}, async (req, res) => {
           .send(`${req.method === 'POST' ? 'created' : 'updated'} ${path}`)
       } catch (e) {
         functions.logger.error(`Error saving ${path}:`, e)
-        res.status(500).send('Save failed')
+        fail(res, 500, 'internal', 'save failed')
       }
       break
     }
     default:
-      res.status(400).send('bad request type')
+      fail(res, 400, 'bad-request', 'bad request type')
   }
 })

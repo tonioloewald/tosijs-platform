@@ -61,7 +61,7 @@ describe('/install is gated on configurator, and refuses before reading', () => 
     expect(endpointTs).toMatch(
       /userRoles\.roles\.includes\(ROLES\.configurator\)/
     )
-    expect(endpointTs).toContain('response.status(403)')
+    expect(endpointTs).toMatch(/fail\(response, 403, 'forbidden'/)
   })
 
   test('the gate precedes every branch', () => {
@@ -118,7 +118,7 @@ describe('the commit is one batch, epoch included', () => {
     // reviewed 1.2.0 can be swapped before the human clicks approve.
     expect(commitFn).toMatch(/sameManifest\(existing\.data\(\)/)
     expect(commitFn).toMatch(/throw new ManifestConflict/)
-    expect(endpointTs).toMatch(/response\.status\(409\)/)
+    expect(endpointTs).toMatch(/fail\(response, 409, 'conflict'/)
   })
 
   test('a null manifest record is guarded, not committed', () => {
@@ -150,7 +150,7 @@ describe('/claim runs the whole ceremony in one transaction', () => {
 
   test('POST requires an authenticated caller', () => {
     expect(claimTs).toMatch(/if \(!user\)/)
-    expect(claimTs).toContain('response.status(401)')
+    expect(claimTs).toMatch(/fail\(response, 401, 'unauthenticated'/)
   })
 })
 
@@ -172,7 +172,7 @@ describe('/claim discloses nothing an anonymous caller should not see', () => {
     // decideClaim distinguishes no-nonce / expired / no-proof / mismatch for
     // the log. Returning those to the client narrates the exact state of the
     // ceremony to somebody who should not be able to observe it.
-    expect(claimTs).toContain("response.status(403).send('claim refused')")
+    expect(claimTs).toMatch(/fail\(response, 403, 'refused', 'claim refused'\)/)
     expect(claimTs).not.toMatch(/send\(.*outcome\.reason/)
     expect(claimTs).toMatch(/logger\.warn\([\s\S]{0,120}outcome\.reason/)
   })

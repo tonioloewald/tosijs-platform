@@ -43,6 +43,7 @@ import {
   MAX_TTL_MS,
   type TokenRecord,
 } from './token'
+import { fail } from '../errors'
 
 const TOKENS = 'token'
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -57,7 +58,7 @@ export const token = onRequest({}, async (request, response: Response) => {
 
   const userRoles = await getUserRoles(req)
   if (!userRoles.roles.length) {
-    response.status(401).send('authentication required')
+    fail(response, 401, 'unauthenticated', 'authentication required')
     return
   }
 
@@ -68,7 +69,7 @@ export const token = onRequest({}, async (request, response: Response) => {
   const user = viaToken ? false : await getUser(req)
   const uid = viaToken ? userRoles.userIds[0] : user ? user.uid : ''
   if (!uid) {
-    response.status(401).send('authentication required')
+    fail(response, 401, 'unauthenticated', 'authentication required')
     return
   }
 
@@ -109,9 +110,9 @@ export const token = onRequest({}, async (request, response: Response) => {
         })
 
         if (decision.status === 'refused') {
-          response
-            .status(403)
-            .json({ status: 'refused', problems: decision.problems })
+          fail(response, 403, 'refused', 'the mint was refused', {
+            problems: decision.problems,
+          })
           return
         }
 
@@ -147,7 +148,7 @@ export const token = onRequest({}, async (request, response: Response) => {
       case 'DELETE': {
         const id = String(req.query.id ?? '')
         if (!id) {
-          response.status(400).send('expected ?id=<tokenId>')
+          fail(response, 400, 'bad-request', 'expected ?id=<tokenId>')
           return
         }
         const ref = db().collection(TOKENS).doc(id)
@@ -155,7 +156,7 @@ export const token = onRequest({}, async (request, response: Response) => {
         // Scoped to the caller's own, and OPAQUE about anyone else's: a 403
         // for a token belonging to somebody else would confirm the id exists.
         if (!existing.exists || (existing.data() as TokenRecord).principalUid !== uid) {
-          response.status(404).send('no such token')
+          fail(response, 404, 'not-found', 'no such token')
           return
         }
         // Tombstoned, not deleted — the record of which agent made which
@@ -171,11 +172,11 @@ export const token = onRequest({}, async (request, response: Response) => {
       }
 
       default:
-        response.status(400).send('bad request type')
+        fail(response, 400, 'bad-request', 'bad request type')
     }
   } catch (e) {
     functions.logger.error(`token: ${req.method} failed`, e)
-    response.status(500).send('token request failed')
+    fail(response, 500, 'internal', 'token request failed')
   }
 })
 
