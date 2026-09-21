@@ -39,6 +39,7 @@ import {
   type WriteMethod,
 } from './collections/write-pipeline'
 import { FirestoreStore } from './firestore-store'
+import { commitWithSeq } from './collections/sequence'
 
 // Schema validation moved into `runWritePipeline` at the 2026-09-16 cutover —
 // including the `strict: true` flag that stops tosijs-schema stride-sampling
@@ -496,7 +497,17 @@ export const doc = onRequest({}, async (req, res) => {
 
       const data = outcome.data
       try {
-        await store.set(canonicalPath, data)
+        if (config.seq) {
+          // Sequenced collections commit through a transaction that also
+          // advances the counter (#14). Assigned HERE rather than in the
+          // pipeline for two reasons: the pipeline is pure and has no I/O, and
+          // it decides `noop` only after validation — so a sequence assigned
+          // earlier would be burnt on writes that never happen, leaving gaps a
+          // replica cannot distinguish from missed events.
+          await commitWithSeq(_collectionPath, canonicalPath, data, ref)
+        } else {
+          await store.set(canonicalPath, data)
+        }
         // Post-commit side effects (cache invalidation, etc). Deliberately
         // after the write — see CollectionConfig.afterWrite. Failures are
         // logged, never surfaced: the write already succeeded, and turning a

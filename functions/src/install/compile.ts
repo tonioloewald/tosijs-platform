@@ -273,6 +273,11 @@ export function compileCollection(
   // write pipeline already calls. Order matters: derive first (it may create the
   // field a version bump compares), then the version bump, which the caller can
   // never influence because it runs last and overwrites.
+  // `envelope.seq` is a flag the COMMIT path reads, not a transform: the
+  // sequence is assigned inside the same transaction as the document write, so
+  // nothing the pipeline could compute would be atomic with it.
+  if (collection.envelope?.seq === true) config.seq = true
+
   const derive = collection.derive?.length
     ? compileDerive(collection.derive, {
         now: options.now ?? (() => new Date().toJSON()),

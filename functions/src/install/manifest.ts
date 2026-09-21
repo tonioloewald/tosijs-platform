@@ -106,7 +106,21 @@ export interface InstalledCollection {
    * entire revision history (2026-09-06). A caller cannot send the field, so
    * there is no branch left to forget.
    */
-  envelope?: { version?: { bumpOn: string[] } }
+  envelope?: {
+    version?: { bumpOn: string[] }
+    /**
+     * Assign a monotonic per-collection `_seq` on commit, so a replica can
+     * resume from a cursor (#14).
+     *
+     * Opt-in because a total order SERIALISES writes to the collection —
+     * roughly one per second, through a single counter document. That is what
+     * a total order is, not an implementation detail to engineer away:
+     * sharding the counter would restore throughput and destroy the ordering.
+     * Timestamps stay automatic and free everywhere; a sequence is a choice,
+     * and it should be made by someone who has seen the number.
+     */
+    seq?: boolean
+  }
   /**
    * An ARRAY, not a role-keyed object. Object key order decided precedence
    * under the old engine, and a manifest's key order comes from a file nobody
@@ -392,6 +406,15 @@ export function validateManifest(
           `${where}.unique: v1 supports one field per collection; ` +
             'a composite constraint needs an index, which is a deployment'
         )
+      }
+    }
+
+    if (c.envelope !== undefined) {
+      const env = c.envelope as Record<string, unknown>
+      if (env === null || typeof env !== 'object') {
+        fail(`${where}.envelope: must be an object`)
+      } else if (env.seq !== undefined && typeof env.seq !== 'boolean') {
+        fail(`${where}.envelope.seq: must be true or false`)
       }
     }
 

@@ -114,7 +114,7 @@ export type WriteOutcome =
  * exist only *after* any strip — and must be hidden from the caller's schema
  * rather than removed from the document.
  */
-export const STAMPED_FIELDS = ['_created', '_modified'] as const
+export const STAMPED_FIELDS = ['_created', '_modified', '_seq'] as const
 
 /** A document as its author wrote it: no envelope, no endpoint stamps. */
 export function withoutStamps(
@@ -144,9 +144,7 @@ export function isUnchanged(
 ): boolean {
   if (prev == null || Object.keys(prev).length === 0) return false
   const strip = (o: Record<string, unknown>) => {
-    const c = stripEnvelope(o)
-    delete c._created
-    delete c._modified
+    const c = withoutStamps(stripEnvelope(o))
     return c
   }
   return stableStringify(strip(next)) === stableStringify(strip(prev))

@@ -14,7 +14,12 @@
 // @ts-ignore - bun:test types intermittently available
 import { describe, test, expect } from 'bun:test'
 
-import { compileManifest, compileVisibility, compileGrant } from './compile'
+import {
+  compileManifest,
+  compileVisibility,
+  compileGrant,
+  compileCollection,
+} from './compile'
 import type { Manifest } from './manifest'
 import { validateManifest } from './manifest'
 import { unenforcedKeywords } from 'tosijs-schema'
@@ -274,5 +279,40 @@ describe('lte/gte — added for capability ceilings (#11)', () => {
     expect(
       compileVisibility({ field: 'x', op: 'sorta-lte' } as never)({ x: 1 })
     ).toBe(false)
+  })
+})
+
+describe('envelope.seq compiles to the commit-path flag (#14)', () => {
+  test('declared true, it is set', () => {
+    const c = compileCollection({
+      schema: { type: 'object' },
+      envelope: { seq: true },
+      access: [{ role: 'author', read: 'ALL' }],
+    } as never)
+    expect(c.seq).toBe(true)
+  })
+
+  test('absent or false, it is not — a sequence is opt-IN', () => {
+    // A total order serialises writes to the collection. Defaulting it on
+    // would put every collection behind one counter document without anyone
+    // choosing that.
+    for (const envelope of [undefined, { seq: false }] as never[]) {
+      const c = compileCollection({
+        schema: { type: 'object' },
+        envelope,
+        access: [{ role: 'author', read: 'ALL' }],
+      } as never)
+      expect(c.seq).toBeUndefined()
+    }
+  })
+
+  test('it composes with envelope.version rather than replacing it', () => {
+    const c = compileCollection({
+      schema: { type: 'object' },
+      envelope: { seq: true, version: { bumpOn: ['source'] } },
+      access: [{ role: 'author', read: 'ALL' }],
+    } as never)
+    expect(c.seq).toBe(true)
+    expect(typeof c.validate).toBe('function')
   })
 })

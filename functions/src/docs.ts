@@ -181,6 +181,46 @@ export const getDocs = async (
   }
 }
 
+/**
+ * The delta query (#14): every document with `_seq > since`, in `_seq` order.
+ *
+ * Separate from `getRecords` because that appends `orderBy('_created desc')`
+ * unconditionally, which is the wrong order here and would need a composite
+ * index besides. A single-field ascending order on `_seq` uses the automatic
+ * index, so a consumer needs no index deploy to start replicating.
+ *
+ * `more` is returned rather than left to the client to infer. A server may cap
+ * `c` below what was asked, so a short page does NOT mean the last page — and
+ * a client that assumes it does stops replicating early and silently. That is
+ * the same class of bug as a filtered query truncating at its limit (D7).
+ */
+async function sequencedDelta(
+  path: string,
+  since: number,
+  limit: number
+): Promise<{ rows: Record<string, unknown>[]; cursor: number; more: boolean }> {
+  const ref = await getRef(path, true)
+  if (ref instanceof Error) return { rows: [], cursor: since, more: false }
+  // One extra row, purely to answer `more` honestly without a second query.
+  const snapshot = await (ref as FirebaseFirestore.Query)
+    .where('_seq', '>', since)
+    .orderBy('_seq', 'asc')
+    .limit(limit + 1)
+    .get()
+  const docs = snapshot.docs.slice(0, limit)
+  const rows: Record<string, unknown>[] = docs.map((d) => ({
+    ...d.data(),
+    _id: d.id,
+  }))
+  return {
+    rows,
+    cursor: rows.length
+      ? (rows[rows.length - 1]._seq as number)
+      : since,
+    more: snapshot.docs.length > limit,
+  }
+}
+
 export const docs = onRequest({}, async (req, res) => {
   if (optionsResponse(req, res, ['GET'])) {
     return
@@ -200,6 +240,40 @@ export const docs = onRequest({}, async (req, res) => {
     userRoles,
     fields
   )
+
+  // The delta cursor (#14). Only for a collection that is actually sequenced —
+  // otherwise `_seq > since` silently matches nothing, and "no new events" and
+  // "this collection has no sequence" would look identical to a replica.
+  const since = req.query.since
+  if (since !== undefined && access !== undefined) {
+    const config = collections[collectionPath(path)]
+    if (!config?.seq) {
+      res.status(400).json({
+        error: 'not-sequenced',
+        message:
+          `"${collectionPath(path)}" does not assign _seq; ` +
+          'declare `envelope: { seq: true }` in its manifest to replicate it',
+      })
+      return
+    }
+    const delta = await sequencedDelta(path, Number(since) || 0, limit)
+    // Row visibility still applies — a delta must not become a way around the
+    // filter a plain LIST would have run.
+    const rows =
+      access === ALL
+        ? delta.rows
+        : (
+            await Promise.all(
+              delta.rows.map(async (row) =>
+                (await access(row, userRoles)) instanceof Error ? null : row
+              )
+            )
+          ).filter(Boolean)
+    compressResponse(req, res, () => {
+      res.json({ rows, cursor: delta.cursor, more: delta.more })
+    })
+    return
+  }
 
   if (access === ALL) {
     const found = await getRecords(

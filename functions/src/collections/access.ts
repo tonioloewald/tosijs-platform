@@ -188,6 +188,16 @@ export interface AccessConfig {
 }
 
 export interface CollectionConfig {
+  /**
+   * Assign a monotonic per-collection `_seq` on commit (#14).
+   *
+   * Opt-in, because a total order SERIALISES writes to the collection — that
+   * is what "total order" means, not a Firestore quirk — and a collection that
+   * nobody replicates should not pay for one. Timestamps stay automatic and
+   * free for every collection; a sequence is a choice.
+   */
+  seq?: boolean
+
   schema?: Base<any> // tosijs-schema for automatic validation
   unique?: string[]
   tagFields?: string[] // fields that support array-contains queries via tagField=<value> syntax

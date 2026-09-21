@@ -404,3 +404,34 @@ describe('unenforcedCapabilities', () => {
     ).toEqual(['virta:files'])
   })
 })
+
+describe('envelope.seq (#14)', () => {
+  const env = (envelope: unknown) =>
+    validateManifest(
+      ok({
+        collections: {
+          'virta:event': {
+            schema: { type: 'object' },
+            envelope,
+            access: [{ role: ROLES.author, read: 'ALL' }],
+          },
+        },
+      } as never),
+      opts
+    ).map((e) => e.message)
+
+  test('a boolean is accepted', () => {
+    expect(env({ seq: true })).toEqual([])
+    expect(env({ seq: false })).toEqual([])
+  })
+
+  test('a non-boolean is refused rather than coerced', () => {
+    // `seq: "yes"` silently meaning false would leave a consumer replicating
+    // a collection that assigns no sequence, which reads as "no new events".
+    expect(env({ seq: 'yes' }).join()).toContain('must be true or false')
+  })
+
+  test('it composes with envelope.version', () => {
+    expect(env({ seq: true, version: { bumpOn: ['x'] } })).toEqual([])
+  })
+})
