@@ -64,6 +64,8 @@ import {
   run,
   capture,
   parseArgs,
+  PLATFORM_FUNCTIONS,
+  SITE_FUNCTIONS,
 } from './sandbox-lib.js'
 
 /**
@@ -107,6 +109,13 @@ const BILLING = val('billing')
 // Valid ids here are nam5/nam7/eur3 or regional ones like us-central1.
 const LOCATION = val('location') ?? 'nam5'
 /**
+ * `--profile platform` provisions a CONSUMER host: the platform routes only,
+ * no site secrets, no blog seed. The default stays `full`, because
+ * loewald.com's own sandboxes need the whole thing (#21).
+ */
+const PROFILE = val('profile') ?? 'full'
+const PLATFORM_ONLY = PROFILE === 'platform'
+/**
  * Cloud Run region for the deployed functions — NOT `LOCATION`, which is the
  * Firestore multi-region (`nam5`). They are different namespaces that both get
  * called "location", and using the Firestore one here 404s every service, which
@@ -122,6 +131,13 @@ async function main() {
   // the report reads as "the provisioner broke"; reported first, it reads as
   // what it is (#17).
   requireGcloud()
+  if (PLATFORM_ONLY) {
+    console.log(
+      '\nPROFILE: platform — the platform routes only, no site secrets, no seed.\n' +
+        `  deploying: ${PLATFORM_FUNCTIONS.join(', ')}\n` +
+        `  NOT deploying: ${SITE_FUNCTIONS.join(', ')}\n`
+    )
+  }
 
   // --- Alias registration -------------------------------------------------
   const rc = readRc()
@@ -284,6 +300,11 @@ async function main() {
   // copying a live billable credential into a throwaway project. Put a real key
   // in by hand if you ever need /gen here.
   step('3c', 'Placeholder secrets for defineSecret()')
+  if (PLATFORM_ONLY) {
+    console.log(
+      '   skipped — they exist only for `gen`, which a platform host does not deploy'
+    )
+  }
   for (const secret of ['gemini-api-key', 'chatgpt-api-key']) {
     if (dry) {
       console.log(`   [dry-run] ensure secret ${secret}`)
@@ -378,7 +399,21 @@ async function main() {
   // policy"), which reads as a failed deploy and stops the script one step from
   // the finish line. The policy is also worth having: it expires old container
   // images that otherwise accrue a small monthly bill forever.
-  run(`${FIREBASE} deploy -P ${ALIAS} --force`, { dryRun: dry })
+  if (PLATFORM_ONLY) {
+    // The site's functions are never created, so a consumer's function list
+    // contains only what they are responsible for. Hosting still deploys: the
+    // consent page for `/authorize` is served by the function, but a signed-in
+    // browser session — needed for the claim — comes from the hosted app.
+    const only = [
+      ...PLATFORM_FUNCTIONS.map((f) => `functions:${f}`),
+      'hosting',
+      'firestore',
+      'storage',
+    ].join(',')
+    run(`${FIREBASE} deploy -P ${ALIAS} --only ${only} --force`, { dryRun: dry })
+  } else {
+    run(`${FIREBASE} deploy -P ${ALIAS} --force`, { dryRun: dry })
+  }
 
   // --- 4b. Email/password sign-in, the scripted-test affordance ------------
   //
@@ -432,7 +467,15 @@ async function main() {
 
   // --- 6. Seed ------------------------------------------------------------
   step(6, 'Seed from initial_state/')
-  run(`bun scripts/seed-production.js --project ${projectId}`, { dryRun: dry })
+  if (PLATFORM_ONLY) {
+    // A consumer's host starts EMPTY. The platform needs no seeded documents:
+    // roles arrive through the claim ceremony, and collections arrive through
+    // an install. Seeding a blog's content here would be somebody else's data
+    // in their database.
+    console.log('   skipped — a platform host starts empty; claim it, then install')
+  } else {
+    run(`bun scripts/seed-production.js --project ${projectId}`, { dryRun: dry })
+  }
 
   // --- The manual step ----------------------------------------------------
   console.log('\n' + '='.repeat(70))
@@ -482,7 +525,9 @@ const PUBLIC_FUNCTIONS = [
 
 async function grantPublicInvokers(projectId, dry) {
   const base = `https://run.googleapis.com/v2/projects/${projectId}/locations/${FUNCTIONS_REGION}/services`
-  for (const name of PUBLIC_FUNCTIONS) {
+  for (const name of PLATFORM_ONLY
+    ? PUBLIC_FUNCTIONS.filter((f) => PLATFORM_FUNCTIONS.includes(f))
+    : PUBLIC_FUNCTIONS) {
     // Cloud Run service names are lowercase, so a camelCase export deploys as
     // `prefetchdata`, not `prefetchData`. Looking it up under the export name
     // finds nothing and reports "not deployed" — which is how this very check,

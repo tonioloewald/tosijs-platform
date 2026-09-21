@@ -40,6 +40,44 @@ export const writeRc = (rc) =>
     JSON.stringify(rc, null, 2) + '\n'
   )
 
+/**
+ * The PLATFORM surface — what a consumer host actually needs (#21).
+ *
+ * A consumer provisioning a host for their own library was getting all of
+ * loewald.com besides: fourteen public Cloud Run services, two placeholder
+ * secrets for an LLM endpoint they never asked for, and a blog's seed data.
+ * None of it broke anything; all of it is theirs to wonder about, and a
+ * function list a host's owner cannot account for is a security surface they
+ * cannot reason about.
+ *
+ * `hello` is in the list deliberately, despite reading like site furniture: it
+ * is the only "what roles do I have?" probe, and #19 established that an agent
+ * has to be able to ask. `stored` is NOT, for the same reason it is excluded
+ * from the invoker bindings — storage.rules still allows world reads on
+ * user-scoped paths (#3).
+ */
+export const PLATFORM_FUNCTIONS = [
+  'doc',
+  'docs',
+  'user',
+  'hello',
+  'claim',
+  'install',
+  'token',
+  'authorize',
+]
+
+/** Everything else this repo deploys — loewald.com's own surface. */
+export const SITE_FUNCTIONS = [
+  'prefetch',
+  'prefetchData',
+  'sitemap',
+  'esm',
+  'cachedQuery',
+  'stored',
+  'gen',
+]
+
 /** The production project id. Anything equal to this is off limits, always. */
 export const productionProjectId = () => readRc().projects?.default ?? null
 
