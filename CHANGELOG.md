@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.2.0-beta.2 — 2026-09-21
+
+Everything the first consumer found. Eight issues, all filed within a day of
+picking up beta.1, all closed. See [BETA.md](BETA.md) for the current guide.
+
+Verified end to end on the consumer's own host, not only in tests: **94 live
+assertions across six ceremonies** (`scripts/verify-*.js`), re-run after every
+change. 663 functions + 655 root unit tests.
+
+### Fixed
+
+- **A closed schema rejected every write** (#16 — the blocker). The pipeline
+  stamped `_created`/`_modified` and then validated the *stamped* document
+  against the caller's schema, so `additionalProperties: false` failed with
+  "Unexpected _created" — which is the schema an append-only log wants. Worse
+  than the missing feature: the same JSON Schema validated locally accepted a
+  document the host refused, so a consumer could not pre-check their own
+  writes. The comment above the bug claimed the strip already covered it.
+- **`derive: { op: 'principal' }` was compiled with `principal: {}`
+  hardcoded**, so it produced `''` for every caller — a declared feature
+  wired to nothing. Found while fixing #18, which was the same shape of
+  defect.
+- **`_by` was promised and never stamped** (#18). BETA.md said "the token is
+  the provenance"; nothing was written, so provenance lived only in a field
+  the writer chose to populate.
+
+### Added
+
+- **`_seq` and a delta cursor** (#14): `GET /docs?p=…&since=<seq>&c=<n>` →
+  `{rows, cursor, more}`. Opt in with `envelope: { seq: true }`. Timestamps
+  cannot order a resume — two writes in a millisecond are indistinguishable,
+  and the stamps come from the function instance's clock, which drifts — so
+  a counter, read and written in the same transaction as the document. A
+  total order serialises writes to the collection at roughly one per second;
+  that is what a total order *is*, hence opt-in.
+- **Atomic multi-document commit** (#15): `POST /docs {writes:[…]}`,
+  all-or-nothing, one transaction. An unnamed `method` means upsert. A
+  sequenced commit takes a contiguous range, so a replica never sees half of
+  one.
+- **`_by` provenance on every write**: `{uid, role, name, token?, label?}`,
+  unforgeable, hidden from the caller's schema. Every token a person mints
+  shares their uid, so the label is what distinguishes one agent from
+  another — and from its human.
+- **`envelope: { requireAttribution: true }`** refuses a write the endpoint
+  cannot attribute.
+- **One error shape** (#20): `{error: "<stable code>", message, details?}`
+  across the platform routes. Clients switch on the code; the prose is free
+  to change. Opaque 404s stay opaque.
+- **`GET /install?name=<ns>`** (#19), answerable by any authenticated
+  principal including a token — an agent could not previously ask whether its
+  own library was installed.
+- **`provision-sandbox.js --profile platform`** (#21): a consumer host gets
+  the platform routes only — no site functions, no LLM secrets, no blog seed.
+- The provisioner enables email/password sign-in, and reports a gcloud
+  failure before printing anything, naming `CLOUDSDK_PYTHON` (#17).
+
 ## 0.2.0-beta.1 — 2026-09-20
 
 The first release a third party can install onto. See [BETA.md](BETA.md) for the

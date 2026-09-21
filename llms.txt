@@ -5,9 +5,10 @@
 > no function deployment, no code review, no redeploy. Agents authenticate with
 > scoped tokens that attenuate their human's authority and die when it does.
 
-Status: **0.2.0-beta.1**, cut 2026-09-20 to be broken. Verified end to end against
-a real deployed host on every change (64 assertions, `scripts/verify-*.js`), which
-is not the same as *used*.
+Status: **0.2.0-beta.2**, 2026-09-21. beta.1 was cut to be broken; the first
+consumer broke it within a day and filed eight issues, all now closed. Verified
+against a real deployed host on every change — 94 assertions across six
+ceremonies (`scripts/verify-*.js`).
 
 ## Start here
 
@@ -18,7 +19,7 @@ is not the same as *used*.
   proposing changes to RBAC, the access model, or the endpoint surface — several of
   those questions are settled and the reasoning matters more than the conclusion.
 
-## The five things that will save you the most time
+## The seven things that will save you the most time
 
 1. **A `404` usually means "not allowed", not "not there".** Denials are opaque to
    non-privileged callers on purpose — a protected document and a missing one must be
@@ -27,21 +28,30 @@ is not the same as *used*.
 2. **Collections must be namespaced**: `yourlib:thing`. A bare name is the platform's,
    always. The separator is `:` — `/` already separates sub-collections.
 3. **Mutating requests put the path in the BODY.** `GET`/`DELETE` use `?p=`;
-   `POST`/`PUT`/`PATCH` send `{"p": "...", "data": {...}}`.
+   `POST`/`PUT`/`PATCH` send `{"p": "...", "data": {...}}`. `POST /docs
+   {writes:[…]}` commits several documents atomically.
 4. **`access` is an array, not a role-keyed object.** Grants join as a lattice, so
    order is meaningless and holding more roles never grants less.
 5. **A fresh function may answer `401` with HTML from *Google*, not from us.** It needs
    an `allUsers` run.invoker binding. Ours carry CORS and rate-limit headers; that is
    the tell. `provision-sandbox.js` grants them.
+6. **Errors are `{error: "<code>", message, details?}`.** Switch on the code; the
+   prose is free to change. Opaque `404`s carry no detail, by design.
+7. **Endpoint-managed fields are hidden from your schema** — `_created`,
+   `_modified`, `_seq`, `_by` — so `additionalProperties: false` works.
 
 ## Endpoints
 
 - `/doc` — single document CRUD. `GET`/`DELETE` take `?p=collection/id`;
   `POST`/`PUT`/`PATCH` take `{p, data}` in the body. `?p=coll/field=value` resolves
   by a field in `unique` or `tagFields`.
-- `/docs` — collection queries. `?p=` collection, `c=` limit, `f=` fields, `o=` order.
+- `/docs` — collection queries (`?p=`, `c=` limit, `f=` fields, `o=` order), the
+  delta cursor (`since=<seq>` → `{rows, cursor, more}`), and `POST {writes:[…]}`
+  for an atomic multi-document commit.
 - `/install` — `POST {manifest, approving?}` installs or upgrades; `GET` lists;
   `DELETE ?name=` revokes. Requires `configurator`, and specifically **not** `owner`.
+  `GET ?name=<ns>` answers `{name, version, status}` to any authenticated
+  principal, tokens included.
 - `/claim` — `GET` publishes a nonce; write it into the datastore by hand to prove
   ownership, then `POST` (authenticated) to mint the first `configurator`.
 - `/token` — `POST` mints a scoped token, `GET` lists your own, `DELETE ?id=` revokes.
@@ -61,6 +71,10 @@ is not the same as *used*.
 - **Revoking never drops rows.** Collections become unreachable; documents stay.
 - **v1 is declarative only.** A `functions` key is a hard failure, not an ignored
   field. Stored ajs is install v2.
+- **`envelope: { seq: true }`** assigns a monotonic `_seq` so a replica can resume.
+  Opt-in: a total order serialises writes to that collection at roughly one per
+  second, through one counter document. **`requireAttribution: true`** refuses a
+  write the endpoint cannot attribute.
 - **Capabilities are shape-only so far.** The format is settled and validated, but
   nothing consults `grant.capabilities` yet. The install response reports
   `unenforced: [...]` so you are never told you hold a power you do not.
@@ -81,8 +95,10 @@ secret is shown once and never stored, only hashed.
 - `functions/src/install/`, `functions/src/auth/` — install and auth, each split into
   pure decisions plus a thin HTTP handler. If it is a judgement, it belongs in the
   pure half where it runs without a cloud.
-- `scripts/verify-install.js`, `verify-token.js`, `verify-authorize.js` — acceptance
-  against a live host. `--alias <name>` targets a project.
+- `scripts/verify-*.js` — acceptance against a LIVE host, six ceremonies:
+  install, token, authorize, sequence, batch, provenance. `--alias <name>`
+  targets a project. Run these first on a new host; if they pass, anything you
+  hit afterwards is your manifest or our design, not a broken deploy.
 - `src/` — client code, which is **leaving**. Do not build on it; see ROADMAP.md.
 
 ## Where to push hardest

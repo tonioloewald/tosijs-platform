@@ -18,9 +18,14 @@ git clone https://github.com/tonioloewald/tosijs-platform
 cd tosijs-platform && bun install
 
 # Dry run first — it changes nothing and reports exactly what it would do.
-bun scripts/provision-sandbox.js --alias mine --project <your-project-id>
-bun scripts/provision-sandbox.js --alias mine --apply
+bun scripts/provision-sandbox.js --alias mine --project <id> --profile platform
+bun scripts/provision-sandbox.js --alias mine --profile platform --apply
 ```
+
+`--profile platform` gives you the platform routes and nothing else — no
+loewald.com functions, no LLM secrets, no seeded blog content. **Your host
+starts empty**: roles arrive through the claim ceremony, collections through an
+install. Drop the flag only if you want this repo's own site too.
 
 This links billing, enables the APIs, creates Firestore and a web app,
 generates the client config, deploys, grants the public invoker bindings, and
@@ -173,6 +178,49 @@ stay. A re-install restores the same library to the same data.
 
 ---
 
+## 4b. Replicating a collection, and committing several documents at once
+
+Two things an event log needs, both opt-in per collection:
+
+```json
+"envelope": { "seq": true, "requireAttribution": true }
+```
+
+`seq` assigns a monotonic `_seq` at commit, so a replica can resume:
+
+```bash
+curl '.../docs?p=virta:event&since=42&c=100'
+# → { "rows": [...], "cursor": 57, "more": true }
+```
+
+`more` is returned rather than left for you to infer — a server may cap `c`
+below what you asked, so **a short page is not the last page.** Timestamps
+cannot do this job: two writes in one millisecond are indistinguishable, and
+the stamps come from the function instance's clock, which drifts between
+instances.
+
+**The cost, so you can decide rather than discover it:** a total order
+serialises writes to that collection, roughly one per second, through a single
+counter document. That is what a total order *is* — sharding the counter would
+restore throughput and destroy the ordering. An append-only log with one writer
+is comfortably inside it; a bulk import is not. Hence opt-in.
+
+Several documents, atomically:
+
+```bash
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"writes":[{"p":"virta:event/e1","data":{...}},{"p":"virta:event/e2","data":{...}}]}' \
+  .../docs
+# → { "status": "committed", "written": 2, "results": [{"p":"…","seq":58}, …] }
+```
+
+All or nothing: one invalid document and **nothing** is written, not even the
+valid ones beside it, and the sequence does not advance. Omit `method` and each
+write is an **upsert** — create if absent, replace if present, no-op if
+identical — which is an idempotent append with no client bookkeeping. Naming
+`POST` or `PUT` keeps the strict guard. Max 100 per commit; the same document
+twice in one commit is refused.
+
 ## 5. Use it
 
 ```bash
@@ -214,7 +262,9 @@ document`, and `400` with schema details all say what they mean.
 | `/docs?p=…` | `c` limit (default 10), `f` comma-separated fields, `o` order — `o=date(desc)` |
 | `field=value` lookups | `/doc?p=virta:task/slug=ship-it` — only for fields in `unique` or `tagFields` |
 | sub-collections | `virta:task/abc/comment/xyz` works; declaring one in a manifest does not yet |
-| reserved fields | `_id`, `_collection`, `_path` are stripped from writes; `_created`/`_modified` are endpoint-managed. Do not put them in your schema expecting to set them. |
+| reserved fields | `_id`, `_collection`, `_path` are stripped from writes. `_created`, `_modified`, `_seq`, `_by` are endpoint-managed — stamped on the document and **hidden from your schema**, so `additionalProperties: false` works. You cannot set them. |
+| provenance | every write carries `_by: {uid, role, name, token?, label?}`. Unforgeable. All of one person's agents share a `uid` — the token **label** is what tells them apart, and from their human. |
+| errors | `{"error": "<stable code>", "message": "<prose>", "details"?: […]}`. Switch on `error`; the prose may be reworded. Opaque `404`s carry no detail by design. |
 | rate limit | 100 requests/minute per IP, `429` with `Retry-After`. A bulk import needs to pace itself. |
 | unchanged writes | a PUT whose content matches returns `200 unchanged …` and does **not** re-stamp `_modified` |
 
