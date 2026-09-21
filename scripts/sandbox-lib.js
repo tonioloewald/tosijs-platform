@@ -78,6 +78,62 @@ export const SITE_FUNCTIONS = [
   'gen',
 ]
 
+/**
+ * A host records WHOSE it is, at `system:host/identity` (#23).
+ *
+ * `resolveSandbox()` only ever asked "is this production?". That cannot tell a
+ * throwaway project the maintainer made to test on from a host somebody else
+ * is using — and the difference matters enormously, because the verify scripts
+ * mint privileged principals, delete role documents and install libraries.
+ *
+ * Run against a consumer's host, `verify-install.js` deleted that consumer's
+ * `configurator` role document: it mints `sandbox-installer@example.test`,
+ * which is the SAME deterministic identity the consumer had used to claim,
+ * because `sandbox-token.js` is the documented way to get an ID token. The
+ * verifier could not tell the consumer's principal from its own.
+ *
+ * `system:host` is unregistered, so deny-default keeps it out of /doc.
+ */
+export const HOST_IDENTITY = { collection: 'system:host', doc: 'identity' }
+
+export const readHostPurpose = async (projectId) => {
+  const res = await fetch(
+    `https://firestore.googleapis.com/v1/projects/${projectId}` +
+      `/databases/(default)/documents/${encodeURIComponent(HOST_IDENTITY.collection)}/${HOST_IDENTITY.doc}`,
+    { headers: { Authorization: `Bearer ${token()}` } }
+  )
+  if (!res.ok) return null
+  const json = await res.json().catch(() => null)
+  return json?.fields?.purpose?.stringValue ?? null
+}
+
+/**
+ * Refuse to run a destructive probe against somebody else's host.
+ *
+ * Fails CLOSED on an UNMARKED host too: every host provisioned before this
+ * existed is unmarked, and one of them turned out to be a consumer's. "I could
+ * not tell" must not read as "go ahead".
+ */
+export const assertProbeAllowed = async (projectId, argv = process.argv) => {
+  if (argv.includes('--i-own-this-host')) return
+  const purpose = await readHostPurpose(projectId)
+  if (purpose === 'platform-sandbox') return
+  console.error(
+    `\nRefusing to run against ${projectId}.\n\n` +
+      (purpose === 'consumer'
+        ? '  This host is marked `consumer` — somebody is using it. These\n' +
+          '  scripts mint privileged principals, delete role documents and\n' +
+          '  install libraries.\n'
+        : '  This host carries no `system:host/identity` marker, so it cannot be\n' +
+          '  shown to be a throwaway. Unmarked fails closed: every host made\n' +
+          '  before the marker existed is unmarked, and one of them was a\n' +
+          "  consumer's.\n") +
+      '\n  If it really is yours to wreck:\n' +
+      '    --i-own-this-host\n'
+  )
+  process.exit(1)
+}
+
 /** The production project id. Anything equal to this is off limits, always. */
 export const productionProjectId = () => readRc().projects?.default ?? null
 

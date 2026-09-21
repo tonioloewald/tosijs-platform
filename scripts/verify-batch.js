@@ -12,6 +12,7 @@ import { execSync } from 'child_process'
 const lib = await import(new URL('sandbox-lib.js', import.meta.url).href)
 const alias = (() => { const i = process.argv.indexOf('--alias'); return i > -1 ? process.argv[i+1] : 'sandbox' })()
 const { projectId } = lib.resolveSandbox(alias)
+await lib.assertProbeAllowed(projectId)
 const BASE = `https://us-central1-${projectId}.cloudfunctions.net`
 const fsq=(m,p,b)=>fetch(`https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${p}`,
   {method:m,headers:{Authorization:`Bearer ${lib.token()}`,'Content-Type':'application/json'},body:b&&JSON.stringify(b)})

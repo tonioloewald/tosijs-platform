@@ -34,6 +34,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import { randomBytes } from 'crypto'
 import { resolveSandbox, projectRoot, parseArgs } from './sandbox-lib.js'
 
 const { has, val } = parseArgs(process.argv)
@@ -56,15 +57,34 @@ if (!apiKey) {
  * Deterministic per-role identities, so a test run is repeatable and the role
  * document seeded by clone-to-sandbox can match on email.
  */
-const email =
-  ROLE === 'owner'
-    ? (
-        fs
-          .readFileSync(configPath, 'utf-8')
-          .match(/PROJECT_ID = '([^']+)'/) ?? []
-      )[1] && 'sandbox-owner@example.test'
-    : `sandbox-${ROLE}@example.test`
-const password = 'sandbox-test-password-not-a-secret'
+/**
+ * Identities are PER RUN unless pinned (#23).
+ *
+ * They used to be deterministic — `sandbox-installer@example.test` for
+ * everyone, always. A consumer following BETA.md used the same identity to
+ * claim their host that the platform's verifier used to test, so the
+ * verifier's cleanup deleted the consumer's `configurator`. It could not tell
+ * them apart because they were the same principal.
+ *
+ * `--pin` restores the fixed identity for a throwaway project where a stable
+ * login is convenient.
+ */
+const RUN = has('pin') ? 'pin' : randomBytes(4).toString('hex')
+const email = has('pin')
+  ? `sandbox-${ROLE}@example.test`
+  : `sandbox-${ROLE}-${RUN}@example.test`
+
+/**
+ * A RANDOM password, unless asked otherwise.
+ *
+ * The fixed one is in a public repository, and #17 now enables email/password
+ * sign-in on every provisioned host — so a consumer following the guide ended
+ * up with a `configurator` whose password anyone could read. `--insecure-fixed-password`
+ * keeps the old behaviour for the platform's own throwaway projects.
+ */
+const password = has('insecure-fixed-password')
+  ? 'sandbox-test-password-not-a-secret'
+  : randomBytes(24).toString('base64url')
 
 const idp = (endpoint, body) =>
   fetch(
@@ -124,7 +144,7 @@ if (val('grant')) {
   const { token } = await import('./sandbox-lib.js')
   const docPath =
     `https://firestore.googleapis.com/v1/projects/${projectId}` +
-    `/databases/(default)/documents/role/sandbox-${ROLE}`
+    `/databases/(default)/documents/role/sandbox-${ROLE}-${RUN}`
   const now = new Date().toISOString()
   const body = {
     fields: {
@@ -167,6 +187,8 @@ if (val('grant')) {
 if (EXPORT) {
   console.log(`export SANDBOX_ID_TOKEN=${idToken}`)
   console.log(`export SANDBOX_UID=${localId}`)
+  console.log(`export SANDBOX_ROLE_DOC=role/sandbox-${ROLE}-${RUN}`)
+  console.log(`export SANDBOX_EMAIL=${email}`)
 } else {
   console.error(`project ${projectId}  user ${email}  uid ${localId}`)
   console.log(idToken)

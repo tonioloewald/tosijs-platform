@@ -66,6 +66,7 @@ import {
   parseArgs,
   PLATFORM_FUNCTIONS,
   SITE_FUNCTIONS,
+  HOST_IDENTITY,
 } from './sandbox-lib.js'
 
 /**
@@ -413,6 +414,28 @@ async function main() {
     run(`${FIREBASE} deploy -P ${ALIAS} --only ${only} --force`, { dryRun: dry })
   } else {
     run(`${FIREBASE} deploy -P ${ALIAS} --force`, { dryRun: dry })
+  }
+
+  // --- 4a. Record whose host this is --------------------------------------
+  //
+  // The verify scripts read this and refuse a `consumer` host (#23). Written
+  // before anything else could tempt somebody to probe it.
+  step('4a', 'Host identity marker')
+  const purpose = PLATFORM_ONLY ? 'consumer' : 'platform-sandbox'
+  console.log(`   purpose: ${purpose}${dry ? ' [dry-run]' : ''}`)
+  if (!dry) {
+    await api(
+      'PATCH',
+      `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)` +
+        `/documents/${encodeURIComponent(HOST_IDENTITY.collection)}/${HOST_IDENTITY.doc}`,
+      {
+        fields: {
+          purpose: { stringValue: purpose },
+          alias: { stringValue: ALIAS },
+          at: { stringValue: new Date().toISOString() },
+        },
+      }
+    )
   }
 
   // --- 4b. Email/password sign-in, the scripted-test affordance ------------

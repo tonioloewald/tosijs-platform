@@ -36,11 +36,12 @@
 import fs from 'fs'
 import path from 'path'
 import { execSync } from 'child_process'
-import { resolveSandbox, projectRoot, parseArgs, token } from './sandbox-lib.js'
+import { resolveSandbox, projectRoot, parseArgs, token, assertProbeAllowed } from './sandbox-lib.js'
 
 const { val } = parseArgs(process.argv)
 const ALIAS = val('alias') ?? 'sandbox'
 const { projectId } = resolveSandbox(ALIAS)
+await assertProbeAllowed(projectId)
 const BASE = `https://us-central1-${projectId}.cloudfunctions.net`
 // Cold functions on a fresh deploy are slow; a default fetch timeout has
 // produced a false failure here before.
@@ -121,13 +122,17 @@ try {
 if (!idToken) fatal('sandbox-token produced no token')
 
 /**
- * Start from a genuinely unprivileged principal.
+ * Remove role documents this RUN's principal holds — and nothing else (#23).
  *
- * The claim ceremony creates a role document with a GENERATED id, so deleting
+ * The claim ceremony creates a role document with a generated id, so deleting
  * a predictable one is not enough: on a second run the principal would already
  * hold `configurator` and the "cannot install without a role" check would pass
- * vacuously — the exact shape of vacuous test this repo has been bitten by.
- * So: find every role document naming this uid, and remove it.
+ * vacuously.
+ *
+ * But `uid` is the right key only because the identity is now PER RUN. When it
+ * was deterministic, a consumer who followed BETA.md shared it — and this
+ * function deleted their `configurator` as if it were its own. Matching on the
+ * uid of an identity created seconds ago cannot collide with anyone.
  */
 const wipeRolesFor = async (subject) => {
   const listed = await firestore('GET', 'role?pageSize=300')

@@ -10,11 +10,12 @@
 import { execSync } from 'child_process'
 import { createHash, randomBytes } from 'crypto'
 import path from 'path'
-import { resolveSandbox, projectRoot, parseArgs, token } from './sandbox-lib.js'
+import { resolveSandbox, projectRoot, parseArgs, token, assertProbeAllowed } from './sandbox-lib.js'
 
 const { val } = parseArgs(process.argv)
 const ALIAS = val('alias') ?? 'sandbox'
 const { projectId } = resolveSandbox(ALIAS)
+await assertProbeAllowed(projectId)
 const BASE = `https://us-central1-${projectId}.cloudfunctions.net`
 
 let failures = 0, step = 0

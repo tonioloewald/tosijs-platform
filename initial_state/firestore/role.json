@@ -2,29 +2,53 @@
   {
     "_id": "owner-role",
     "name": "Owner",
-    "contacts": [{ "type": "email", "value": "owner@gmail.com" }],
-    "roles": ["owner", "developer", "admin", "editor", "author"],
-    "userIds": []
+    "contacts": [
+      {
+        "type": "email",
+        "value": "owner@example.invalid"
+      }
+    ],
+    "roles": [],
+    "userIds": [],
+    "_seedNote": "Placeholder only. Roles are deliberately EMPTY and the address is unregisterable (RFC 2606 .invalid): a seeded grant keyed on an email is claimable by whoever owns that address, and getUserRoles resolves by email contact. Grant real roles through the claim ceremony or by editing role documents directly."
   },
   {
     "_id": "admin-role",
     "name": "Admin",
-    "contacts": [{ "type": "email", "value": "admin@gmail.com" }],
-    "roles": ["admin", "editor", "author"],
-    "userIds": []
+    "contacts": [
+      {
+        "type": "email",
+        "value": "admin@example.invalid"
+      }
+    ],
+    "roles": [],
+    "userIds": [],
+    "_seedNote": "Placeholder only. Roles are deliberately EMPTY and the address is unregisterable (RFC 2606 .invalid): a seeded grant keyed on an email is claimable by whoever owns that address, and getUserRoles resolves by email contact. Grant real roles through the claim ceremony or by editing role documents directly."
   },
   {
     "_id": "writer-role",
     "name": "Writer",
-    "contacts": [{ "type": "email", "value": "writer@gmail.com" }],
-    "roles": ["author"],
-    "userIds": []
+    "contacts": [
+      {
+        "type": "email",
+        "value": "writer@example.invalid"
+      }
+    ],
+    "roles": [],
+    "userIds": [],
+    "_seedNote": "Placeholder only. Roles are deliberately EMPTY and the address is unregisterable (RFC 2606 .invalid): a seeded grant keyed on an email is claimable by whoever owns that address, and getUserRoles resolves by email contact. Grant real roles through the claim ceremony or by editing role documents directly."
   },
   {
     "_id": "rando-role",
     "name": "Random User",
-    "contacts": [{ "type": "email", "value": "rando@gmail.com" }],
+    "contacts": [
+      {
+        "type": "email",
+        "value": "rando@example.invalid"
+      }
+    ],
     "roles": [],
-    "userIds": []
+    "userIds": [],
+    "_seedNote": "Placeholder only. Roles are deliberately EMPTY and the address is unregisterable (RFC 2606 .invalid): a seeded grant keyed on an email is claimable by whoever owns that address, and getUserRoles resolves by email contact. Grant real roles through the claim ceremony or by editing role documents directly."
   }
 ]
