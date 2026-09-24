@@ -205,6 +205,34 @@ counter document. That is what a total order *is* — sharding the counter would
 restore throughput and destroy the ordering. An append-only log with one writer
 is comfortably inside it; a bulk import is not. Hence opt-in.
 
+**Declare `seq` before the first write.** An upgrade that turns it on — or off —
+for a collection that already exists is refused: documents written before it
+would have no `_seq`, and `since=0` would answer "nothing" while they sit there.
+If you need it on an existing collection, install the log under a new name.
+
+**A log should also be immutable.** `seq` promises an order; only `immutable`
+promises the order is not rewritten:
+
+```json
+"virta:event": { "schema": {...}, "immutable": true, "envelope": { "seq": true }, ... }
+```
+
+Re-writing a stored document with identical content is a no-op (so a retried
+commit is safe); with *different* content it is refused — `409 {"error":
+"immutable"}`, and in a batch nothing is written. Without it, an upsert over an
+existing id replaces the document and gives it a **new** `_seq`: every replica
+that already folded it now sees the same id at two positions in the order, and
+nothing errors. A replica cannot survive re-sequencing, so a collection you
+replicate should not allow it. **Deletes are refused too** (`409
+{"error": "immutable"}`): delete-then-recreate would land the same id at a fresh
+`_seq`, and a replica never hears about a delete through `since=` anyway.
+Removing a document from a log (a legal takedown, say) is the host owner acting
+on the datastore directly.
+
+A retry that must be a no-op should be a `PUT` or an upsert through `POST /docs`
+— an explicit `POST` asserts "not yet" and is refused with `exists` when the
+document is already there, identical or not.
+
 Several documents, atomically:
 
 ```bash
@@ -216,8 +244,9 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
 
 All or nothing: one invalid document and **nothing** is written, not even the
 valid ones beside it, and the sequence does not advance. Omit `method` and each
-write is an **upsert** — create if absent, replace if present, no-op if
-identical — which is an idempotent append with no client bookkeeping. Naming
+write is an **upsert** — create if absent, replace if present (refused, if the
+collection is `immutable`), no-op if identical — which is an idempotent append
+with no client bookkeeping. Naming
 `POST` or `PUT` keeps the strict guard. Max 100 per commit; the same document
 twice in one commit is refused.
 

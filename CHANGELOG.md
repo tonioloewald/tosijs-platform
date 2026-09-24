@@ -1,5 +1,99 @@
 # Changelog
 
+## 0.2.0-beta.3 — 2026-09-24
+
+A log you can trust. The first consumer (tosijs-virta) found that a sequenced
+collection could be silently re-sequenced by an upsert, and silently
+truncated by an upgrade. Both are now refused rather than applied. The
+pre-release review (`reviews/0.2.0-beta.3-log-integrity.md`) then found three
+security holes and a broken verify script, all fixed here.
+
+### ⚠️ Action required on existing hosts
+
+The seed fix below protects hosts seeded **from now on**. A host seeded from an
+earlier version, or one the verify scripts have run against, may still carry
+grants that anyone can claim — and nothing removes them. Run the read-only
+audit, and delete what it lists:
+
+```bash
+bun scripts/audit-host.js --alias <alias>
+```
+
+It flags role documents keyed on the old seed addresses (`owner@gmail.com`,
+`admin@gmail.com`, `writer@gmail.com`, `rando@gmail.com`), every `role/sandbox-*`
+grant, and every Auth user on `sandbox-*@example.test`. It changes nothing;
+the deletions are the host owner's to make. Re-run until it reports clean.
+
+### Added
+
+- **`immutable: true`** (#25). An identical re-write is a no-op; a different
+  one is refused with the new stable code **`immutable`** (`409`), and in a
+  `POST /docs` batch the whole commit is refused with it. Creates are
+  unaffected; deletes are refused (see Security). The field was already in the manifest type and accepted by
+  the validator — and compiled to nothing, so a consumer could declare its log
+  immutable and every writer could still rewrite it. Without it, an upsert over
+  an existing id replaces the document *and assigns a new `_seq`*, moving
+  history. Opt-in, like `seq`; a non-boolean value is now refused.
+
+### Security
+
+- **A contact-email role resolved for an UNVERIFIED email** (review M1). Role
+  lookup falls back to matching `contacts` by the token's email, and never
+  checked `email_verified`. With password sign-in enabled on every provisioned
+  host (#17) and a public API key, anyone could create an account under an
+  address a role was waiting for — a pre-assigned grant, a clone's owner
+  document, or the old seed — and hold those roles. Now the email path is
+  taken only when `email_verified === true`.
+- **The `system` namespace was not reserved** (review M2). A manifest named
+  `system` could declare `system:claim`, `system:host` or `system:seq`, which
+  are safe only because nothing registers them — one configurator approval
+  from reopening the claim ceremony, marking a consumer's host a sandbox, or
+  rewinding a sequence. Refused at install, dropped at registry load, and
+  unreachable at lookup.
+- **An immutable document could be deleted and re-created** at a fresh `_seq`
+  (review M3), which is the rewrite `immutable` exists to prevent. DELETE on an
+  immutable collection is now refused with `409 immutable`.
+
+### Fixed
+
+- **An upgrade could switch `envelope.seq` on under stored documents** (#22),
+  leaving them with no `_seq` — `since=0` answered "nothing" and a replica
+  started from a silently truncated log. An upgrade now refuses turning `seq`
+  on *or off* for an existing collection (off silently stops replicas
+  receiving). Backfilling in `_created` order was declined: it reintroduces
+  the clock ordering `seq` exists to replace.
+- **The seed granted `owner` to a real, claimable address** (#23 audit).
+  `initial_state` role documents keyed on `owner@gmail.com` et al. meant anyone
+  controlling that address could sign in to any host seeded from this repo as
+  owner. Seeded roles now grant nothing and use RFC 2606 `.invalid`;
+  `seed-safety.test.ts` asserts both.
+- **Platform verification could run against a consumer's host** (#23). Hosts
+  now record whose they are (`system:host/identity`); every `verify-*.js`
+  refuses anything but a marked sandbox and fails closed on an unmarked host.
+  Per-run identities, random passwords by default, cleanup keyed on the run.
+- `prepublishOnly` printed a wall of expected red on a successful publish; the
+  gate is now readable, and the dead shadow-mode scaffolding is deleted.
+- **`verify-token.js` revoked a role document that no longer existed** (review
+  M4). The grant moved to a per-run id with #23; the script still PATCHed the
+  old fixed id, which the REST API silently *creates* — a false red, and a
+  stray author+admin grant left behind. It now reads the id from the minter,
+  refuses to create on revoke, and deletes the per-run grant when it is done.
+- **The emulator integration suites depended on the seeded `owner@gmail.com`**
+  and had been passing only because they skip without emulators. They now mint
+  their own owner; 53 pass against emulators.
+
+### Contract changes
+
+- New error code `immutable` (`409`), on rewrite and on delete.
+- Upgrades that change `envelope.seq` on an existing collection are refused.
+- Contact-email role resolution requires a verified email.
+- `system` is a reserved namespace.
+
+### Still open
+
+- **#24** — a hand-written role document without `_created` is invisible to
+  role resolution. Write `_created` on any role document you create by hand.
+
 ## 0.2.0-beta.2 — 2026-09-21
 
 Everything the first consumer found. Eight issues, all filed within a day of

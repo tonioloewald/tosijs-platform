@@ -75,6 +75,19 @@ ceremonies (`scripts/verify-*.js`).
   Opt-in: a total order serialises writes to that collection at roughly one per
   second, through one counter document. **`requireAttribution: true`** refuses a
   write the endpoint cannot attribute.
+  **Declare `seq` before the first write:** an upgrade that turns it on or off
+  for an existing collection is refused, because earlier (or later) documents
+  would carry no `_seq` and be invisible to `since=`.
+- **`immutable: true`** (top level of a collection, beside `schema`) makes a
+  stored document unchangeable: an identical re-write is a no-op, a different one
+  is refused with `409 {error: "immutable"}` — in a batch, the whole commit is.
+  Deletes are refused too. Without it an upsert over an existing id REPLACES it
+  and assigns a new `_seq`. Declare it on any log you replicate.
+- **A role pre-assigned by contact email resolves only for a VERIFIED email.**
+  Password sign-up is enabled on provisioned hosts, so an unverified address is
+  a claim anyone can make.
+- **The `system` namespace is the platform's.** A manifest named `system`, or
+  declaring `system:*`, is refused.
 - **Capabilities are shape-only so far.** The format is settled and validated, but
   nothing consults `grant.capabilities` yet. The install response reports
   `unenforced: [...]` so you are never told you hold a power you do not.
