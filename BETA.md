@@ -227,7 +227,8 @@ replicate should not allow it. **Deletes are refused too** (`409
 {"error": "immutable"}`): delete-then-recreate would land the same id at a fresh
 `_seq`, and a replica never hears about a delete through `since=` anyway.
 Removing a document from a log (a legal takedown, say) is the host owner acting
-on the datastore directly.
+on the datastore directly. `immutable` may be added by upgrade, never dropped — the
+documents already stored were written under the promise.
 
 A retry that must be a no-op should be a `PUT` or an upsert through `POST /docs`
 — an explicit `POST` asserts "not yet" and is refused with `exists` when the

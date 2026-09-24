@@ -487,10 +487,17 @@ describe('a sequence cannot change under stored documents (#22)', () => {
     expect(additiveProblems(manifest(), added)).toEqual([])
   })
 
-  test('immutable may be turned on or off — it only governs future writes', () => {
+  test('immutable may be ADDED — it only restricts future writes', () => {
     const imm = withEnvelope({ immutable: true })
     expect(additiveProblems(manifest(), imm)).toEqual([])
-    expect(additiveProblems(imm, manifest())).toEqual([])
+    expect(additiveProblems(imm, imm)).toEqual([])
+  })
+
+  test('but never DROPPED — stored documents were promised never to change (F2)', () => {
+    const imm = withEnvelope({ immutable: true })
+    for (const after of [manifest({ version: '1.0.2' }), withEnvelope({ immutable: false })]) {
+      expect(additiveProblems(imm, after).join()).toContain('dropped immutable')
+    }
   })
 
   test('the refusal reaches the install decision', () => {

@@ -181,6 +181,18 @@ export function additiveProblems(
               'silently stop receiving new documents'
       )
     }
+    // `immutable` may be ADDED by upgrade — it only restricts future writes —
+    // but never dropped. Dropping it would reopen upsert re-sequencing and
+    // delete-then-recreate on a log already stored under the promise, and an
+    // upgrade with unchanged capabilities needs no human approval. The notes
+    // say only the host owner, acting on the datastore, can rewrite a log;
+    // this is what makes that true (0.2.0-beta.3 re-review, F2).
+    if (before.immutable === true && after.immutable !== true) {
+      problems.push(
+        `"${name}" dropped immutable — documents stored under it were promised ` +
+          'never to change; install the collection under a new name instead'
+      )
+    }
     if (
       JSON.stringify(before.unique ?? []) !== JSON.stringify(after.unique ?? [])
     ) {

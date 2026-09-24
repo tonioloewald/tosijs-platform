@@ -12,24 +12,41 @@ security holes and a broken verify script, all fixed here.
 
 The seed fix below protects hosts seeded **from now on**. A host seeded from an
 earlier version, or one the verify scripts have run against, may still carry
-grants that anyone can claim — and nothing removes them. Run the read-only
-audit, and delete what it lists:
+grants that anyone can claim — and nothing removes them.
 
-```bash
-bun scripts/audit-host.js --alias <alias>
-```
+1. **Audit** (read-only; needs this repo and `gcloud` user credentials):
 
-It flags role documents keyed on the old seed addresses (`owner@gmail.com`,
-`admin@gmail.com`, `writer@gmail.com`, `rando@gmail.com`), every `role/sandbox-*`
-grant, and every Auth user on `sandbox-*@example.test`. It changes nothing;
-the deletions are the host owner's to make. Re-run until it reports clean.
+   ```bash
+   bun scripts/audit-host.js --alias <alias>
+   ```
+
+   It reports **claimable** grants — role documents keyed on the old seed
+   addresses (`owner@gmail.com`, `admin@gmail.com`, `writer@gmail.com`,
+   `rando@gmail.com`), and FIXED sandbox identities (`sandbox-<role>`, `-pin`)
+   whose password was once public — and separately, per-run verify leftovers,
+   which are not claimable (random passwords) but worth deleting. Exit 1 means
+   claimable grants; 3 means the Auth half could not be listed. Without the
+   repo, check `role` documents and Auth users in the Firebase console for the
+   same addresses.
+2. **Replace before you delete.** If a claimable grant holds `owner` or
+   `configurator`, it may be your only path in. Grant that authority to a
+   verified identity of yours first and confirm it with `GET /hello`. (The
+   audit says when this applies. Deleting first is recoverable — re-run the
+   claim ceremony — but needlessly.)
+3. **Delete** the claimable entries, then re-run the audit until it is clean.
+4. **Check contact-email grants for lock-out.** A role that reaches its holder
+   *only* through a contact email now needs a **verified** email (see
+   Security). A user who signs in with a password — which never verifies,
+   because nothing here sends a verification email — loses it silently. Bind
+   such users by uid (`userIds`), or have them sign in with Google.
 
 ### Added
 
 - **`immutable: true`** (#25). An identical re-write is a no-op; a different
   one is refused with the new stable code **`immutable`** (`409`), and in a
   `POST /docs` batch the whole commit is refused with it. Creates are
-  unaffected; deletes are refused (see Security). The field was already in the manifest type and accepted by
+  unaffected; deletes are refused (see Security), and once declared an upgrade
+  may not drop it. The field was already in the manifest type and accepted by
   the validator — and compiled to nothing, so a consumer could declare its log
   immutable and every writer could still rewrite it. Without it, an upsert over
   an existing id replaces the document *and assigns a new `_seq`*, moving
@@ -87,6 +104,7 @@ the deletions are the host owner's to make. Re-run until it reports clean.
 - New error code `immutable` (`409`), on rewrite and on delete.
 - Upgrades that change `envelope.seq` on an existing collection are refused.
 - Contact-email role resolution requires a verified email.
+- An upgrade may not drop `immutable` from a collection that declared it.
 - `system` is a reserved namespace.
 
 ### Still open

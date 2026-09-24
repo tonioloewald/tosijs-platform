@@ -37,8 +37,15 @@ const ok = (label, condition, detail = '') => {
   if (!condition) failures += 1
   return condition
 }
+// What this run created, so an abort can say what it left behind. `fatal` is
+// synchronous and exits, so it cannot clean up itself — but a leftover grant
+// nobody knows about is how the old fixed grants outlived every run.
+const created = []
 const fatal = (m) => {
   console.error(`\nABORTED: ${m}`)
+  if (created.length) {
+    console.error(`left behind — delete by hand: ${created.join(', ')}`)
+  }
   process.exit(1)
 }
 
@@ -105,6 +112,7 @@ try {
 }
 if (!human) fatal('no human id token')
 if (!ROLE_DOC) fatal('sandbox-token did not report SANDBOX_ROLE_DOC')
+created.push(ROLE_DOC, `auth uid ${uid}`)
 
 // --- minting ---------------------------------------------------------------
 const mint = (body) => call('POST', '/token', { bearer: human, body })

@@ -111,41 +111,47 @@ describe('the destructive command is reachable only through the guard', () => {
 })
 
 describe('claimableGrant — the existing-host audit (B1)', () => {
-  test('the old seed documents are flagged', async () => {
+  test('the old seed documents are claimable', async () => {
     const { claimableGrant } = await import('./sandbox-lib.js')
     expect(
       claimableGrant('owner-role', {
         contacts: [{ type: 'email', value: 'owner@gmail.com' }],
         roles: ['owner', 'developer', 'admin', 'editor', 'author'],
       })
-    ).toContain('owner@gmail.com')
-    // Flagged even with no roles: the address is claimable, and roles can be
-    // added to that document later by someone who does not know its history.
+    ).toMatchObject({ severity: 'claimable' })
+    // Even with no roles: the address is claimable, and roles can be added to
+    // that document later by someone who does not know its history.
     expect(
       claimableGrant('rando-role', {
         contacts: [{ type: 'email', value: 'Rando@Gmail.com' }],
         roles: [],
-      })
+      })?.why
     ).toContain('rando@gmail.com')
   })
 
-  test('every sandbox-* grant is flagged, old fixed id or per-run', async () => {
+  test('a FIXED sandbox grant is claimable; a per-run one is only leftover', async () => {
     const { claimableGrant } = await import('./sandbox-lib.js')
-    expect(claimableGrant('sandbox-owner', { roles: ['owner'] })).not.toBeNull()
-    expect(claimableGrant('sandbox-agentboss-3f9a', { roles: [] })).not.toBeNull()
+    const fixed = { contacts: [{ type: 'email', value: 'sandbox-owner@example.test' }], roles: ['owner'] }
+    expect(claimableGrant('sandbox-owner', fixed)).toMatchObject({ severity: 'claimable' })
+    expect(claimableGrant('sandbox-author-pin', { roles: ['author'] })).toMatchObject({ severity: 'claimable' })
+    expect(claimableGrant('sandbox-agentboss-3f9a0c1d', { roles: ['author'] })).toMatchObject({
+      severity: 'leftover',
+    })
   })
 
-  test('a fixture address holding roles is flagged', async () => {
+  test("the operator's own sandbox-owner (a real contact) is not flagged (F1)", async () => {
+    // clone-to-sandbox writes this for the gcloud account. Flagging it meant a
+    // cloned sandbox could never report clean.
     const { claimableGrant } = await import('./sandbox-lib.js')
     expect(
-      claimableGrant('x', {
-        contacts: [{ type: 'email', value: 'sandbox-author@example.test' }],
-        roles: ['author'],
+      claimableGrant('sandbox-owner', {
+        contacts: [{ type: 'email', value: 'alice@example.org' }],
+        roles: ['owner'],
       })
-    ).not.toBeNull()
+    ).toBeNull()
   })
 
-  test("the new seed, and a real person's grant, are not", async () => {
+  test("the new seed, and a real person's grant, are not flagged", async () => {
     const { claimableGrant } = await import('./sandbox-lib.js')
     expect(
       claimableGrant('owner-role', {
@@ -160,5 +166,16 @@ describe('claimableGrant — the existing-host audit (B1)', () => {
         userIds: ['u1'],
       })
     ).toBeNull()
+  })
+})
+
+describe('fixtureUser — Auth users the audit reports', () => {
+  test('severities', async () => {
+    const { fixtureUser } = await import('./sandbox-lib.js')
+    expect(fixtureUser('owner@gmail.com')).toMatchObject({ severity: 'claimable' })
+    expect(fixtureUser('sandbox-owner@example.test')).toMatchObject({ severity: 'claimable' })
+    expect(fixtureUser('sandbox-owner-pin@example.test')).toMatchObject({ severity: 'claimable' })
+    expect(fixtureUser('sandbox-owner-0a1b2c3d@example.test')).toMatchObject({ severity: 'leftover' })
+    expect(fixtureUser('alice@example.org')).toBeNull()
   })
 })

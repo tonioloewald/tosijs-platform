@@ -15,7 +15,10 @@
  *   bun scripts/audit-host.js --alias <alias>
  *
  * Any alias, `default` included — reading is safe, and production deserves the
- * same audit. Exits 1 when it finds something, so it can gate a deploy.
+ * same audit. Exit codes: 0 no claimable grants (leftovers are reported, not
+ * failed), 1 claimable grants found, 3 incomplete (the Auth half could not be
+ * listed — fails closed). Needs this repo and gcloud user credentials; a
+ * consumer without them can check the same things in the Firebase console.
  */
 
 import {
@@ -23,7 +26,7 @@ import {
   token,
   parseArgs,
   claimableGrant,
-  OLD_SEED_ADDRESSES,
+  fixtureUser,
 } from './sandbox-lib.js'
 
 const { val } = parseArgs(process.argv)
@@ -101,12 +104,8 @@ async function fixtureUsers() {
     const users = body.userInfo ?? []
     for (const u of users) {
       const email = String(u.email ?? '').toLowerCase()
-      const fixture =
-        /^sandbox-.*@example\.test$/.test(email) ||
-        OLD_SEED_ADDRESSES.includes(email)
-      if (fixture) {
-        found.push({ uid: u.localId, email })
-      }
+      const hit = fixtureUser(email)
+      if (hit) found.push({ uid: u.localId, email, ...hit })
     }
     if (users.length < 500) return found
     offset += users.length
@@ -115,25 +114,53 @@ async function fixtureUsers() {
 
 console.log(`\naudit-host → ${projectId} (read-only)\n`)
 
-const flagged = (await roleDocs())
-  .map(({ id, doc }) => ({ id, why: claimableGrant(id, doc) }))
-  .filter((r) => r.why)
+const roles = (await roleDocs())
+  .map(({ id, doc }) => ({ id, doc, ...(claimableGrant(id, doc) ?? {}) }))
+  .filter((r) => r.severity)
 const users = await fixtureUsers()
 
-for (const r of flagged) console.log(`   role/${r.id} — ${r.why}`)
-for (const u of users ?? []) console.log(`   auth user ${u.email} (uid ${u.uid})`)
+const claimable = [
+  ...roles.filter((r) => r.severity === 'claimable').map((r) => `role/${r.id} — ${r.why}`),
+  ...(users ?? []).filter((u) => u.severity === 'claimable').map((u) => `auth ${u.email} (${u.uid}) — ${u.why}`),
+]
+const leftover = [
+  ...roles.filter((r) => r.severity === 'leftover').map((r) => `role/${r.id} — ${r.why}`),
+  ...(users ?? []).filter((u) => u.severity === 'leftover').map((u) => `auth ${u.email} (${u.uid}) — ${u.why}`),
+]
 
-if (!flagged.length && users && !users.length) {
-  console.log('   clean — no claimable grants, no fixture principals')
-  process.exit(0)
+if (claimable.length) {
+  console.log('CLAIMABLE — somebody else could sign in and hold these:\n')
+  for (const line of claimable) console.log(`   ${line}`)
+  // A flagged grant may be the ONLY path in with authority. Deleting it first
+  // locks the owner out (recoverable by re-claiming, but needlessly).
+  const load = roles.filter(
+    (r) =>
+      r.severity === 'claimable' &&
+      (r.doc.roles ?? []).some((x) => x === 'owner' || x === 'configurator')
+  )
+  if (load.length) {
+    console.log(
+      '\n   ⚠ holds owner/configurator: ' + load.map((r) => `role/${r.id}`).join(', ') +
+        '\n     Grant that authority to a VERIFIED identity of yours first, and confirm\n' +
+        '     it with GET /hello, BEFORE deleting these — or you lock yourself out.'
+    )
+  }
+}
+if (leftover.length) {
+  console.log('\nLeftover — not claimable (random passwords), worth deleting:\n')
+  for (const line of leftover) console.log(`   ${line}`)
 }
 
+if (users === null) {
+  // Fail closed: "no claimable roles" says nothing about the Auth half.
+  console.log('\nINCOMPLETE — the Auth user listing failed; check fixture users by hand.')
+  process.exit(3)
+}
+if (!claimable.length) {
+  console.log(leftover.length ? '\nclean of claimable grants' : '   clean')
+  process.exit(0)
+}
 console.log(
-  '\nTo remediate, delete (these are the host owner\'s to decide on):\n' +
-    flagged.map((r) => `   firestore: role/${r.id}`).join('\n') +
-    (users?.length
-      ? '\n' + users.map((u) => `   auth:      ${u.email} (${u.uid})`).join('\n')
-      : '') +
-    '\n\nThen re-run this until it reports clean.\n'
+  '\nDelete the CLAIMABLE entries (the host owner decides), then re-run until clean.\n'
 )
 process.exit(1)

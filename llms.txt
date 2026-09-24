@@ -81,7 +81,7 @@ ceremonies (`scripts/verify-*.js`).
 - **`immutable: true`** (top level of a collection, beside `schema`) makes a
   stored document unchangeable: an identical re-write is a no-op, a different one
   is refused with `409 {error: "immutable"}` — in a batch, the whole commit is.
-  Deletes are refused too. Without it an upsert over an existing id REPLACES it
+  Deletes are refused too, and an upgrade may add it but never drop it. Without it an upsert over an existing id REPLACES it
   and assigns a new `_seq`. Declare it on any log you replicate.
 - **A role pre-assigned by contact email resolves only for a VERIFIED email.**
   Password sign-up is enabled on provisioned hosts, so an unverified address is

@@ -230,20 +230,28 @@ export const homeBackupRoot = (projectId) =>
   path.join(os.homedir(), 'Backups', 'tosijs-platform', projectId)
 
 /**
- * Why a role document is a leftover grant somebody else could claim, or null.
+ * Classify a role document left behind by fixtures, or null.
  *
  * The 0.2.0-beta.3 fix for the seed (#23) protects hosts seeded FROM NOW ON.
  * Hosts seeded earlier still carry the old documents, and nothing removes them
  * — `seed-production` only ever `.set()`s. This is the classifier behind
  * `audit-host.js`, kept pure so it is tested rather than trusted.
  *
- * Flags three shapes:
- *   - a contact on a real, registrable fixture address (`owner@gmail.com` …),
- *     which the old seed keyed owner/admin/author on;
- *   - a `sandbox-*` grant from the verify scripts — before #23 their password
- *     was a constant in this repo, and every provisioned host has password
- *     sign-in enabled;
- *   - any contact on `@example.test` holding roles, for the same reason.
+ * Two severities, because they call for different actions:
+ *
+ *   `claimable` — somebody else could sign in and hold it: a contact on a
+ *   real, registrable fixture address (`owner@gmail.com` …, the old seed), or a
+ *   FIXED sandbox identity (`sandbox-<role>`, or `-pin`) whose password was a
+ *   constant in this repo. Fails the audit.
+ *
+ *   `leftover` — a per-run verify grant (`sandbox-<role>-<8 hex>`). Its
+ *   password was random and never printed, so nobody can claim it; it is
+ *   clutter worth deleting, not a hole. Reported, never fails the audit —
+ *   otherwise a host the verify scripts touched could never report clean.
+ *
+ * A `sandbox-*` document whose contact is a REAL address is the operator's
+ * own (clone-to-sandbox writes `role/sandbox-owner` for the gcloud account)
+ * and is not flagged at all.
  */
 export const OLD_SEED_ADDRESSES = [
   'owner@gmail.com',
@@ -252,22 +260,44 @@ export const OLD_SEED_ADDRESSES = [
   'rando@gmail.com',
 ]
 
+const FIXTURE_DOMAIN = /@example\.test$/
+const PER_RUN = /^sandbox-.+-[0-9a-f]{8}$/
+
+/** Classify a fixture Auth user by email, or null. Same severities. */
+export function fixtureUser(email) {
+  const e = String(email ?? '').toLowerCase()
+  if (OLD_SEED_ADDRESSES.includes(e)) {
+    return { severity: 'claimable', why: 'an old seed address' }
+  }
+  if (!/^sandbox-/.test(e) || !FIXTURE_DOMAIN.test(e)) return null
+  return PER_RUN.test(e.replace(FIXTURE_DOMAIN, ''))
+    ? { severity: 'leftover', why: 'a per-run verify identity (random password)' }
+    : { severity: 'claimable', why: 'a FIXED sandbox identity (its password was public)' }
+}
+
 export function claimableGrant(id, doc) {
   const roles = doc?.roles ?? []
+  const granting = roles.length ? `, granting ${roles.join(',')}` : ''
   const emails = (doc?.contacts ?? [])
     .filter((c) => c?.type === 'email')
     .map((c) => String(c.value ?? '').toLowerCase())
+
   const seeded = emails.find((e) => OLD_SEED_ADDRESSES.includes(e))
   if (seeded) {
-    return `keyed on the old seed address ${seeded}` +
-      (roles.length ? `, granting ${roles.join(',')}` : '')
+    return { severity: 'claimable', why: `keyed on the old seed address ${seeded}${granting}` }
   }
   if (/^sandbox-/.test(id)) {
-    return `a verify-script grant${roles.length ? ` (${roles.join(',')})` : ''}`
+    // The operator's own grant (a real contact) is not a fixture.
+    if (emails.some((e) => !FIXTURE_DOMAIN.test(e))) return null
+    return PER_RUN.test(id)
+      ? { severity: 'leftover', why: `a per-run verify grant${granting}` }
+      : { severity: 'claimable', why: `a FIXED sandbox grant, password once public${granting}` }
   }
-  const fixture = emails.find((e) => e.endsWith('@example.test'))
+  const fixture = emails.find((e) => FIXTURE_DOMAIN.test(e))
   if (fixture && roles.length) {
-    return `keyed on the fixture address ${fixture}, granting ${roles.join(',')}`
+    return fixtureUser(fixture)?.severity === 'leftover'
+      ? { severity: 'leftover', why: `keyed on ${fixture}${granting}` }
+      : { severity: 'claimable', why: `keyed on the fixture address ${fixture}${granting}` }
   }
   return null
 }

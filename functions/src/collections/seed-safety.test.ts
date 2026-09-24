@@ -52,10 +52,13 @@ describe('seeded role documents grant nothing', () => {
       expect(doc.userIds ?? []).toEqual([])
     })
 
-    test(`${doc._id}: its email cannot be registered by anyone`, () => {
-      // RFC 2606 reserves `.invalid` and `.example`; `.test` too. A seeded
-      // contact on a REGISTERABLE domain is a standing invitation, because
-      // role resolution matches on it.
+    test(`${doc._id}: its email is on a reserved, unownable domain`, () => {
+      // RFC 2606 reserves `.invalid` and `.example`; `.test` too. Nobody can
+      // OWN such an address, so nobody can VERIFY it — and since M1 only a
+      // verified email resolves a contact grant, the contact is inert. (A
+      // password account can still be created under it; that is why
+      // verification, not the domain, is the real guard.) A seeded contact on
+      // a REGISTERABLE domain is a standing invitation.
       for (const contact of doc.contacts ?? []) {
         if (contact.type !== 'email') continue
         expect(contact.value).toMatch(/@[a-z0-9.-]*\.(invalid|example|test)$/)

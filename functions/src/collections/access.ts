@@ -221,8 +221,11 @@ export interface CollectionConfig {
    * positions in the total order — silently. `seq` alone promises an order;
    * only this promises that the order is not rewritten.
    *
+   * Deletes are refused too: delete-then-recreate would land the same id at a
+   * fresh `_seq`. Removal is the owner acting on the datastore.
+   *
    * Opt-in, like `seq`: most collections are tables and are meant to be
-   * edited. Deletes are not affected.
+   * edited. Once declared, an upgrade may not drop it (#22's rule).
    */
   immutable?: boolean
 

@@ -46,6 +46,7 @@ import {
   type ClaimState,
 } from './install/claim'
 import { ROLES } from './collections/roles'
+import { lookupEmail } from './collections/join-roles'
 import { fail } from './errors'
 
 /** `system:claim/current`, split. Not a registered collection — see epoch.ts. */
@@ -173,10 +174,14 @@ export const claim = onRequest({}, async (request, response: Response) => {
           })
         }
       } else {
+        // A contact is authority (role lookup matches on it), so only a
+        // VERIFIED email may be recorded as one — the same rule as M1. The
+        // grant itself rides on the uid either way.
+        const contactEmail = lookupEmail(user)
         tx.set(admin.firestore().collection('role').doc(), {
           name: user.email ?? user.uid,
-          contacts: user.email
-            ? [{ type: 'email', value: user.email }]
+          contacts: contactEmail
+            ? [{ type: 'email', value: contactEmail }]
             : [],
           roles: [ROLES.configurator],
           userIds: [user.uid],
