@@ -43,7 +43,7 @@ import {
   MAX_TTL_MS,
   type TokenRecord,
 } from './token'
-import { fail } from '../errors'
+import { fail, noStore } from '../errors'
 
 const TOKENS = 'token'
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -51,6 +51,11 @@ const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const db = () => admin.firestore()
 
 export const token = onRequest({}, async (request, response: Response) => {
+  // A platform API response is about the caller who asked — never shared
+  // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
+  // rate-limit / method refusals inside optionsResponse. A handler that is
+  // genuinely public may override it.
+  noStore(response)
   const req = request as AuthenticatedRequest
   if (optionsResponse(req, response, ['OPTIONS', 'GET', 'POST', 'DELETE'])) {
     return

@@ -47,7 +47,7 @@ import {
 } from './install/claim'
 import { ROLES } from './collections/roles'
 import { lookupEmail } from './collections/join-roles'
-import { fail } from './errors'
+import { fail, noStore } from './errors'
 
 /** `system:claim/current`, split. Not a registered collection — see epoch.ts. */
 const CLAIM = { collection: 'system:claim', doc: 'current' }
@@ -95,6 +95,11 @@ async function publishNonce(): Promise<ClaimState> {
 }
 
 export const claim = onRequest({}, async (request, response: Response) => {
+  // A platform API response is about the caller who asked — never shared
+  // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
+  // rate-limit / method refusals inside optionsResponse. A handler that is
+  // genuinely public may override it.
+  noStore(response)
   const req = request as AuthenticatedRequest
   if (optionsResponse(req, response, ['OPTIONS', 'GET', 'POST'])) {
     return

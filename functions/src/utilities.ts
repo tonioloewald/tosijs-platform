@@ -1,3 +1,4 @@
+import { noStore } from './errors'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 import * as crypto from 'crypto'
@@ -152,6 +153,7 @@ function checkRateLimit(
       'X-RateLimit-Reset',
       String(Math.ceil((entry.windowStart + config.windowMs) / 1000))
     )
+    noStore(res)
     res.status(429).send('Too Many Requests')
     return true // Rate limited
   }
@@ -197,6 +199,7 @@ function optionsResponse(
     res.status(204).send('')
     return true
   } else if (!options.includes(method)) {
+    noStore(res)
     res.status(403).send('')
     return true
   }

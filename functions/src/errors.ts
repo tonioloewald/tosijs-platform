@@ -57,6 +57,22 @@ export interface ErrorBody {
   [extra: string]: unknown
 }
 
+/**
+ * Mark a response uncacheable by any shared cache (#27).
+ *
+ * Behind Firebase Hosting, a function response WITHOUT `Cache-Control` gets
+ * `max-age=600` added, and the CDN keys on the URL alone — not on
+ * `Authorization`. So one caller's error was served to every other caller of
+ * that URL for ten minutes, whatever their credentials, and no request header
+ * could opt out. The worst case is a cached 401: a client that treats 401 as
+ * "your token was refused" drops a valid token because someone else's was bad.
+ *
+ * An API answer is about the caller who asked. Nothing here is shareable.
+ */
+export function noStore(res: Response): void {
+  res.set('Cache-Control', 'no-store')
+}
+
 /** Send one. Returns nothing — the response is finished. */
 export function fail(
   res: Response,
@@ -65,6 +81,9 @@ export function fail(
   message: string,
   extra: Record<string, unknown> = {}
 ): void {
+  // Every error, on every endpoint — including the SSR ones that DO want CDN
+  // caching for their successes. An error is never someone else's answer.
+  noStore(res)
   res.status(status).json({ error, message, ...extra })
 }
 
@@ -76,5 +95,6 @@ export function fail(
  * status code refuses to be.
  */
 export function notFound(res: Response, status = 404): void {
+  noStore(res)
   res.status(status).json({ error: 'not-found', message: 'not found' })
 }

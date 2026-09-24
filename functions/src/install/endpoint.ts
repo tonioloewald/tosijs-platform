@@ -53,7 +53,7 @@ import {
 } from './manifest'
 import { bumpEpochIn } from './epoch'
 import { sameManifest, ManifestConflict } from './manifest-identity'
-import { fail } from '../errors'
+import { fail, noStore } from '../errors'
 
 const MANIFESTS = 'manifest'
 const GRANTS = 'grant'
@@ -124,6 +124,11 @@ async function commit(records: InstallRecords): Promise<void> {
 }
 
 export const install = onRequest({}, async (request, response: Response) => {
+  // A platform API response is about the caller who asked — never shared
+  // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
+  // rate-limit / method refusals inside optionsResponse. A handler that is
+  // genuinely public may override it.
+  noStore(response)
   const req = request as AuthenticatedRequest
   if (optionsResponse(req, response, ['OPTIONS', 'GET', 'POST', 'DELETE'])) {
     return

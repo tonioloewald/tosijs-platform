@@ -379,3 +379,35 @@ describe('/authorize never hands the browser a credential (B2, #6)', () => {
     expect(page).toMatch(/Check you started this/)
   })
 })
+
+describe('platform API responses are never CDN-cached (#27)', () => {
+  // Set FIRST in each handler, so success, error and an uncaught throw are
+  // all covered, and so are optionsResponse's own 429/403 refusals.
+  const PLATFORM = [
+    'doc.ts',
+    'docs.ts',
+    'user.ts',
+    'hello.ts',
+    'claim.ts',
+    'install/endpoint.ts',
+    'auth/endpoint.ts',
+    'auth/authorize-endpoint.ts',
+  ]
+  for (const file of PLATFORM) {
+    test(`${file} sets no-store before anything else`, () => {
+      const text = src(file)
+      const handler = text.slice(text.indexOf('onRequest('))
+      const store = handler.indexOf('noStore(')
+      expect(store).toBeGreaterThan(-1)
+      expect(store).toBeLessThan(handler.indexOf('optionsResponse('))
+    })
+  }
+
+  test('optionsResponse marks its own refusals no-store', () => {
+    // Those run for EVERY endpoint, including the SSR ones that keep CDN
+    // caching for successes — an error is never someone else's answer.
+    const utilities = src('utilities.ts')
+    expect(utilities).toMatch(/noStore\(res\)\s*\n\s*res\.status\(429\)/)
+    expect(utilities).toMatch(/noStore\(res\)\s*\n\s*res\.status\(403\)/)
+  })
+})

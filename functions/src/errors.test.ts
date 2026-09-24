@@ -12,8 +12,16 @@ import { join } from 'path'
 import { fail, notFound, ERROR_CODES } from './errors'
 
 const spy = () => {
-  const sent: { status?: number; body?: unknown } = {}
+  const sent: {
+    status?: number
+    body?: unknown
+    headers: Record<string, string>
+  } = { headers: {} }
   const res = {
+    set(k: string, v: string) {
+      sent.headers[k] = v
+      return res
+    },
     status(s: number) {
       sent.status = s
       return res
@@ -92,4 +100,20 @@ describe('the platform routes actually use it', () => {
       expect(source).not.toMatch(/status:\s*'refused'/)
     })
   }
+})
+
+describe('errors are never cached by a shared CDN (#27)', () => {
+  // Behind Firebase Hosting a response with no Cache-Control gets max-age=600,
+  // keyed on the URL alone — so one caller's 401 was served to everyone.
+  test('fail() sets no-store', () => {
+    const { res, sent } = spy()
+    fail(res, 401, 'unauthenticated', 'no')
+    expect(sent.headers['Cache-Control']).toBe('no-store')
+  })
+
+  test('notFound() sets no-store', () => {
+    const { res, sent } = spy()
+    notFound(res)
+    expect(sent.headers['Cache-Control']).toBe('no-store')
+  })
 })

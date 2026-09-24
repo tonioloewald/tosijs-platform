@@ -41,7 +41,7 @@ import { runWritePipeline, type WriteMethod } from './collections/write-pipeline
 import { validateWriteSet } from './collections/write-set'
 import { SEQ_COLLECTION } from './collections/sequence'
 import { physicalPath } from './collections/namespace'
-import { fail, notFound } from './errors'
+import { fail, notFound, noStore } from './errors'
 
 const compressResponse = compression()
 
@@ -409,6 +409,11 @@ async function commitWriteSet(
 }
 
 export const docs = onRequest({}, async (req, res) => {
+  // A platform API response is about the caller who asked — never shared
+  // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
+  // rate-limit / method refusals inside optionsResponse. A handler that is
+  // genuinely public may override it.
+  noStore(res)
   if (optionsResponse(req, res, ['GET', 'POST'])) {
     return
   }

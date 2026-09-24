@@ -53,7 +53,7 @@ import {
 } from './authorize'
 import { decideMint, hashToken, newTokenSecret } from './token'
 import { consentPage } from './consent-page'
-import { fail } from '../errors'
+import { fail, noStore } from '../errors'
 
 const db = () => admin.firestore()
 const requests = () => db().collection(AUTHORIZE_COLLECTION)
@@ -64,6 +64,11 @@ const selfUrl = (req: AuthenticatedRequest): string => {
 }
 
 export const authorize = onRequest({}, async (request, response: Response) => {
+  // A platform API response is about the caller who asked — never shared
+  // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
+  // rate-limit / method refusals inside optionsResponse. A handler that is
+  // genuinely public may override it.
+  noStore(response)
   const req = request as AuthenticatedRequest
   if (optionsResponse(req, response, ['OPTIONS', 'GET', 'POST'])) {
     return

@@ -39,7 +39,7 @@ import {
   type WriteMethod,
 } from './collections/write-pipeline'
 import { FirestoreStore } from './firestore-store'
-import { fail, notFound } from './errors'
+import { fail, notFound, noStore } from './errors'
 import { commitWithSeq } from './collections/sequence'
 
 // Schema validation moved into `runWritePipeline` at the 2026-09-16 cutover —
@@ -309,6 +309,11 @@ export const getDocData = async (
 }
 
 export const doc = onRequest({}, async (req, res) => {
+  // A platform API response is about the caller who asked — never shared
+  // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
+  // rate-limit / method refusals inside optionsResponse. A handler that is
+  // genuinely public may override it.
+  noStore(res)
   if (optionsResponse(req, res, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])) {
     return
   }
