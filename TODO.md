@@ -115,6 +115,70 @@ cases on 2026-09-11).
 - [ ] **Enumerate-then-map the blog** — inventory `blog.ts` + editors, map each feature to
   {web component | rules+proc | missing tosijs-ui primitive}. No silent third bucket.
 
+## Pre-release review follow-ups (0.2.0-beta.3, 2026-09-25)
+
+From `reviews/0.2.0-beta.3-log-integrity.md`. None of these gate the release. The review's
+blocker and majors were fixed before the tag.
+
+**Security / correctness**
+- [ ] **Behavioural tests for M1 and M3.** Today these are checked by source regex and pure
+  functions only. Add to `write-path.integration.test.ts`: (a) DELETE on an immutable collection
+  returns 409 and the doc is still there; (b) password signUp under a contact email resolves as
+  anonymous, while IdP sign-in with `email_verified: true` gets the role.
+- [ ] **Move the immutable DELETE decision into the kernel.** `doc.ts` decides it inline. Export
+  `deleteDecision(config, exists)` (or add DELETE to the pipeline) so the policy has one tested
+  copy that ships.
+- [ ] **Immutable PATCH is a content oracle** for a principal with write but no read: `200
+  unchanged` vs `409 immutable` confirms guesses. Either refuse PATCH on immutable (a log has
+  nothing to merge), or give non-readers the same response.
+- [ ] **Immutable is not atomic on single-document `/doc`.** `exists` is read outside the
+  transaction, and `commitWithSeq` never re-reads the document. Two concurrent creates of one id,
+  or a `/doc` write racing a `/docs` batch, can both pass. The batch path is safe. Add a
+  concurrency test **before virta relies on #25 under load.**
+- [ ] **An explicit POST retry on immutable returns 403 `exists`**, not a no-op. This is
+  documented in BETA.md. Consider running the no-op comparison before the POST guard.
+- [ ] **`--i-own-this-host` overrides an explicit `consumer` marker** (`sandbox-lib.js`). A host
+  marked `consumer` should refuse even with the flag.
+- [ ] **M2 on existing data.** Check whether any live registry or grant record holds a
+  `system`-named manifest. Decide how install, upgrade and uninstall treat one now that the name
+  is refused and `system:*` is dropped.
+
+**Test honesty (a vacuous pass is a failing test)**
+- [ ] **Emulator suites turn a broken fixture into a skip.** When emulators are reachable but the
+  token mint or `grantEmulatorRoles` fails, `beforeAll` should throw rather than set
+  `ready = false` (`write-path.integration.test.ts`). `privilege-lifecycle` ignores the grant's
+  return value.
+
+**Tooling / blast radius**
+- [ ] **Per-run verify identities leak Auth users.** Each verify run leaves a
+  `sandbox-<role>-<hex>@example.test` user behind; the role doc is now deleted, the user is not.
+  Delete it in cleanup. Also paginate `wipeRolesFor` (it uses `pageSize=300` and never pages).
+- [ ] **verify-token cleanup on every exit path.** `fatal()` now prints what it left behind but
+  does not delete it. Use try/finally or a registered cleanup.
+- [ ] **`sandbox-token --pin` fails on its second run** (fixed email, random password →
+  EMAIL_EXISTS). Make `--pin` imply the fixed password, or reset it. Delete the stale
+  "Deterministic per-role identities" docstring.
+- [ ] **Host marker: an explicit `--purpose`, never silently overwritten.** Today it is inferred
+  from the profile on every provision. Also: a way to mark an existing host, and document the
+  marker and `--i-own-this-host` in BETA.md.
+- [ ] **`kill-ports` SIGKILLs connected clients, not just listeners.** Use `-sTCP:LISTEN`, check
+  the process name, and send TERM before KILL.
+- [ ] **Firebase CLI active project is `virta-7e070` in this checkout**, so a bare `bun deploy`
+  targets virta's host. Consider having `deploy*` scripts assert the target, as
+  `assert-build-target.js` does for builds.
+- [ ] **release-doctor "packaged exports" false positive.** It reads `import` lines inside a JSDoc
+  example in `access.ts` (preserved in the `.d.ts`) as real imports. Fix upstream in
+  tosijs-coding-practices (skip comments), or move the example out of the doc comment.
+
+**Docs**
+- [ ] **`initial_state/README.md` still documents the old seed.** It shows `@gmail.com` owner and
+  admin grants and says "use `@gmail.com` addresses". It should describe the `.invalid`
+  placeholders, the claim ceremony and the verified-email requirement.
+- [ ] **BETA.md does not mention M1** (verified email for contact grants) **or M2** (the reserved
+  `system` namespace). `seed-emulators.js` still says userIds are auto-populated on first login.
+- [ ] **Package size in preflight.** Print packed and unpacked size and the change since the last
+  published version. beta.3 is 76.2 kB unpacked, +2.9%, from #25.
+
 ## Pre-release review follow-ups (2026-09-06)
 
 From [`reviews/2026-09-06-backend-consolidation.md`](reviews/2026-09-06-backend-consolidation.md)
