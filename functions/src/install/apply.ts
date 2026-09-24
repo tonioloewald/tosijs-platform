@@ -157,6 +157,30 @@ export function additiveProblems(
         )
       }
     }
+    // A sequence cannot be switched on or off under documents that already
+    // exist (#22). ON leaves every earlier document without `_seq`, so
+    // `since=0` answers "nothing" and a replica starts from a silently
+    // truncated log. OFF leaves every later document without one, so replicas
+    // silently stop receiving. Both directions are refused, and refused even
+    // for an empty collection: proving emptiness would mean reading the store
+    // here, racing the writes an upgrade does not stop, and a fresh name costs
+    // an empty collection nothing.
+    //
+    // Backfilling in `_created` order was considered and declined: it
+    // re-introduces the clock-drift ordering `seq` exists to replace, and it
+    // is a batched migration job, not an upgrade.
+    const seqBefore = before.envelope?.seq === true
+    const seqAfter = after.envelope?.seq === true
+    if (seqBefore !== seqAfter) {
+      problems.push(
+        seqAfter
+          ? `"${name}" turned envelope.seq ON — documents written before it ` +
+              'would have no _seq and be invisible to since=; declare seq ' +
+              'before the first write, or install the collection under a new name'
+          : `"${name}" turned envelope.seq OFF — replicas reading since= would ` +
+              'silently stop receiving new documents'
+      )
+    }
     if (
       JSON.stringify(before.unique ?? []) !== JSON.stringify(after.unique ?? [])
     ) {

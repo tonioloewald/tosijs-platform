@@ -446,3 +446,61 @@ describe('additiveProblems in isolation', () => {
     expect(additiveProblems(manifest(), manifest())).toEqual([])
   })
 })
+
+describe('a sequence cannot change under stored documents (#22)', () => {
+  const task = manifest().collections['virta:task']
+  const withEnvelope = (extra: Record<string, unknown>) =>
+    manifest({
+      version: '1.0.1',
+      collections: { 'virta:task': { ...task, ...extra } as never },
+    })
+
+  test('turning seq ON is refused — earlier documents would be invisible to since=', () => {
+    // virta's case: ten writes at 0.1.1, seq added at 0.1.2, and `since=0`
+    // answered "nothing" with no error anywhere.
+    const problems = additiveProblems(
+      manifest(),
+      withEnvelope({ envelope: { seq: true } })
+    )
+    expect(problems.join()).toContain('turned envelope.seq ON')
+    expect(problems.join()).toContain('new name')
+  })
+
+  test('turning seq OFF is refused — replicas would silently stop receiving', () => {
+    const problems = additiveProblems(
+      withEnvelope({ envelope: { seq: true } }),
+      withEnvelope({ envelope: { seq: false } })
+    )
+    expect(problems.join()).toContain('turned envelope.seq OFF')
+  })
+
+  test('keeping seq as it was is fine, as is a NEW collection that declares it', () => {
+    const seq = withEnvelope({ envelope: { seq: true } })
+    expect(additiveProblems(seq, seq)).toEqual([])
+    const added = manifest({
+      version: '1.0.1',
+      collections: {
+        ...manifest().collections,
+        'virta:event': { ...task, envelope: { seq: true } } as never,
+      },
+    })
+    expect(additiveProblems(manifest(), added)).toEqual([])
+  })
+
+  test('immutable may be turned on or off — it only governs future writes', () => {
+    const imm = withEnvelope({ immutable: true })
+    expect(additiveProblems(manifest(), imm)).toEqual([])
+    expect(additiveProblems(imm, manifest())).toEqual([])
+  })
+
+  test('the refusal reaches the install decision', () => {
+    const d = decideInstall({
+      ...base,
+      manifest: withEnvelope({ envelope: { seq: true } }),
+      existing: { name: 'virta', activeVersion: '1.0.0' } as never,
+      previousManifest: manifest(),
+    } as never)
+    expect(d.status).toBe('refused')
+    expect((d as { problems: string[] }).problems.join()).toContain('envelope.seq')
+  })
+})
