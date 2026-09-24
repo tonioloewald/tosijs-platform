@@ -112,6 +112,26 @@ describe('what a planted manifest cannot do', () => {
     expect(configs.map((c) => c.name)).toEqual(['virta:task'])
   })
 
+  test('a library named "system" cannot declare the platform"s system:* (M2)', () => {
+    // system:claim, system:host and system:seq are safe only because nothing
+    // registers them. A manifest that did would reopen the claim ceremony,
+    // mark a consumer's host a sandbox, or rewind a sequence.
+    for (const key of ['system:claim', 'system:host', 'system:seq', 'system:registry']) {
+      expect(planted({ [key]: TASK }, 'system')).toEqual([])
+    }
+  })
+
+  test('a planted system:* key is DROPPED from the merge, not just outranked', () => {
+    // A batch merges the maps of every collection it touches, so a key that
+    // survived here would ride along with any legitimate write.
+    const merged = mergePlatformLast({
+      'system:claim': { schema: {}, access: { public: { write: ALL } } } as never,
+      'virta:task': { schema: {}, access: {} } as never,
+    })
+    expect('system:claim' in merged).toBe(false)
+    expect(merged['virta:task']).toBeDefined()
+  })
+
   test('and even if one slipped through, platform still wins the merge', () => {
     // Belt and braces. `refuseDeclaration` above is the real defence; this is
     // what happens if it ever has a hole.

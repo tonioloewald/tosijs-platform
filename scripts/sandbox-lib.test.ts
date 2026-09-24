@@ -109,3 +109,56 @@ describe('the destructive command is reachable only through the guard', () => {
     expect(src).toMatch(/NEW_PROJECT === productionProjectId\(\)[\s\S]{0,160}Refusing/)
   })
 })
+
+describe('claimableGrant — the existing-host audit (B1)', () => {
+  test('the old seed documents are flagged', async () => {
+    const { claimableGrant } = await import('./sandbox-lib.js')
+    expect(
+      claimableGrant('owner-role', {
+        contacts: [{ type: 'email', value: 'owner@gmail.com' }],
+        roles: ['owner', 'developer', 'admin', 'editor', 'author'],
+      })
+    ).toContain('owner@gmail.com')
+    // Flagged even with no roles: the address is claimable, and roles can be
+    // added to that document later by someone who does not know its history.
+    expect(
+      claimableGrant('rando-role', {
+        contacts: [{ type: 'email', value: 'Rando@Gmail.com' }],
+        roles: [],
+      })
+    ).toContain('rando@gmail.com')
+  })
+
+  test('every sandbox-* grant is flagged, old fixed id or per-run', async () => {
+    const { claimableGrant } = await import('./sandbox-lib.js')
+    expect(claimableGrant('sandbox-owner', { roles: ['owner'] })).not.toBeNull()
+    expect(claimableGrant('sandbox-agentboss-3f9a', { roles: [] })).not.toBeNull()
+  })
+
+  test('a fixture address holding roles is flagged', async () => {
+    const { claimableGrant } = await import('./sandbox-lib.js')
+    expect(
+      claimableGrant('x', {
+        contacts: [{ type: 'email', value: 'sandbox-author@example.test' }],
+        roles: ['author'],
+      })
+    ).not.toBeNull()
+  })
+
+  test("the new seed, and a real person's grant, are not", async () => {
+    const { claimableGrant } = await import('./sandbox-lib.js')
+    expect(
+      claimableGrant('owner-role', {
+        contacts: [{ type: 'email', value: 'owner@example.invalid' }],
+        roles: [],
+      })
+    ).toBeNull()
+    expect(
+      claimableGrant('abc123', {
+        contacts: [{ type: 'email', value: 'alice@example.org' }],
+        roles: ['owner'],
+        userIds: ['u1'],
+      })
+    ).toBeNull()
+  })
+})

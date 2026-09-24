@@ -27,7 +27,7 @@
  * is not a passing one.
  */
 import { describe, test, expect, beforeAll } from 'bun:test'
-import { emulatorFetch } from './emulator-fetch.test'
+import { emulatorFetch, grantEmulatorRoles, ALL_ROLES } from './emulator-fetch.test'
 
 const PROJECT_ID = 'liquid-force-425209-g2'
 const FUNCTIONS_URL = `http://127.0.0.1:5001/${PROJECT_ID}/us-central1`
@@ -146,7 +146,13 @@ beforeAll(async () => {
     emulatorsRunning = false
   }
   if (!emulatorsRunning) return
-  ownerToken = (await idTokenFor('owner', 'owner@gmail.com')).token
+  // A suite-owned owner: the seeded owner@gmail.com grant was claimable on
+  // real hosts (#23) and the seed now grants nothing.
+  const owner = await idTokenFor('lifecycle-owner', 'lifecycle-owner@example.invalid')
+  if (owner.uid) {
+    await grantEmulatorRoles(PROJECT_ID, 'lifecycle-owner', owner.uid, ALL_ROLES)
+  }
+  ownerToken = owner.token
   const subject = await idTokenFor(SUBJECT_SUB, SUBJECT_EMAIL)
   subjectToken = subject.token
   subjectUid = subject.uid

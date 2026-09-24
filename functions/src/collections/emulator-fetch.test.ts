@@ -19,6 +19,48 @@
  */
 import { describe, test, expect } from 'bun:test'
 
+/**
+ * Write a role document straight into the Firestore EMULATOR, bypassing /doc.
+ *
+ * The integration suites used to authenticate as the seeded `owner@gmail.com`,
+ * whose seeded role granted everything. That seed was a claimable grant on
+ * every real host it touched (#23) and now grants nothing, so a suite that
+ * needs an owner mints one: an identity of its own plus a role document keyed
+ * on the uid the emulator assigned. `Bearer owner` is the emulator's admin
+ * credential, which is what lets this skip the endpoint — it works against an
+ * emulator and nowhere else.
+ *
+ * `_created` is written deliberately: role lookup orders by it, and a role
+ * document without it is invisible (#24).
+ */
+export async function grantEmulatorRoles(
+  projectId: string,
+  docId: string,
+  uid: string,
+  roles: string[]
+): Promise<boolean> {
+  const res = await emulatorFetch(
+    `http://127.0.0.1:8080/v1/projects/${projectId}/databases/(default)/documents/role/${docId}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+      body: JSON.stringify({
+        fields: {
+          name: { stringValue: docId },
+          roles: { arrayValue: { values: roles.map((r) => ({ stringValue: r })) } },
+          userIds: { arrayValue: { values: [{ stringValue: uid }] } },
+          contacts: { arrayValue: { values: [] } },
+          _created: { stringValue: new Date().toJSON() },
+        },
+      }),
+    }
+  )
+  return res.ok
+}
+
+/** Every role, for a suite that needs an owner. */
+export const ALL_ROLES = ['owner', 'developer', 'admin', 'editor', 'author']
+
 const RETRY_STATUSES = new Set([429, 503])
 
 /** fetch that retries throttling responses instead of reporting them as results. */

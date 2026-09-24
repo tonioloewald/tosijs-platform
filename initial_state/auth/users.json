@@ -1,7 +1,7 @@
 [
   {
     "uid": "owner-uid",
-    "email": "owner@gmail.com",
+    "email": "owner@example.invalid",
     "displayName": "Owner User",
     "disabled": false,
     "emailVerified": true,
@@ -9,7 +9,7 @@
   },
   {
     "uid": "admin-uid",
-    "email": "admin@gmail.com",
+    "email": "admin@example.invalid",
     "displayName": "Admin User",
     "disabled": false,
     "emailVerified": true,
@@ -17,7 +17,7 @@
   },
   {
     "uid": "writer-uid",
-    "email": "writer@gmail.com",
+    "email": "writer@example.invalid",
     "displayName": "Writer User",
     "disabled": false,
     "emailVerified": true,
@@ -25,7 +25,7 @@
   },
   {
     "uid": "rando-uid",
-    "email": "rando@gmail.com",
+    "email": "rando@example.invalid",
     "displayName": "Random User",
     "disabled": false,
     "emailVerified": true,

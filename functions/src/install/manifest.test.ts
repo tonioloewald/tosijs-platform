@@ -463,3 +463,29 @@ describe('immutable (#25)', () => {
     expect(imm('yes').join()).toContain('immutable: must be true or false')
   })
 })
+
+describe('the "system" namespace is reserved (M2)', () => {
+  test('a manifest named system declaring system:claim is refused', () => {
+    const problems = validateManifest(
+      ok({
+        name: 'system',
+        collections: {
+          'system:claim': {
+            schema: { type: 'object' },
+            access: [{ role: ROLES.public, read: 'ALL', write: 'ALL' }],
+          },
+        },
+      } as never),
+      opts
+    ).map((e) => e.message)
+    expect(problems.join()).toContain('reserved')
+  })
+
+  test('so is a manifest merely NAMED system, with no collections', () => {
+    const problems = validateManifest(
+      ok({ name: 'system', collections: {} } as never),
+      opts
+    ).map((e) => e.message)
+    expect(problems.join()).toContain('reserved namespace')
+  })
+})

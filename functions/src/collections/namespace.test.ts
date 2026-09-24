@@ -18,6 +18,7 @@ import {
   parseCollection,
   refuseDeclaration,
   isPlatformCollection,
+  isReservedCollection,
   physicalCollection,
   physicalPath,
   PLATFORM_COLLECTIONS,
@@ -172,5 +173,21 @@ describe('Firestore collection id legality', () => {
     // …but a raw `:` is legal in a query value, which is what /doc?p= receives.
     const parsed = new URL('https://x/doc?p=virta:task/abc')
     expect(parsed.searchParams.get('p')).toBe('virta:task/abc')
+  })
+})
+
+describe('reserved namespaces (M2, 0.2.0-beta.3 review)', () => {
+  test('no manifest may take the "system" namespace', () => {
+    expect(refuseDeclaration('system', 'system:claim')?.message).toContain('reserved')
+    expect(refuseDeclaration('system', 'system:anything')?.message).toContain('reserved')
+  })
+
+  test('isReservedCollection recognises system:* and nothing else', () => {
+    expect(isReservedCollection('system:claim')).toBe(true)
+    expect(isReservedCollection('system:host')).toBe(true)
+    expect(isReservedCollection('virta:task')).toBe(false)
+    // A bare name is the platform's by a different rule.
+    expect(isReservedCollection('system')).toBe(false)
+    expect(isReservedCollection('systems:x')).toBe(false)
   })
 })

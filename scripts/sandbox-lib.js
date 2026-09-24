@@ -228,3 +228,46 @@ export const parseArgs = (argv) => {
 
 export const homeBackupRoot = (projectId) =>
   path.join(os.homedir(), 'Backups', 'tosijs-platform', projectId)
+
+/**
+ * Why a role document is a leftover grant somebody else could claim, or null.
+ *
+ * The 0.2.0-beta.3 fix for the seed (#23) protects hosts seeded FROM NOW ON.
+ * Hosts seeded earlier still carry the old documents, and nothing removes them
+ * — `seed-production` only ever `.set()`s. This is the classifier behind
+ * `audit-host.js`, kept pure so it is tested rather than trusted.
+ *
+ * Flags three shapes:
+ *   - a contact on a real, registrable fixture address (`owner@gmail.com` …),
+ *     which the old seed keyed owner/admin/author on;
+ *   - a `sandbox-*` grant from the verify scripts — before #23 their password
+ *     was a constant in this repo, and every provisioned host has password
+ *     sign-in enabled;
+ *   - any contact on `@example.test` holding roles, for the same reason.
+ */
+export const OLD_SEED_ADDRESSES = [
+  'owner@gmail.com',
+  'admin@gmail.com',
+  'writer@gmail.com',
+  'rando@gmail.com',
+]
+
+export function claimableGrant(id, doc) {
+  const roles = doc?.roles ?? []
+  const emails = (doc?.contacts ?? [])
+    .filter((c) => c?.type === 'email')
+    .map((c) => String(c.value ?? '').toLowerCase())
+  const seeded = emails.find((e) => OLD_SEED_ADDRESSES.includes(e))
+  if (seeded) {
+    return `keyed on the old seed address ${seeded}` +
+      (roles.length ? `, granting ${roles.join(',')}` : '')
+  }
+  if (/^sandbox-/.test(id)) {
+    return `a verify-script grant${roles.length ? ` (${roles.join(',')})` : ''}`
+  }
+  const fixture = emails.find((e) => e.endsWith('@example.test'))
+  if (fixture && roles.length) {
+    return `keyed on the fixture address ${fixture}, granting ${roles.join(',')}`
+  }
+  return null
+}

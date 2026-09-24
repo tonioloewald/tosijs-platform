@@ -50,6 +50,7 @@ import { COLLECTIONS } from '../collections'
 import type { CollectionMap } from '../collections/access'
 import {
   NAMESPACE_SEPARATOR,
+  isReservedCollection,
   refuseDeclaration,
 } from '../collections/namespace'
 import { readEpoch } from './epoch'
@@ -150,11 +151,19 @@ export const installedRegistry = new CollectionRegistry(
 /**
  * Platform collections spread LAST, so they always win — an installed config
  * can never shadow `role`, `post` or `config`, whatever a manifest says.
+ *
+ * Reserved-namespace keys (`system:*`) are DROPPED, not merely outranked: the
+ * platform registers none of them, so there is nothing to win with, and a
+ * batch merges the maps of every collection it touches — one planted key would
+ * ride along with any legitimate write.
  */
-export const mergePlatformLast = (installed: CollectionMap): CollectionMap => ({
-  ...installed,
-  ...COLLECTIONS,
-})
+export const mergePlatformLast = (installed: CollectionMap): CollectionMap => {
+  const out: CollectionMap = {}
+  for (const [key, config] of Object.entries(installed)) {
+    if (!isReservedCollection(key)) out[key] = config
+  }
+  return { ...out, ...COLLECTIONS }
+}
 
 /**
  * The collection map to use for one request.
@@ -166,6 +175,14 @@ export const mergePlatformLast = (installed: CollectionMap): CollectionMap => ({
 export async function collectionsFor(
   collectionPath: string
 ): Promise<CollectionMap> {
-  if (!collectionPath.includes(NAMESPACE_SEPARATOR)) return COLLECTIONS
+  // A reserved namespace is the platform's, like a bare name — and the
+  // platform registers none of it, so it is unreachable. Checked here as well
+  // as at install and load: a planted registry entry must not reopen it.
+  if (
+    !collectionPath.includes(NAMESPACE_SEPARATOR) ||
+    isReservedCollection(collectionPath.split('/')[0])
+  ) {
+    return COLLECTIONS
+  }
   return mergePlatformLast(await installedRegistry.collections())
 }

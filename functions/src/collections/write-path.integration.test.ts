@@ -14,14 +14,16 @@
  * and (end-to-end) both fixes from this session — module.validate initializing
  * `revisions` to 0 on create (not NaN) and incrementing it on a source change.
  *
- * They authenticate the same way the seed script does: mint an emulator ID token
- * for the seeded `owner@gmail.com` Google user, whose role grants every role.
+ * They mint their OWN owner: an emulator ID token for a `.invalid` identity,
+ * plus a role document granting it every role (`grantEmulatorRoles`). The
+ * seeded owner used to be `owner@gmail.com` holding everything — a claimable
+ * grant on any real host seeded from this repo (#23) — and now holds nothing.
  */
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
 import { test, expect, describe, beforeAll } from 'bun:test'
-import { emulatorFetch } from './emulator-fetch.test'
+import { emulatorFetch, grantEmulatorRoles, ALL_ROLES } from './emulator-fetch.test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 
@@ -50,12 +52,12 @@ async function emulatorFunctionsRunning(): Promise<boolean> {
   }
 }
 
-// Mint an ID token for the seeded owner@gmail.com Google user, exactly as the
-// seed script creates it (accounts:signInWithIdp with a fake OIDC token).
+// Mint an ID token for a test-owned identity (accounts:signInWithIdp with a
+// fake OIDC token), then grant it every role by uid.
 async function getOwnerIdToken(): Promise<string | undefined> {
   const fakeIdToken = JSON.stringify({
-    sub: 'owner-uid',
-    email: 'owner@gmail.com',
+    sub: 'write-path-owner',
+    email: 'write-path-owner@example.invalid',
     name: 'Owner User',
     email_verified: true,
   })
@@ -80,8 +82,16 @@ async function getOwnerIdToken(): Promise<string | undefined> {
       }
     )
     if (!res.ok) return undefined
-    const json = (await res.json()) as { idToken?: string }
-    return json.idToken
+    const json = (await res.json()) as { idToken?: string; localId?: string }
+    if (!json.localId) return undefined
+    // Granted by the uid the emulator assigned — the seed no longer does it.
+    const granted = await grantEmulatorRoles(
+      PROJECT_ID,
+      'write-path-owner',
+      json.localId,
+      ALL_ROLES
+    )
+    return granted ? json.idToken : undefined
   } catch {
     return undefined
   }

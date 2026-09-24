@@ -402,7 +402,22 @@ export const doc = onRequest({}, async (req, res) => {
       return
 
     case 'DELETE':
-      if (doc.exists && access === ALL) {
+      if (doc.exists && access === ALL && config.immutable) {
+        // An immutable collection refuses deletes too (0.2.0-beta.3 review,
+        // M3). Refusing only rewrites would leave delete-then-recreate, which
+        // lands the same id with a FRESH `_seq` — exactly the re-sequencing
+        // `immutable` exists to prevent — and a replica never hears about a
+        // delete through `since=` anyway. Removal (a legal takedown, say) is
+        // an owner acting on the datastore, not a request through `/doc`.
+        // Reached only after the access gate, so naming the reason discloses
+        // nothing the caller could not already learn.
+        fail(
+          res,
+          409,
+          'immutable',
+          'this collection is immutable: a stored document cannot be deleted'
+        )
+      } else if (doc.exists && access === ALL) {
         try {
           const deleted = doc.data as Record<string, unknown>
           await store.delete(canonicalPath)

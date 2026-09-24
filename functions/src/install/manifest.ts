@@ -28,6 +28,7 @@
 import {
   refuseDeclaration,
   NAMESPACE_PATTERN,
+  RESERVED_NAMESPACES,
 } from '../collections/namespace'
 
 /** JSON Schema as data. Deliberately loose — the checks below are the gate. */
@@ -355,6 +356,12 @@ export function validateManifest(
 
   if (typeof m.name !== 'string' || !NAMESPACE_PATTERN.test(m.name)) {
     fail(`"name" must be a valid namespace, got ${JSON.stringify(m.name)}`)
+  }
+  // Refused by name as well as per collection: a manifest named `system` with
+  // no collections declares nothing, but its grant record would still claim
+  // the platform's namespace.
+  if ((RESERVED_NAMESPACES as readonly string[]).includes(m.name as string)) {
+    fail(`"name": "${String(m.name)}" is a reserved namespace; it belongs to the platform`)
   }
   if (typeof m.version !== 'string' || !SEMVER.test(m.version)) {
     fail(`"version" must be semver, got ${JSON.stringify(m.version)}`)

@@ -85,6 +85,7 @@ console.log(`\nverify-token → ${projectId}\n`)
 // crown-jewel refusals below are testing the rule and not the absence of it.
 let human = ''
 let uid = ''
+let ROLE_DOC = ''
 try {
   const out = execSync(
     `bun ${path.join(projectRoot, 'scripts', 'sandbox-token.js')} ` +
@@ -93,12 +94,17 @@ try {
   )
   human = (out.match(/SANDBOX_ID_TOKEN=(\S+)/) ?? [])[1] ?? ''
   uid = (out.match(/SANDBOX_UID=(\S+)/) ?? [])[1] ?? ''
+  // The grant lives at a PER-RUN id (`role/sandbox-agentboss-<run>`, #23).
+  // This used to be hardcoded to the old fixed id, so the revoke below PATCHed
+  // a document that no longer existed — which the REST API happily CREATES —
+  // reported a false red, and left a stray author+admin grant behind
+  // (0.2.0-beta.3 review, M4). Read it from the minter, never assume it.
+  ROLE_DOC = (out.match(/SANDBOX_ROLE_DOC=(\S+)/) ?? [])[1] ?? ''
 } catch (e) {
   fatal(`could not mint a human token: ${e.message}`)
 }
 if (!human) fatal('no human id token')
-
-const ROLE_DOC = 'role/sandbox-agentboss'
+if (!ROLE_DOC) fatal('sandbox-token did not report SANDBOX_ROLE_DOC')
 
 // --- minting ---------------------------------------------------------------
 const mint = (body) => call('POST', '/token', { bearer: human, body })
@@ -215,9 +221,14 @@ ok(
 )
 
 // Revoke the HUMAN's roles, touching nothing about the token.
-await firestore('PATCH', `${ROLE_DOC}?updateMask.fieldPaths=roles`, {
-  fields: { roles: { arrayValue: { values: [] } } },
-})
+// `currentDocument.exists=true`: a PATCH to a missing document would CREATE it,
+// so a wrong id must fail loudly here instead of passing vacuously.
+const revoked = await firestore(
+  'PATCH',
+  `${ROLE_DOC}?updateMask.fieldPaths=roles&currentDocument.exists=true`,
+  { fields: { roles: { arrayValue: { values: [] } } } }
+)
+if (!revoked.ok) fatal(`could not revoke ${ROLE_DOC}: ${revoked.status}`)
 const after = await call('GET', '/hello', { bearer: agent })
 ok(
   'REVOKING THE HUMAN REVOKES THE AGENT — no revocation list, nothing to remember',
@@ -236,16 +247,25 @@ ok(
 )
 
 // --- cleanup ----------------------------------------------------------------
-await firestore('PATCH', `${ROLE_DOC}?updateMask.fieldPaths=roles`, {
-  fields: {
-    roles: {
-      arrayValue: { values: [{ stringValue: 'author' }, { stringValue: 'admin' }] },
+// Re-grant briefly so the human may delete their own token record, then
+// delete the per-run grant outright.
+await firestore(
+  'PATCH',
+  `${ROLE_DOC}?updateMask.fieldPaths=roles&currentDocument.exists=true`,
+  {
+    fields: {
+      roles: {
+        arrayValue: { values: [{ stringValue: 'author' }, { stringValue: 'admin' }] },
+      },
     },
-  },
-})
+  }
+)
 if (minted.json?.id) {
   await call('DELETE', `/token?id=${minted.json.id}`, { bearer: human })
 }
+// The grant was minted for THIS run, so it is deleted rather than restored —
+// restoring it left an author+admin grant behind after every run.
+await firestore('DELETE', ROLE_DOC)
 await firestore('DELETE', 'post/token-probe')
 
 console.log(

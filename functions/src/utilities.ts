@@ -6,7 +6,11 @@ import { Response } from 'express'
 import { DecodedIdToken } from 'firebase-admin/auth'
 
 import { UserRoles, anonymousUser } from './collections/roles'
-import { joinRoleDocs, MAX_ROLE_DOCS } from './collections/join-roles'
+import {
+  joinRoleDocs,
+  lookupEmail,
+  MAX_ROLE_DOCS,
+} from './collections/join-roles'
 import {
   TOKEN_PREFIX,
   hashToken,
@@ -395,7 +399,8 @@ async function getUserRoles(req: AuthenticatedRequest): Promise<UserRoles> {
     return anonymousUser
   }
 
-  const docs = await findRoleDocs(user.uid, user.email)
+  // Only a VERIFIED email may resolve a role by contact — see lookupEmail.
+  const docs = await findRoleDocs(user.uid, lookupEmail(user))
   if (docs.length >= MAX_ROLE_DOCS) {
     functions.logger.error(
       `role lookup for ${user.uid} hit the ${MAX_ROLE_DOCS}-document bound — ` +

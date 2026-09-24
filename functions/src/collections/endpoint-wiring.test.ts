@@ -26,6 +26,7 @@ import { join } from 'path'
 const src = (f: string) => readFileSync(join(__dirname, '..', f), 'utf-8')
 const docTs = src('doc.ts')
 const docsTs = src('docs.ts')
+const utilitiesTs = src('utilities.ts')
 // Since the 2026-09-16 cutover the write DECISION lives in the pipeline and only
 // the commit and the HTTP mapping remain in doc.ts, so wiring assertions about
 // rejection messages have to span both files.
@@ -155,6 +156,20 @@ describe('doc.ts denial branches do not disclose existence', () => {
       /outcome\.reason === 'immutable'\)\s*\{[\s\S]*?fail\(res, 409, 'immutable'/
     )
     expect(docsTs).toMatch(/refusal\.reason === 'immutable'\s*\?\s*409/)
+  })
+
+  test('an immutable document cannot be DELETED either (M3)', () => {
+    // Delete-then-recreate lands the same id at a fresh _seq: refusing only
+    // rewrites would leave the re-sequencing #25 exists to prevent.
+    const del = docTs.slice(docTs.indexOf("case 'DELETE':"), docTs.indexOf("case 'POST':"))
+    expect(del).toMatch(/config\.immutable\)\s*\{[\s\S]*?fail\(\s*res,\s*409,\s*'immutable'/)
+    // ...and the refusal comes BEFORE the store delete.
+    expect(del.indexOf('config.immutable')).toBeLessThan(del.indexOf('store.delete('))
+  })
+
+  test('role lookup by email requires a VERIFIED email (M1)', () => {
+    expect(utilitiesTs).toContain('findRoleDocs(user.uid, lookupEmail(user))')
+    expect(utilitiesTs).not.toContain('findRoleDocs(user.uid, user.email)')
   })
 
   test('doc.ts is wired to the pipeline and keeps no second write path', () => {

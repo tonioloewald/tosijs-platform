@@ -105,6 +105,31 @@ export function parseCollection(segment: string): ParsedCollection | Error {
   return { namespace, name, logical: segment }
 }
 
+/**
+ * Namespaces the platform owns. No manifest may take one.
+ *
+ * `system:*` holds the claim ceremony (`system:claim`), the host marker that
+ * decides whether verification probes may run (`system:host`), the install
+ * registry and the sequence counters. All of it is safe ONLY because nothing
+ * registers those collections, so deny-default makes them unreachable through
+ * `/doc`. A library named `system` that declared them with public access would
+ * have been one configurator approval away from reopening the claim, marking a
+ * consumer's host a sandbox, or rewinding a counter — found in the 0.2.0-beta.3
+ * review (M2). Bare names were already the platform's; this is the same rule
+ * for the namespaced ones it uses.
+ */
+export const RESERVED_NAMESPACES = ['system'] as const
+
+/** Does this segment fall in a namespace the platform owns? */
+export const isReservedCollection = (segment: string): boolean => {
+  const parsed = parseCollection(segment)
+  return (
+    !(parsed instanceof Error) &&
+    parsed.namespace !== null &&
+    (RESERVED_NAMESPACES as readonly string[]).includes(parsed.namespace)
+  )
+}
+
 /** Is this a platform-owned (un-namespaced) collection? */
 export const isPlatformCollection = (segment: string): boolean => {
   const parsed = parseCollection(segment)
@@ -127,6 +152,9 @@ export function refuseDeclaration(
 ): Error | null {
   if (!NAMESPACE_PATTERN.test(namespace)) {
     return new Error(`"${namespace}" is not a valid namespace`)
+  }
+  if ((RESERVED_NAMESPACES as readonly string[]).includes(namespace)) {
+    return new Error(`"${namespace}" is a reserved namespace; it belongs to the platform`)
   }
   const parsed = parseCollection(segment)
   if (parsed instanceof Error) return parsed

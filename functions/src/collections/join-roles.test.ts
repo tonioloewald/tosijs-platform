@@ -11,7 +11,12 @@
 // @ts-ignore - bun:test types intermittently available
 import { describe, test, expect } from 'bun:test'
 
-import { joinRoleDocs, MAX_ROLE_DOCS, type RoleRecord } from './join-roles'
+import {
+  joinRoleDocs,
+  lookupEmail,
+  MAX_ROLE_DOCS,
+  type RoleRecord,
+} from './join-roles'
 import { anonymousUser, ROLES } from './roles'
 
 const doc = (over: Partial<RoleRecord> = {}): RoleRecord => ({
@@ -120,5 +125,20 @@ describe('the bound is a bound', () => {
     // grows into the hundreds it has stopped being a safety limit.
     expect(MAX_ROLE_DOCS).toBeGreaterThan(1)
     expect(MAX_ROLE_DOCS).toBeLessThanOrEqual(25)
+  })
+})
+
+describe('only a verified email resolves a role by contact', () => {
+  // Password sign-up is enabled on provisioned hosts and the API key is public,
+  // so an unverified email is a claim anyone can make about any address.
+  test('verified → the email is used', () => {
+    expect(lookupEmail({ email: 'a@b.c', email_verified: true })).toBe('a@b.c')
+  })
+
+  test('unverified or unstated → no email lookup at all', () => {
+    expect(lookupEmail({ email: 'a@b.c', email_verified: false })).toBeUndefined()
+    expect(lookupEmail({ email: 'a@b.c' })).toBeUndefined()
+    // Truthiness is not verification.
+    expect(lookupEmail({ email: 'a@b.c', email_verified: 'true' as never })).toBeUndefined()
   })
 })
