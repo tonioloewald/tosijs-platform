@@ -115,6 +115,35 @@ cases on 2026-09-11).
 - [ ] **Enumerate-then-map the blog** — inventory `blog.ts` + editors, map each feature to
   {web component | rules+proc | missing tosijs-ui primitive}. No silent third bucket.
 
+## Pre-release review follow-ups (0.2.0-beta.4, 2026-09-25)
+
+From `reviews/0.2.0-beta.4-cdn-cache.md` (#27, the CDN caching error responses across credentials).
+
+- [ ] **`/esm` still has the cross-credential cache problem on loewald.com** (security, verified,
+  predates beta.4). `esm.ts` resolves with the caller's real roles, is Hosting-rewritten, and
+  sets no Cache-Control, so a developer's private module source could be served to anonymous
+  callers (low practical exposure: `<tosi-esm>` sends no Authorization). Fix:
+  `getDoc(asPublicRequest(req), …)` plus `noStore`/`fail()` on the error branch.
+- [ ] **Route the SSR error paths through `fail()`/`notFound()`/`noStore()`**: `stored.ts`,
+  `prefetch.ts`, `sitemap.ts`, `cached-query.ts`. A transient 5xx or early 404 is otherwise cached
+  for 600 s. There is a specific trap in `stored.ts`: it sets `public, max-age=3600` before
+  streaming, so a stream failure sends a 500 that is marked cacheable for an hour.
+- [ ] **Derive the no-store guard from `index.ts`'s exports.** Every exported endpoint should
+  either call `noStore()` before `optionsResponse()` or sit on an explicit allowlist of
+  CDN-cacheable endpoints, instead of a hand-written list of eight. Optionally use one
+  `platformRequest(onRequest)` wrapper.
+- [ ] **Behavioural #27 tests** (today they regex the source): spy on `res`, then call
+  `optionsResponse` with a disallowed method and with the rate limit exhausted, call one error
+  branch per handler, and assert `no-store`.
+- [ ] **`gen.ts`**: GET, credential-dependent, no Cache-Control. It is safe only because nothing
+  rewrites to it. Add `noStore`, and settle what actually ships for `gen` (CLAUDE.md's
+  "firebase.json ignores gen.ts" looks stale).
+- [ ] **The authorize consent page's `public, max-age=3600`**: confirm it cannot vary by caller or
+  request id before it is shared by URL for an hour.
+- [ ] **Candidate for tosijs-coding-practices (deployment):** "every Cloud Function response
+  behind Firebase Hosting must set Cache-Control explicitly — Hosting adds max-age=600 and keys
+  on URL only." For Tonio to decide.
+
 ## Pre-release review follow-ups (0.2.0-beta.3, 2026-09-25)
 
 From `reviews/0.2.0-beta.3-log-integrity.md`. None of these gate the release. The review's

@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0-beta.4 — 2026-09-25
+
+One fix, found by the first consumer the day they put the API behind their own
+domain.
+
+### Fixed
+
+- **Error responses were CDN-cached across credentials behind Firebase
+  Hosting** (#27). A function response with no `Cache-Control` gets
+  `max-age=600` from Hosting, and its CDN keys on the URL alone — not on
+  `Authorization` — so one caller's `401`/`403`/`404` was served to every
+  caller of that URL for ten minutes, and no request header could opt out.
+  The worst case is a cached `401` making a client drop a *valid* token.
+  The platform API endpoints (`doc`, `docs`, `user`, `hello`, `claim`,
+  `install`, `token`, `authorize`) now send `Cache-Control: no-store` on
+  **every** response, success included, set before anything else runs. On
+  every endpoint, errors sent through the shared writers (`fail()`,
+  `notFound()`) and `optionsResponse`'s own 429/403 are `no-store` too. The
+  site's SSR endpoints (`prefetch`, `esm`, `sitemap`, `stored`,
+  `cachedQuery`) keep CDN caching for their successes. Some of their error
+  paths still bypass the shared writers; that is tracked in TODO.md, and none
+  of them is part of the platform profile a consumer host deploys.
+
 ## 0.2.0-beta.3 — 2026-09-24
 
 A log you can trust. The first consumer (tosijs-virta) found that a sequenced

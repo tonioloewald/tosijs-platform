@@ -81,8 +81,10 @@ export function fail(
   message: string,
   extra: Record<string, unknown> = {}
 ): void {
-  // Every error, on every endpoint — including the SSR ones that DO want CDN
-  // caching for their successes. An error is never someone else's answer.
+  // Every error sent through here, on any endpoint — including the SSR ones
+  // that DO want CDN caching for their successes. An error is never someone
+  // else's answer. (Some SSR error paths still write raw responses and bypass
+  // this — see TODO.md, #27 follow-ups.)
   noStore(res)
   res.status(status).json({ error, message, ...extra })
 }
