@@ -107,6 +107,7 @@ export type WriteOutcome =
         | 'exists'
         | 'missing'
         | 'unattributed'
+        | 'immutable'
       message: string
       details?: Array<{ path: string; message: string }>
     }
@@ -326,6 +327,26 @@ export async function runWritePipeline(
   // introduce a collision, and this is the stage that avoids privileged I/O.
   if (isUnchanged(data, existing)) {
     return { status: 'noop' }
+  }
+
+  // An immutable collection's documents never change once stored (#25).
+  // Checked AFTER the no-op test, so an identical retry still succeeds, and
+  // against post-transform data like the no-op test itself, so the two can
+  // never disagree about what "identical" means. `exists` rather than
+  // `existing`: an empty stored document is still a stored document.
+  //
+  // A transform that is not a pure function of the body — `derive: now`, or
+  // `shortId` on a field the caller omits — makes a retry differ from the
+  // original, and this refuses it. That is the correct answer for a log: send
+  // the derived value, or do not derive it.
+  if (config.immutable && exists) {
+    return {
+      status: 'rejected',
+      reason: 'immutable',
+      message:
+        'this collection is immutable: a stored document cannot be changed ' +
+        '(an identical write is a no-op)',
+    }
   }
 
   // Uniqueness (§4.2): privileged read, reject-only — it can refuse a duplicate

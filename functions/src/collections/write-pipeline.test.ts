@@ -657,3 +657,94 @@ describe('provenance is stamped, not claimed (#18)', () => {
     expect((await write(nobody)).status).toBe('write')
   })
 })
+
+describe('an immutable collection is a log, not a table (#25)', () => {
+  const log: CollectionConfig = { immutable: true, seq: true }
+  // A stored event as a replica has already folded it: stamped, sequenced,
+  // attributed by someone else.
+  const stored = {
+    kind: 'created',
+    at: EARLIER,
+    _created: EARLIER,
+    _modified: EARLIER,
+    _seq: 41,
+    _by: { uid: 'someone-else' },
+  }
+  const write = (
+    method: 'POST' | 'PUT' | 'PATCH',
+    body: Record<string, unknown>,
+    existing: Record<string, unknown> | null = stored,
+    config: CollectionConfig = log
+  ) =>
+    runWritePipeline(
+      { method, body, existing, config, userRoles: roles },
+      deps()
+    )
+
+  test('an identical re-write is a no-op — the torn-commit retry', async () => {
+    // Stamps, `_seq` and `_by` differ from the body and must not count: the
+    // retry comes from a different clock and possibly a different principal.
+    expect((await write('PUT', { kind: 'created', at: EARLIER })).status).toBe(
+      'noop'
+    )
+    expect((await write('PATCH', { kind: 'created' })).status).toBe('noop')
+  })
+
+  test('a different body is refused, never replaced', async () => {
+    // virta's re-import: same id, a freshly stamped `at`. Upsert would have
+    // replaced it and assigned a new `_seq`, moving history.
+    const o = await write('PUT', { kind: 'created', at: NOW })
+    expect(o).toMatchObject({ status: 'rejected', reason: 'immutable' })
+  })
+
+  test('a PATCH cannot sneak a change in by merging', async () => {
+    const o = await write('PATCH', { note: 'added later' })
+    expect(o).toMatchObject({ status: 'rejected', reason: 'immutable' })
+  })
+
+  test('the message names no path — the endpoint adds that', async () => {
+    const o = (await write('PUT', { kind: 'other' })) as { message: string }
+    expect(o.message).not.toContain('/')
+  })
+
+  test('creating is unaffected', async () => {
+    expect((await write('POST', { kind: 'created' }, null)).status).toBe('write')
+  })
+
+  test('an empty stored document is still stored', async () => {
+    // Firestore permits `set({})`; `existing` has no keys but the document
+    // exists, and a write must not treat it as free to replace.
+    const o = await runWritePipeline(
+      {
+        method: 'PUT',
+        body: { kind: 'x' },
+        existing: {},
+        exists: true,
+        config: log,
+        userRoles: roles,
+      },
+      deps()
+    )
+    expect(o).toMatchObject({ status: 'rejected', reason: 'immutable' })
+  })
+
+  test('the comparison is post-transform, like the no-op test', async () => {
+    // A transform that fills a field the body omits makes the retry identical
+    // to what is stored — and one that is not a pure function of the body
+    // would make it differ. Either way the decision is about what would LAND.
+    const withDefault: CollectionConfig = {
+      immutable: true,
+      validate: async (d) => ({ ...d, at: d.at ?? EARLIER }),
+    }
+    expect((await write('PUT', { kind: 'created' }, stored, withDefault)).status).toBe(
+      'noop'
+    )
+  })
+
+  test('without the flag, a sequenced collection still upserts', async () => {
+    // Opt-in, like `seq`. Pinned so that changing the default is a decision
+    // somebody makes, not a side effect.
+    const o = await write('PUT', { kind: 'created', at: NOW }, stored, { seq: true })
+    expect(o.status).toBe('write')
+  })
+})

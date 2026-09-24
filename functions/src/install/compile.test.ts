@@ -369,3 +369,24 @@ describe('derive: principal reads the REQUEST principal (#18)', () => {
     expect(out.roleRef).toBe('role-3')
   })
 })
+
+describe('immutable compiles to the pipeline flag (#25)', () => {
+  const compile = (immutable?: boolean) =>
+    compileCollection({
+      schema: { type: 'object' },
+      ...(immutable === undefined ? {} : { immutable }),
+      access: [{ role: 'author', read: 'ALL' }],
+    } as never)
+
+  test('declared true, it is set', () => {
+    // It was accepted by the validator and compiled to NOTHING before #25 — a
+    // manifest could declare its log immutable and every writer could still
+    // rewrite it. A declared guarantee wired to nothing is worse than none.
+    expect(compile(true).immutable).toBe(true)
+  })
+
+  test('absent or false, it is not', () => {
+    expect(compile().immutable).toBeUndefined()
+    expect(compile(false).immutable).toBeUndefined()
+  })
+})

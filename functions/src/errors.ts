@@ -41,6 +41,7 @@ export const ERROR_CODES = [
   'validate',
   'unique',
   'unattributed',
+  'immutable',
   'refused',
   'conflict',
   'not-sequenced',

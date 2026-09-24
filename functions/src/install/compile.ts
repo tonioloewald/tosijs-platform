@@ -298,6 +298,7 @@ export function compileCollection(
   // sequence is assigned inside the same transaction as the document write, so
   // nothing the pipeline could compute would be atomic with it.
   if (collection.envelope?.seq === true) config.seq = true
+  if (collection.immutable === true) config.immutable = true
   if (collection.envelope?.requireAttribution === true) {
     config.requireAttribution = true
   }

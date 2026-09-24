@@ -207,6 +207,25 @@ export interface CollectionConfig {
    */
   requireAttribution?: boolean
 
+  /**
+   * A stored document may never change (#25).
+   *
+   * Re-writing an existing document with the same content is a no-op — the
+   * retry of a torn commit, which must keep working. Re-writing it with
+   * DIFFERENT content is refused, and in a batch the whole commit with it.
+   * Never a replace, and so never a new `_seq`.
+   *
+   * This is what makes a sequenced collection a LOG rather than a table with a
+   * cursor. Without it an upsert replaces the document and assigns a fresh
+   * `_seq`, so a replica that already folded it sees the same id twice at two
+   * positions in the total order — silently. `seq` alone promises an order;
+   * only this promises that the order is not rewritten.
+   *
+   * Opt-in, like `seq`: most collections are tables and are meant to be
+   * edited. Deletes are not affected.
+   */
+  immutable?: boolean
+
   schema?: Base<any> // tosijs-schema for automatic validation
   unique?: string[]
   tagFields?: string[] // fields that support array-contains queries via tagField=<value> syntax

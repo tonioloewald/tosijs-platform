@@ -388,7 +388,11 @@ async function commitWriteSet(
     if (refusal) {
       fail(
         res,
-        refusal.reason === 'schema' ? 400 : 403,
+        refusal.reason === 'schema'
+          ? 400
+          : refusal.reason === 'immutable'
+            ? 409
+            : 403,
         refusal.reason as never,
         refusal.message as string,
         {

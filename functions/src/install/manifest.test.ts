@@ -435,3 +435,31 @@ describe('envelope.seq (#14)', () => {
     expect(env({ seq: true, version: { bumpOn: ['x'] } })).toEqual([])
   })
 })
+
+describe('immutable (#25)', () => {
+  const imm = (immutable: unknown) =>
+    validateManifest(
+      ok({
+        collections: {
+          'virta:event': {
+            schema: { type: 'object' },
+            immutable,
+            envelope: { seq: true },
+            access: [{ role: ROLES.author, read: 'ALL' }],
+          },
+        },
+      } as never),
+      opts
+    ).map((e) => e.message)
+
+  test('a boolean is accepted', () => {
+    expect(imm(true)).toEqual([])
+    expect(imm(false)).toEqual([])
+  })
+
+  test('a non-boolean is refused rather than coerced', () => {
+    // `"yes"` read as false would leave a consumer believing its log is
+    // append-only while every writer can rewrite it.
+    expect(imm('yes').join()).toContain('immutable: must be true or false')
+  })
+})

@@ -94,6 +94,12 @@ export interface InstalledCollection {
   unique?: string[]
   tagFields?: string[]
   derive?: DeriveOp[]
+  /**
+   * A stored document may never change: an identical re-write is a no-op, a
+   * different one is refused (#25). Declare it on a log — with `envelope.seq`,
+   * it is what stops an upsert from re-sequencing history. See
+   * `CollectionConfig.immutable`.
+   */
   immutable?: boolean
   cacheLatencySeconds?: number
   /**
@@ -416,6 +422,13 @@ export function validateManifest(
             'a composite constraint needs an index, which is a deployment'
         )
       }
+    }
+
+    // Refused rather than coerced, like the envelope flags: `immutable: "yes"`
+    // read as false would leave a consumer believing its log cannot be
+    // rewritten when every writer can rewrite it.
+    if (c.immutable !== undefined && typeof c.immutable !== 'boolean') {
+      fail(`${where}.immutable: must be true or false`)
     }
 
     if (c.envelope !== undefined) {

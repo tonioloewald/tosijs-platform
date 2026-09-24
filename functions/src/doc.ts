@@ -483,6 +483,11 @@ export const doc = onRequest({}, async (req, res) => {
           outcome.reason === 'unattributed'
         ) {
           fail(res, 403, outcome.reason, outcome.message)
+        } else if (outcome.reason === 'immutable') {
+          // 409: the request is well-formed and authorized, and conflicts with
+          // what is stored. Retrying it cannot succeed; sending what is stored
+          // would.
+          fail(res, 409, 'immutable', outcome.message)
         } else if (outcome.reason === 'schema') {
           fail(res, 400, 'schema', outcome.message, {
             details: outcome.details,

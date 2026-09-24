@@ -146,6 +146,17 @@ describe('doc.ts denial branches do not disclose existence', () => {
     expect(branch).toMatch(/fail\(res, 403, outcome\.reason, outcome\.message\)/)
   })
 
+  test('an immutable refusal is a 409 on both write routes (#25)', () => {
+    // Not 403: the caller is authorized and the request is well-formed; it
+    // conflicts with what is stored. A client retrying on 403-means-transient
+    // would loop; 409 says "send what is there, or nothing".
+    const write = docTs.slice(docTs.indexOf("case 'POST':"))
+    expect(write).toMatch(
+      /outcome\.reason === 'immutable'\)\s*\{[\s\S]*?fail\(res, 409, 'immutable'/
+    )
+    expect(docsTs).toMatch(/refusal\.reason === 'immutable'\s*\?\s*409/)
+  })
+
   test('doc.ts is wired to the pipeline and keeps no second write path', () => {
     // The cutover's real risk is a partial revert leaving both paths alive.
     expect(docTs).toContain('runWritePipeline(')
