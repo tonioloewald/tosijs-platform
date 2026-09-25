@@ -47,3 +47,17 @@ CLOUDSDK_PYTHON=/opt/homebrew/bin/python3.12 npx -y firebase-tools@latest deploy
 
 Then run `bun run verify:prod` and check the editor by hand. Rollback: redeploy from the tag
 production ran before, or restore documents from the backup through `/doc`.
+
+## Production result (2026-09-25)
+
+Deployed by the owner. All 15 functions on liquid-force-425209-g2 were updated at ~20:30Z, including
+the four new ones (`claim`, `install`, `token`, `authorize`).
+
+- `verify:prod`: 17 pass, 0 fail. The 4 authorized checks skip by design: no token is minted
+  against production.
+- SSR home and post: 200, correct titles, `cache-control: private` (unchanged).
+- `/doc` 404: `cache-control: no-store` (#27 live). `/docs` lists posts.
+- Browser, home and a post: render fully. No console errors, only deprecation warnings
+  (`elementCreator` tag/styleSpec, `<xin-slot>` → `<tosi-slot>`).
+
+**Still owed:** the owner saving one post through the editor.
