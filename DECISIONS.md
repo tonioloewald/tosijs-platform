@@ -29,6 +29,7 @@ time, carry the entry with the code.
 | [D16](#d16) | Bootstrap by proving datastore access, not by a first-run secret | this repo |
 | [D17](#d17) | Install v1 is declarative; `functions` is refused, not ignored | this repo |
 | [D18](#d18) | Consumer order: virta, then the tjs-lang platform, then loewald.com | all |
+| [D19](#d19) | loewald.com moves ahead of the tjs-lang backend (amends D18) | all |
 
 ---
 
@@ -466,3 +467,18 @@ pieces rather than converted in place.
 Immediate consequence: **the `/doc` swap for platform collections is NOT on virta's critical path.**
 Installed collections are what virta needs; `post`/`page`/`module` can stay compiled until their
 turn. A production-touching migration was about to be done for a consumer that does not require it.
+
+## D19
+**loewald.com moves ahead of the tjs-lang platform backend.** *(2026-09-25, owner)* Amends D18's
+order: **virta, then loewald.com, then the tjs-lang platform backend.**
+
+D18 put the blog last on risk grounds. Since then virta has exercised everything the blog needs:
+collections, public reads, attributed writes, provenance, sequencing and install. The surface the
+tjs-lang backend depends on most, `/esm` and libraries-as-a-service, is one the blog barely uses.
+So the blog is now the lower-demand consumer of what is already proven, and tjs-lang would be the
+first real test of what is not.
+
+D18's other half stands: the blog is migrated in discrete pieces, not converted in place. In
+order: a catch-up deploy of current platform code (compiled configs, rehearsed on a clone); then
+the deferred swap of the bare-name collections to the registry's seeded configs (measured on the
+clone first); client extraction to `tosijs-blog` later, per ROADMAP.
