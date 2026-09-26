@@ -115,6 +115,16 @@ cases on 2026-09-11).
 - [ ] **Enumerate-then-map the blog** — inventory `blog.ts` + editors, map each feature to
   {web component | rules+proc | missing tosijs-ui primitive}. No silent third bucket.
 
+## Registry design (2026-09-26)
+
+- [ ] **Shared rules, scoped to one root collection's subcollections.** No mechanism exists today:
+  every collection carries its own `access` array, so identical rules are written out per
+  collection. Owner's constraint: a shared rule may apply across the **subcollections of a
+  single root collection**, never across root collections. Some storage backends have no
+  subcollections; define the scope in logical terms (a path prefix) rather than Firestore's. Prefer
+  **expansion at install time**: the manifest names the shared rule, and the stored config holds
+  the expanded copy, so each collection's actual rules stay visible and diffable on upgrade.
+
 ## Pre-release review follow-ups (0.2.0-beta.4, 2026-09-25)
 
 From `reviews/0.2.0-beta.4-cdn-cache.md` (#27, the CDN caching error responses across credentials).
