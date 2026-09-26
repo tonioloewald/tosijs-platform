@@ -434,3 +434,11 @@ describe('role resolution records WHO AUTHENTICATED (#28)', () => {
     expect(utilitiesTs).toMatch(/principal: \{\s*uid: record\.principalUid,[\s\S]*?record\.principalName/)
   })
 })
+
+describe('/claim never names a role document after an email (0.2.1 re-review)', () => {
+  test('the claimer\'s new role document is named from the display name, not user.email', () => {
+    const claim = src('claim.ts')
+    expect(claim).not.toMatch(/name: user\.email/)
+    expect(claim).toContain('credentialName(user)')
+  })
+})

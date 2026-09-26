@@ -7,7 +7,7 @@
 
 Status: **0.2.1**, 2026-09-26 (0.2.0 was the first stable release). Two production hosts run it:
 tosijs-virta's (the first consumer, which broke the betas and got every break fixed) and
-loewald.com. Verified against a real deployed host on every change: 94 assertions across
+loewald.com. Verified against a real deployed host on every change: 99 checks across
 six ceremonies (`scripts/verify-*.js`).
 
 ## Start here

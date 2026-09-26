@@ -22,7 +22,12 @@ Two fixes reported by tosijs-virta, the proving consumer.
       name.
     - A contact or shared match: the principal's own display name, or no name
       at all, never the document's.
-    - Never an email address, because `_by` is published with public documents.
+    - Never an email address, nor a value from the principal's contacts,
+      because `_by` is published with public documents. This is enforced where
+      `_by` is produced, so role documents and tokens already stored on live
+      hosts are covered without a migration. `/claim` used to name the first
+      owner's role document after their email; it now uses their display name,
+      or `Host owner`. Rename such a document to set the curated name.
     - Display names are self-asserted, so spoofing is confined to the case
       where no curated name exists.
   - **An agent's writes carry its human's name.** The minting human's display
@@ -36,7 +41,7 @@ Two fixes reported by tosijs-virta, the proving consumer.
   happen inside it.
 
 **Verified:**
-- **Unit tests:** 768 passing.
+- **Unit tests:** 775 passing.
 - **Emulator suites:** 54 pass, including a new step: a contact-matched writer
   on a document listing someone else first is stamped as themselves.
 - **Live on the sandbox:** a 5-way race on one id gives exactly one `200`,

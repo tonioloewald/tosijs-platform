@@ -429,3 +429,20 @@ describe('derive: principal names who AUTHENTICATED (#28; 0.2.1 review, B1)', ()
     expect(out.authorName).toBe('Service Principal')
   })
 })
+
+describe('derive:principal never derives an email name (0.2.1 re-review)', () => {
+  test('a sole owner of an email-named document with a display name → the display name', async () => {
+    const c = compileCollection({
+      schema: { type: 'object' },
+      derive: [{ op: 'principal', to: 'authorName', field: 'name' }],
+      access: [{ role: 'author', write: 'ALL' }],
+    } as never)
+    const validate = c.validate as (d: unknown, r: unknown, e: unknown) => Promise<Record<string, unknown>>
+    const out = await validate(
+      {},
+      { name: 'owner@example.org', contacts: [], roles: ['author'], userIds: ['me'], principal: { uid: 'me', name: 'Ada' } },
+      {}
+    )
+    expect(out.authorName).toBe('Ada')
+  })
+})

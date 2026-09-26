@@ -857,3 +857,41 @@ describe('_by.name: curated when owned (owner decision 2026-09-26)', () => {
     expect(by.name).toBe('Ada')
   })
 })
+
+describe('_by.name is NEVER an email or a contact value (0.2.1 re-review)', () => {
+  // /claim named every host's first owner's role document after their email;
+  // "curated when owned" then published it. Filtered where `_by` is made.
+  const byOf = async (userRoles: UserRoles) =>
+    ((await runWritePipeline(
+      { method: 'POST', body: { t: 'x' }, existing: null, config: {}, userRoles },
+      deps()
+    )) as { data: { _by: Record<string, unknown> } }).data._by
+  const contacts = [{ type: 'email', value: 'owner@example.org' }] as never
+
+  test('sole owner of an email-named document, with a display name → the display name', async () => {
+    const by = await byOf({ name: 'owner@example.org', contacts, roles: [], userIds: ['me'], principal: { uid: 'me', name: 'Ada' } })
+    expect(by.name).toBe('Ada')
+  })
+
+  test('…and with no display name → NO name', async () => {
+    const by = await byOf({ name: 'owner@example.org', contacts, roles: [], userIds: ['me'], principal: { uid: 'me' } })
+    expect('name' in by).toBe(false)
+  })
+
+  test('an email stored as a token\'s principalName is dropped too', async () => {
+    const by = await byOf({ name: 'Curated', contacts: [], roles: [], userIds: ['svc'], principal: { uid: 'me', name: 'me@example.org' } })
+    expect('name' in by).toBe(false)
+  })
+
+  test('a name equal to a contact value (not only emails) is dropped', async () => {
+    const phone = [{ type: 'phone', value: '+1 555 123 4567' }] as never
+    const by = await byOf({ name: '+1 555 123 4567', contacts: phone, roles: [], userIds: ['me'], principal: { uid: 'me' } })
+    expect('name' in by).toBe(false)
+  })
+
+  test('no principal (a kernel consumer): an email document name is still never published', async () => {
+    const by = await byOf({ name: 'owner@example.org', contacts, roles: [], userIds: ['me'] })
+    expect(by.uid).toBe('me')
+    expect('name' in by).toBe(false)
+  })
+})

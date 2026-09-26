@@ -102,22 +102,37 @@ export const anonymousUser: UserRoles = Object.freeze({
  *     symptom). A display name is self-asserted, so spoofing is confined to
  *     the case where no curated name exists for this person;
  *   - no principal (a kernel consumer) → the document's name, as before.
- * Never an email address: `_by` is published with public documents.
+ * Never an email address, nor a contact value: `_by` is published with
+ * public documents. Enforced here, for every candidate.
  */
 export function principalIdentity(userRoles: UserRoles | null | undefined): {
   uid?: string
   name?: string
 } {
   if (!userRoles) return {}
-  const docName =
-    userRoles.name && userRoles.name !== 'unknown' ? userRoles.name : undefined
+  // Enforced HERE, where `_by` is produced, not only where names are
+  // written: a name that is an email address, or equals one of the
+  // principal's contacts, is never published (0.2.1 re-review). /claim named
+  // every host's first owner's role document after their email, so "curated
+  // when owned" published it — and role documents and tokens already stored
+  // on live hosts carry such names. Filtering at read covers them all
+  // without a migration.
+  const contacts = new Set(
+    (userRoles.contacts ?? []).map((c) => String((c as { value?: unknown }).value ?? '').toLowerCase())
+  )
+  const publishable = (n: string | undefined): string | undefined =>
+    n && n !== 'unknown' && !n.includes('@') && !contacts.has(n.toLowerCase())
+      ? n
+      : undefined
+  const docName = publishable(userRoles.name)
   const principal = userRoles.principal
   if (!principal) {
     const uid = userRoles.userIds?.[0]
     return { ...(uid ? { uid } : {}), ...(docName ? { name: docName } : {}) }
   }
+  const credential = publishable(principal.name)
   const soleOwner =
     userRoles.userIds?.length === 1 && userRoles.userIds[0] === principal.uid
-  const name = soleOwner ? (docName ?? principal.name) : principal.name
+  const name = soleOwner ? (docName ?? credential) : credential
   return { uid: principal.uid, ...(name ? { name } : {}) }
 }

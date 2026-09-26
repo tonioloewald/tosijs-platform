@@ -46,7 +46,7 @@ import {
   type ClaimState,
 } from './install/claim'
 import { ROLES } from './collections/roles'
-import { lookupEmail } from './collections/join-roles'
+import { credentialName, lookupEmail } from './collections/join-roles'
 import { fail, noStore } from './errors'
 
 /** `system:claim/current`, split. Not a registered collection — see epoch.ts. */
@@ -184,7 +184,10 @@ export const claim = onRequest({}, async (request, response: Response) => {
         // grant itself rides on the uid either way.
         const contactEmail = lookupEmail(user)
         tx.set(admin.firestore().collection('role').doc(), {
-          name: user.email ?? user.uid,
+          // Never the email: a role document's name is what "curated when
+          // owned" publishes as `_by.name` (0.2.1 re-review). The display name
+          // if there is one; otherwise a neutral label an operator can edit.
+          name: credentialName(user) ?? 'Host owner',
           contacts: contactEmail
             ? [{ type: 'email', value: contactEmail }]
             : [],
