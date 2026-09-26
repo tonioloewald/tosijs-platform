@@ -5,6 +5,7 @@ import compression from 'compression'
 import { getDoc, getRef } from './doc'
 import { isPublished } from '../shared/post'
 import { optionsResponse } from './utilities'
+import { collectionsFor } from './install/installed'
 
 const compressResponse = compression()
 
@@ -27,7 +28,7 @@ export const sitemap = onRequest({}, async (req, res) => {
 
   const staticUrls = [`https://${host}/`, `https://${host}/blog/`]
 
-  const postsRef = await getRef('post', true)
+  const postsRef = await getRef('post', true, await collectionsFor('post'))
   if (postsRef instanceof Error) {
     res.status(500).send('Error loading posts')
     return

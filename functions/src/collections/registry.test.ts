@@ -542,3 +542,122 @@ describe('the TTL reload happens in the BACKGROUND when the epoch vouches for th
     state.release()
   })
 })
+
+describe('reload races (0.2.0-beta.5 review)', () => {
+  const without = (name: string) => STORED.filter((e) => e.name !== name)
+
+  test('a change landing MID-LOAD never leaves old rules tagged as current', async () => {
+    // Epoch read AFTER the load used to pair old entries with the new epoch,
+    // and every later check then confirmed them. Read first, the next check
+    // sees the epoch has moved and reloads.
+    const state = { entries: STORED, epoch: 1, changeDuringLoad: false }
+    const source: ConfigSource = {
+      load: async () => {
+        const e = state.entries
+        if (state.changeDuringLoad) {
+          state.entries = without('post')
+          state.epoch = 2
+          state.changeDuringLoad = false
+        }
+        return e
+      },
+      epoch: async () => state.epoch,
+    }
+    let clock = 1000
+    const reg = new CollectionRegistry(source, { now: () => clock, epochTtlMs: 100 })
+    state.changeDuringLoad = true
+    expect(await reg.resolve('post')).toBeDefined() // loaded the pre-change set
+    clock += 101
+    expect(await reg.resolve('post')).toBeUndefined() // and noticed the change
+  })
+
+  test('after a change is seen, a request does NOT join a load that started before it', async () => {
+    let release = () => undefined as void
+    const state = { entries: STORED, epoch: 1, loads: 0, block: false }
+    const source: ConfigSource = {
+      load: async () => {
+        state.loads++
+        const snapshotOfEntries = state.entries
+        if (state.block) {
+          state.block = false
+          await new Promise<void>((r) => (release = r))
+        }
+        return snapshotOfEntries
+      },
+      epoch: async () => state.epoch,
+    }
+    let clock = 1000
+    const reg = new CollectionRegistry(source, { now: () => clock, ttlMs: 500, epochTtlMs: 100 })
+    await reg.collections()
+    // A background reload starts (TTL passed, epoch unchanged) and stalls,
+    // holding the OLD entries.
+    state.block = true
+    clock += 501
+    await reg.collections()
+    // Now the rules change.
+    state.entries = without('post')
+    state.epoch = 2
+    clock += 101
+    expect(await reg.resolve('post')).toBeUndefined()
+    // The stalled, stale load finishing late must not overwrite the new rules.
+    release()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(await reg.resolve('post')).toBeUndefined()
+  })
+
+  test('a FAILED BACKGROUND reload keeps the snapshot the epoch confirmed', async () => {
+    // Emptying it would take every collection on the instance offline for a
+    // transient read error — broader than the owner's per-collection rule.
+    const state = { fail: false }
+    const source: ConfigSource = {
+      load: async () => {
+        if (state.fail) throw new Error('transient')
+        return STORED
+      },
+      epoch: async () => 1,
+    }
+    let clock = 1000
+    const reg = new CollectionRegistry(source, { now: () => clock, ttlMs: 500, epochTtlMs: 100 })
+    await reg.collections()
+    state.fail = true
+    clock += 501
+    await reg.collections() // background reload starts and fails
+    await new Promise((r) => setTimeout(r, 0))
+    clock += 101
+    expect(await reg.resolve('post')).toBeDefined()
+  })
+
+  test('a failed INLINE load still fails closed', async () => {
+    const source: ConfigSource = {
+      load: async () => {
+        throw new Error('down')
+      },
+      epoch: async () => 1,
+    }
+    const reg = new CollectionRegistry(source, { now: () => 1000 })
+    expect(await reg.resolve('post')).toBeUndefined()
+  })
+
+  test('invalidate() discards a load that was already in flight', async () => {
+    let release = () => undefined as void
+    const state = { entries: STORED, first: true }
+    const source: ConfigSource = {
+      load: async () => {
+        const e = state.entries
+        if (state.first) {
+          state.first = false
+          await new Promise<void>((r) => (release = r))
+        }
+        return e
+      },
+    }
+    const reg = new CollectionRegistry(source, { now: () => 1000 })
+    const stale = reg.collections() // starts, stalls with the old entries
+    state.entries = without('post')
+    reg.invalidate()
+    expect(await reg.resolve('post')).toBeUndefined() // a new load, new rules
+    release()
+    await stale
+    expect(await reg.resolve('post')).toBeUndefined() // the stale load did not win
+  })
+})

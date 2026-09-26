@@ -154,17 +154,19 @@ describe('post: the data form reproduces the shipped behaviour', () => {
     expect(out.path).toBe('hello-world')
   })
 
-  test('a supplied slug is NORMALISED, not trusted verbatim', async () => {
-    // blog.ts slugifies whatever the author typed too, so a hand-entered slug
-    // and a generated one cannot disagree about what is legal.
+  test('a supplied path is left EXACTLY as written — like blog.ts', async () => {
+    // blog.ts generates a path only when none is given. This test used to
+    // assert the opposite ("normalised") under a comment claiming blog.ts
+    // did the same; it did not, and the seed would have rewritten 96 live
+    // post URLs on their next edit (0.2.0-beta.5 review, B1).
     const validate = compileCollection(POST_AS_DATA).validate as never as (
       d: unknown,
       r: unknown,
       e: unknown
     ) => Promise<Record<string, unknown>>
-    expect((await validate({ title: 'T', path: 'Hello World!' }, who([]), {})).path).toBe(
-      'hello-world'
-    )
+    for (const path of ['Hello World!', 'what-s-in-a-name-', 'x'.repeat(86), 'under_score']) {
+      expect((await validate({ title: 'T', path }, who([]), {})).path).toBe(path)
+    }
   })
 })
 

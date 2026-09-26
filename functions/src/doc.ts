@@ -31,7 +31,6 @@ import {
   opaqueStatus,
   type CollectionMap,
 } from './collections/access'
-import { COLLECTIONS } from './collections'
 import { collectionsFor } from './install/installed'
 import { UserRoles } from './collections/roles'
 import {
@@ -104,8 +103,11 @@ export const getRef = async (
   // Which configs to resolve `field=value` against. Defaults to the compiled
   // platform map; a namespaced request passes the merged map so an installed
   // collection's own `unique`/`tagFields` are honoured. NOT a global read: see
-  // `collectionsFor`, which short-circuits bare names to exactly this default.
-  collections: CollectionMap = COLLECTIONS
+  // REQUIRED, with no default (0.2.0-beta.5 review): a silent default to the
+  // compiled map meant a call site that forgot to pass the request's map
+  // resolved `field=value` against rules that, with the registry switch on,
+  // are no longer the ones in force. A forgotten site now fails to compile.
+  collections: CollectionMap
 ): Promise<FirestoreRef | Error> => {
   const pathParts = path.split('/')
 
@@ -174,6 +176,7 @@ export const getRef = async (
 }
 
 const isUnique = async (
+  collections: CollectionMap,
   path: string,
   field: string,
   value: unknown,
@@ -184,7 +187,7 @@ const isUnique = async (
   }
   const parts = path.split('/')
   parts.pop()
-  const ref = await getRef(parts.join('/'), true)
+  const ref = await getRef(parts.join('/'), true, collections)
   if (ref instanceof Error) {
     return false
   }
@@ -221,7 +224,8 @@ const isUnique = async (
 const storeFor = (collections: CollectionMap) =>
   new FirestoreStore({
     getRef: (path, isCollection) => getRef(path, isCollection, collections),
-    isUnique,
+    isUnique: (path, field, value, existing) =>
+      isUnique(collections, path, field, value, existing),
   })
 
 export const getDoc = async (

@@ -3,6 +3,7 @@ import {
   platformConfigsFrom,
   platformDocId,
   platformFromRegistry,
+  missingPlatformConfigs,
 } from './platform-configs'
 import { PLATFORM_CONFIGS } from '../collections/seed-configs'
 import { compileStored } from '../collections/registry'
@@ -81,5 +82,14 @@ describe('the switch', () => {
     }
     process.env.PLATFORM_CONFIGS_FROM_REGISTRY = 'true'
     expect(platformFromRegistry()).toBe(true)
+  })
+})
+
+describe('missingPlatformConfigs — an unseeded or partial registry is loud', () => {
+  test('nothing missing when every seed is present', () => {
+    expect(missingPlatformConfigs(PLATFORM_CONFIGS)).toEqual([])
+  })
+  test('an empty registry reports every platform name', () => {
+    expect(missingPlatformConfigs([]).sort()).toEqual(PLATFORM_CONFIGS.map((c) => c.name).sort())
   })
 })

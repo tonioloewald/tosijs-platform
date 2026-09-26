@@ -177,11 +177,13 @@ export function compileDerive(
           const current = String(out[op.to] ?? '').trim()
           if (op.when === 'always' || !current) {
             out[op.to] = slugify(String(out[op.from] ?? ''))
-          } else {
-            // Normalise what the author typed, so a hand-entered slug and a
-            // generated one cannot disagree about what is legal.
-            out[op.to] = slugify(current)
           }
+          // A SUPPLIED value is left exactly as written. This used to
+          // "normalise" it, which ran on every edit — so a stored path like
+          // `what-s-in-a-name-` or one over 80 characters was silently
+          // rewritten the next time the post was saved, breaking every link to
+          // it. 96 of 791 production posts would have moved (0.2.0-beta.5
+          // review, B1). `when: 'absent'` means exactly that.
           break
         }
         case 'shortId': {

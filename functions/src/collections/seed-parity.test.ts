@@ -14,6 +14,8 @@ import { join } from 'path'
 
 test('seeded data configs decide exactly what the shipped TypeScript decides (isolated run)', () => {
   const run = spawnSync('bun', ['test', join(__dirname, 'seed-parity.isolated.ts')], {
+    timeout: 55_000,
+    killSignal: 'SIGKILL',
     encoding: 'utf-8',
     cwd: join(__dirname, '..', '..'),
   })

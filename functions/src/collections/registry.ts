@@ -168,9 +168,20 @@ export class CollectionRegistry {
     return this.options.now ?? Date.now
   }
 
+  /**
+   * Bumped whenever a load already in flight must NOT be trusted: after
+   * `invalidate()`, and when a check sees the epoch move. A load compares its
+   * generation on completion and discards itself if it is stale, so a request
+   * that has seen a change can never join — or be overwritten by — a load that
+   * started before it (0.2.0-beta.5 review).
+   */
+  private generation = 0
+
   /** Drop the cache. Call after any write that changes a collection config. */
   invalidate(): void {
     this.snapshot = null
+    this.generation++
+    this.inFlight = null
   }
 
   async current(): Promise<RegistrySnapshot> {
@@ -192,16 +203,18 @@ export class CollectionRegistry {
             // freshness; the TTL reload is belt-and-braces, and paying it
             // inline put a full load + compile on one request per instance per
             // minute — a p99 of ~950 ms against ~330 ms on a production clone
-            // (reviews/2026-09-25-registry-swap-measurement.md). A change still
-            // reloads INLINE below, so a revocation is never served stale.
-            if (!fresh) void this.reload()
+            // (reviews/2026-09-25-registry-swap-measurement.md). A change is
+            // reloaded INLINE below, by a fresh load, never by joining this one.
+            if (!fresh) void this.reload({ background: true })
             return snap
           }
-          // Changed — fall through to a full, inline reload.
+          // Changed: a fresh, inline reload that no earlier load can satisfy.
+          return this.reload({ fresh: true })
         } catch (e) {
           // An epoch we cannot read is an epoch we cannot trust. Reload rather
           // than keep serving rules whose freshness is unknown.
           this.options.onError?.(`registry: epoch check failed: ${String(e)}`)
+          return this.reload({ fresh: true })
         }
       } else if (fresh) {
         // No epoch support: TTL is all there is, and nothing vouches for the
@@ -214,51 +227,72 @@ export class CollectionRegistry {
   }
 
   /**
-   * Load and compile. Never rejects: a failed load yields an EMPTY snapshot
-   * (fail closed), so it is safe to fire without awaiting.
+   * Load and compile. Never rejects, so it is safe to fire without awaiting.
+   *
+   * - The epoch is read BEFORE the load. Read after, a config change landing
+   *   mid-load would tag the OLD rules with the NEW epoch, and every check
+   *   would then confirm them as current until the TTL. Read before, the worst
+   *   case is new rules under an old epoch — which the next check reloads.
+   * - `fresh` discards any load in flight: it may predate the change.
+   * - A failed INLINE load fails closed (empty snapshot: nothing is served on
+   *   rules nobody could read). A failed BACKGROUND load keeps the snapshot
+   *   the epoch just confirmed as current — emptying it would take every
+   *   collection on the instance offline for a transient read error, which is
+   *   broader than the per-collection failure the owner chose.
    */
-  private reload(): Promise<RegistrySnapshot> {
+  private reload(
+    { background = false, fresh = false }: { background?: boolean; fresh?: boolean } = {}
+  ): Promise<RegistrySnapshot> {
+    if (fresh) {
+      this.generation++
+      this.inFlight = null
+    }
     // Collapse concurrent refreshes: a cold instance serving a burst should do
     // ONE load, not one per request.
     if (this.inFlight) return this.inFlight
 
-    this.inFlight = (async () => {
+    const generation = this.generation
+    const current = () => generation === this.generation
+    // Declared first so `finally` can tell whether it is still the in-flight load.
+    let load: Promise<RegistrySnapshot> | undefined = undefined
+    load = (async () => {
       try {
-        const stored = await this.source.load()
         const epoch = this.source.epoch
           ? await this.source.epoch().catch(() => undefined)
           : undefined
+        const stored = await this.source.load()
         const { collections, failed } = compileStored(
           stored,
           this.options.onError
         )
         const at = this.clock()
-        this.snapshot = {
+        const snapshot: RegistrySnapshot = {
           collections,
           failed,
           loadedAt: at,
           checkedAt: at,
           epoch,
         }
-        return this.snapshot
+        if (current()) this.snapshot = snapshot
+        return snapshot
       } catch (e) {
         this.options.onError?.(`registry: load failed: ${String(e)}`)
-        // FAIL CLOSED. An unreadable config store yields no collections, so
-        // /doc denies everything, rather than serving whatever happened to be
-        // cached from before a revocation.
+        if (background && this.snapshot) return this.snapshot
         const at = this.clock()
-        this.snapshot = {
+        const empty: RegistrySnapshot = {
           collections: {},
           failed: [],
           loadedAt: at,
           checkedAt: at,
         }
-        return this.snapshot
+        if (current()) this.snapshot = empty
+        return empty
       } finally {
-        this.inFlight = null
+        if (this.inFlight === load) this.inFlight = null
       }
     })()
-    return this.inFlight
+    this.inFlight = load
+    return load
   }
 
   /** The whole map, for `getMethodAccess`. */

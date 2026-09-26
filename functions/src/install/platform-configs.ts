@@ -27,6 +27,7 @@
 import type { StoredCollectionConfig } from '../collections/registry'
 import { NAMESPACE_SEPARATOR } from '../collections/namespace'
 import { EPOCH_PATH } from './epoch'
+import { PLATFORM_CONFIGS } from '../collections/seed-configs'
 
 /** Where the platform's configs live. Shared with the epoch document. */
 export const PLATFORM_REGISTRY_COLLECTION = EPOCH_PATH.collection
@@ -83,4 +84,10 @@ export function platformConfigsFrom(
     })
   }
   return out
+}
+
+/** Platform names the code expects that the loaded set lacks. Pure. */
+export function missingPlatformConfigs(loaded: StoredCollectionConfig[]): string[] {
+  const have = new Set(loaded.map((c) => c.name))
+  return PLATFORM_CONFIGS.map((c) => c.name).filter((n) => !have.has(n))
 }

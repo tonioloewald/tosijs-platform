@@ -35,7 +35,20 @@ const EVERY_ROLE = Object.values(ROLES)
 const who = (roles: string[]) =>
   ({ name: 'x', contacts: [], roles, userIds: ['uid'] }) as never
 
+await import('./module')
+await import('./config')
+await import('./role')
+const { validate: schemaValidate } = await import('tosijs-schema')
+
 const FIXTURES: Record<string, Array<Record<string, unknown>>> = {
+  module: [
+    { name: 'm1', source: 'export {}', version: '1.0.0', tags: [] },
+    { name: 'm2', source: 'export {}', version: '1.0.0', tags: ['public'] },
+    { name: 'm3', source: 'export {}', version: '1.0.0', tags: ['public', 'visible'] },
+    { name: 'm4', source: 'export {}', version: '1.0.0' },
+  ],
+  config: [{ name: 'app', host: 'example.org' }, { name: 'blog' }],
+  role: [{ name: 'r', roles: ['author'], userIds: ['u'], contacts: [] }],
   post: [
     { title: 'published', content: 'x', path: 'a', date: '2026-01-01' },
     { title: 'unpublished, empty date', content: 'x', path: 'b', date: '' },
@@ -55,7 +68,14 @@ const outcome = async (decision: unknown, doc: Record<string, unknown>) => {
   if (decision === undefined) return 'deny'
   if (decision === ALL) return 'all'
   if (typeof decision === 'function') {
-    const r = await (decision as (d: unknown) => unknown)(structuredClone(doc))
+    let r: unknown
+    try {
+      r = await (decision as (d: unknown) => unknown)(structuredClone(doc))
+    } catch {
+      // The compiled module/page filters dereference `tags` and THROW on a
+      // document without it (a 500); the data rule hides it. See ACCEPTED.
+      return 'throws'
+    }
     if (r instanceof Error) return 'hidden'
     return `shown:${Object.keys(r as object).sort().join(',')}`
   }
@@ -73,6 +93,10 @@ for (const name of Object.keys(FIXTURES)) {
           for (const doc of FIXTURES[name]) {
             const a = await outcome(fromCode, doc)
             const b = await outcome(fromData, doc)
+            // ACCEPTED divergence: where compiled code crashes, data hides.
+            // Hiding is the deny-by-default answer; a crash was never a
+            // decision anyone made.
+            if (a === 'throws' && b === 'hidden') continue
             if (a !== b) {
               mismatches.push(`${role} ${method} "${String(doc.path)}": code=${a} data=${b}`)
             }
@@ -105,5 +129,62 @@ test('every compiled afterWrite is registered as a platform hook (D19)', () => {
   expect(withHook.length).toBeGreaterThan(0)
   for (const [name, config] of withHook) {
     expect(PLATFORM_HOOKS[name]?.afterWrite).toBe(config.afterWrite)
+  }
+})
+
+// --- schema parity ------------------------------------------------------------
+// Access parity says who may write; this says WHAT they may write. The
+// seeded schema is JSON Schema, the compiled one tosijs-schema — the same
+// documents must be accepted and refused by both.
+const SCHEMA_FIXTURES: Record<string, Array<Record<string, unknown>>> = {
+  post: [
+    { title: 't', content: 'c' },
+    { title: 't' },
+    { content: 'c' },
+    { title: 't', content: 'c', keywords: ['a'] },
+    { title: 't', content: 'c', keywords: 'a' },
+    { title: 1, content: 'c' },
+  ],
+  page: [
+    { title: 't', description: 'd', path: 'p', source: 's' },
+    { title: 't', description: 'd', path: 'p' },
+    { title: 't', description: 'd', path: 'p', source: 's', tags: ['x'] },
+    { title: 't', description: 'd', path: 'p', source: 's', tags: 'x' },
+  ],
+  module: [
+    { name: 'm', source: 's', version: '1.0.0' },
+    { name: 'm', source: 's', version: 'not-semver' },
+    { name: 'm', source: 's' },
+    { name: 'm', source: 's', version: '1.0.0', revisions: 2 },
+    { name: 'm', source: 's', version: '1.0.0', revisions: 1.5 },
+    { name: 'm', source: 's', version: '1.0.0', tags: ['x'] },
+  ],
+}
+
+for (const name of Object.keys(SCHEMA_FIXTURES)) {
+  test(`${name}: the seeded schema accepts and refuses what the compiled one does`, () => {
+    const mismatches: string[] = []
+    for (const doc of SCHEMA_FIXTURES[name]) {
+      const a = schemaValidate(doc, COLLECTIONS[name].schema as never, { strict: true } as never)
+      const b = schemaValidate(doc, seeded[name].schema as never, { strict: true } as never)
+      if (a !== b) mismatches.push(`${JSON.stringify(doc)}: code=${a} data=${b}`)
+    }
+    expect(mismatches).toEqual([])
+  })
+}
+
+test('post: saving a LEGACY path leaves it exactly as stored — code and data (B1)', async () => {
+  // 96 of 791 production paths are not what slugify would produce (trailing
+  // `-`, `_`, over 80 characters). An edit must not move them.
+  const legacy = ['what-s-in-a-name-', 'x'.repeat(86), 'under_score', 'Mixed-Case']
+  for (const path of legacy) {
+    const body = () => ({ title: 'Some Title', content: 'c', path })
+    const codeValidate = COLLECTIONS.post.validate
+    const dataValidate = seeded.post.validate
+    if (!codeValidate || !dataValidate) throw new Error('post has no validate on one side')
+    const fromCode = await codeValidate(body(), who([ROLES.author]), { path })
+    const fromData = await dataValidate(body(), who([ROLES.author]), { path })
+    expect((fromCode as { path: string }).path).toBe(path)
+    expect((fromData as { path: string }).path).toBe(path)
   }
 })

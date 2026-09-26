@@ -124,14 +124,18 @@ export const PLATFORM_CONFIGS: StoredCollectionConfig[] = [
         properties: {
           name: { type: 'string' },
           source: { type: 'string' },
-          version: { type: 'string' },
-          revisions: { type: 'number' },
+          // Matches ModuleSchema. The seed had `{type:'string'}`, `number` and
+          // no `tags` requirement, so the swap would have accepted module
+          // documents the shipped code refuses (0.2.0-beta.5 review; caught by
+          // seed-parity.isolated.ts's schema fixtures).
+          version: { type: 'string', pattern: '^\\d+\\.\\d+\\.\\d+$' },
+          revisions: { type: 'integer', minimum: 0 },
           type: { type: 'string' },
           tags: { type: 'array', items: { type: 'string' } },
           _created: { type: 'string' },
           _modified: { type: 'string' },
         },
-        required: ['name', 'source', 'version'],
+        required: ['name', 'source', 'version', 'tags'],
       },
       unique: ['name'],
       // Replaces module.ts's revision provenance. The caller cannot send this
@@ -224,15 +228,10 @@ export const PLATFORM_CONFIGS: StoredCollectionConfig[] = [
       ],
     },
   },
-  {
-    name: 'post/comment',
-    namespace: null,
-    collection: {
-      schema: { type: 'object' },
-      access: [
-        { role: ROLES.public, read: 'ALL', list: 'ALL' },
-        { role: ROLES.admin, read: 'ALL', write: 'ALL', list: 'ALL' },
-      ],
-    },
-  },
+  // NO `post/comment`. It was seeded here (public read/list, admin schemaless
+  // write), but the shipped code never registers it — the only occurrence is a
+  // doc-comment EXAMPLE in access.ts — so the swap would have OPENED a
+  // collection that is closed today (0.2.0-beta.5 review, B2). Opening comments
+  // is a decision to make on purpose, in both places, not a side effect of a
+  // seed. `seed-configs.test.ts` now pins the name sets as equal.
 ]

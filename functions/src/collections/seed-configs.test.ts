@@ -25,6 +25,7 @@ import './module'
 import './config'
 import './role'
 import './install-records'
+import './token-records'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { validateManifest } from '../install/manifest'
@@ -178,5 +179,33 @@ describe('uniqueness matches the shipped TypeScript (D19)', () => {
     const blog = readFileSync(join(__dirname, '..', 'blog.ts'), 'utf-8')
     expect(blog).toContain("unique: ['title', 'path']")
     expect([...(seeded.post?.unique ?? [])].sort()).toEqual(['path', 'title'])
+  })
+})
+
+describe('the seed names exactly the collections the code registers (B2)', () => {
+  // A name in only one set is a decision that changes when the switch flips:
+  // seeded-only OPENS a collection that is closed today (post/comment did),
+  // compiled-only makes one inaccessible. Both must be deliberate.
+  //
+  // Compiled but deliberately NOT seeded:
+  //   - `token`: `access: {}` compiled, so deny either way — written only by
+  //     the /token endpoint, never through /doc.
+  // `post`/`page` are registered by endpoint modules this file cannot load;
+  // seed-parity.isolated.ts covers them.
+  const NOT_SEEDED = new Set(['token'])
+  const ENDPOINT_MODULES = new Set(['post', 'page'])
+
+  test('every seeded name is compiled (or an endpoint-module collection)', () => {
+    for (const { name } of PLATFORM_CONFIGS) {
+      expect(COLLECTIONS[name] !== undefined || ENDPOINT_MODULES.has(name)).toBe(true)
+    }
+  })
+
+  test('every compiled name is seeded (or deliberately not)', () => {
+    const seededNames = new Set(PLATFORM_CONFIGS.map((c) => c.name))
+    const missing = Object.keys(COLLECTIONS).filter(
+      (n) => !seededNames.has(n) && !NOT_SEEDED.has(n) && n !== 'test'
+    )
+    expect(missing).toEqual([])
   })
 })

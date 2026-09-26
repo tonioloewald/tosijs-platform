@@ -26,6 +26,12 @@
  *   bun scripts/seed-registry.js --alias sandbox            # what would change
  *   bun scripts/seed-registry.js --alias sandbox --apply
  *   bun scripts/seed-registry.js --alias default --production --apply
+ *   bun scripts/seed-registry.js --alias default --production --check
+ *
+ * `--check` exits 1 unless every config is `unchanged` (and nothing is stored
+ * that the code does not know). Run it before deploying with the switch on:
+ * flipping the switch onto an unseeded or stale registry makes collections
+ * inaccessible.
  */
 import { readRc, token, parseArgs, productionProjectId } from './sandbox-lib.js'
 
@@ -120,6 +126,11 @@ for (const id of wanted.keys()) {
 }
 for (const id of extra) console.log(`   EXTRA     ${id}  (stored, not in PLATFORM_CONFIGS — left alone)`)
 
+if (has('check')) {
+  const ok = !changes.length && !extra.length
+  console.log(ok ? '\nCHECK OK — the stored registry matches the code' : '\nCHECK FAILED — seed (or reconcile EXTRA) before enabling the switch')
+  process.exit(ok ? 0 : 1)
+}
 if (!changes.length) {
   console.log('\nnothing to write')
   process.exit(0)

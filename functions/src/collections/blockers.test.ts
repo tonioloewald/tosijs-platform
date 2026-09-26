@@ -77,7 +77,7 @@ describe('B3: the demo `test` collection is emulator-only', () => {
    * the full set in a sibling test surfaced that (2026-09-19). An allowlist that
    * must be edited deliberately is the point; silence was not.
    */
-  const PUBLIC_LIST_ALLOWED = new Set(['config', 'post/comment'])
+  const PUBLIC_LIST_ALLOWED = new Set(['config'])
 
   test('no registered collection grants the public role list: ALL', () => {
     for (const [name, config] of Object.entries(COLLECTIONS)) {

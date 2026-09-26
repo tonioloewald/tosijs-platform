@@ -56,6 +56,7 @@ import {
 import { readEpoch } from './epoch'
 import {
   PLATFORM_REGISTRY_COLLECTION,
+  missingPlatformConfigs,
   platformConfigsFrom,
   platformFromRegistry,
 } from './platform-configs'
@@ -150,13 +151,21 @@ export class InstalledConfigSource implements ConfigSource {
     // one snapshot with the installed libraries: a rule change anywhere is a
     // single consistent view everywhere.
     const platform = await db.collection(PLATFORM_REGISTRY_COLLECTION).get()
-    return [
-      ...platformConfigsFrom(
-        platform.docs.map((d) => ({ id: d.id, data: d.data() })),
-        (m) => functions.logger.error(m)
-      ),
-      ...installed,
-    ]
+    const configs = platformConfigsFrom(
+      platform.docs.map((d) => ({ id: d.id, data: d.data() })),
+      (m) => functions.logger.error(m)
+    )
+    // Missing is not an error the design can recover from on its own — that
+    // collection is simply inaccessible — so it must at least be LOUD. An
+    // unseeded registry (switch flipped before seeding) shows up here as every
+    // platform name at once.
+    for (const name of missingPlatformConfigs(configs)) {
+      functions.logger.error(
+        `platform registry: no config for "${name}" — it is INACCESSIBLE. ` +
+          'Run: bun scripts/seed-registry.js --alias <alias> --apply'
+      )
+    }
+    return [...configs, ...installed]
   }
 
   async epoch(): Promise<number> {

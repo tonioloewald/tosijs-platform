@@ -32,7 +32,6 @@ import {
   hasPrivilegedRole,
   type CollectionMap,
 } from './collections/access'
-import { COLLECTIONS } from './collections'
 import { collectionsFor } from './install/installed'
 import { getRef } from './doc'
 import { Response } from 'express'
@@ -66,9 +65,11 @@ export async function getRecords(
    * (possibly narrowed) to keep it, or an Error to hide it — the AccessFilterFunc
    * contract.
    */
-  filter?: (rec: Record<string, unknown>) => Promise<Error | Record<string, unknown>>,
-  /** Configs to resolve `field=value` against — see getRef in doc.ts. */
-  collections: CollectionMap = COLLECTIONS
+  filter:
+    | ((rec: Record<string, unknown>) => Promise<Error | Record<string, unknown>>)
+    | undefined,
+  /** Configs to resolve `field=value` against — REQUIRED; see getRef in doc.ts. */
+  collections: CollectionMap
 ): Promise<Record<string, unknown>[]> {
   const refResult = await getRef(path, true, collections)
   if (refResult instanceof Error) {
@@ -203,9 +204,10 @@ export const getDocs = async (
 async function sequencedDelta(
   path: string,
   since: number,
-  limit: number
+  limit: number,
+  collections: CollectionMap
 ): Promise<{ rows: Record<string, unknown>[]; cursor: number; more: boolean }> {
-  const ref = await getRef(path, true)
+  const ref = await getRef(path, true, collections)
   if (ref instanceof Error) return { rows: [], cursor: since, more: false }
   // One extra row, purely to answer `more` honestly without a second query.
   const snapshot = await (ref as FirebaseFirestore.Query)
@@ -465,7 +467,7 @@ export const docs = onRequest({}, async (req, res) => {
           'declare `envelope: { seq: true }` in its manifest to replicate it')
       return
     }
-    const delta = await sequencedDelta(path, Number(since) || 0, limit)
+    const delta = await sequencedDelta(path, Number(since) || 0, limit, collections)
     // Row visibility still applies — a delta must not become a way around the
     // filter a plain LIST would have run.
     const rows =
