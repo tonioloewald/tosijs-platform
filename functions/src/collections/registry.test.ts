@@ -661,3 +661,31 @@ describe('reload races (0.2.0-beta.5 review)', () => {
     expect(await reg.resolve('post')).toBeUndefined() // the stale load did not win
   })
 })
+
+describe('no thundering herd after a change (0.2.0-beta.5 re-review, M1)', () => {
+  test('a burst of requests after an epoch change shares ONE fresh load, and it sticks', async () => {
+    const state = { epoch: 1, loads: 0 }
+    const source: ConfigSource = {
+      load: async () => {
+        state.loads++
+        await new Promise((r) => setTimeout(r, 5)) // a load takes a while
+        return STORED
+      },
+      epoch: async () => state.epoch,
+    }
+    let clock = 1000
+    const reg = new CollectionRegistry(source, { now: () => clock, epochTtlMs: 100 })
+    await reg.collections()
+    expect(state.loads).toBe(1)
+
+    state.epoch = 2
+    clock += 101
+    await Promise.all(Array.from({ length: 40 }, () => reg.collections()))
+    // One fresh load for the whole burst — not one per request.
+    expect(state.loads).toBe(2)
+    // …and it was STORED under the new epoch: a later request loads nothing.
+    clock += 101
+    await reg.collections()
+    expect(state.loads).toBe(2)
+  })
+})

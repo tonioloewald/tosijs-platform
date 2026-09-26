@@ -56,6 +56,7 @@ import {
 import { readEpoch } from './epoch'
 import {
   PLATFORM_REGISTRY_COLLECTION,
+  extraPlatformConfigs,
   missingPlatformConfigs,
   platformConfigsFrom,
   platformFromRegistry,
@@ -163,6 +164,12 @@ export class InstalledConfigSource implements ConfigSource {
       functions.logger.error(
         `platform registry: no config for "${name}" — it is INACCESSIBLE. ` +
           'Run: bun scripts/seed-registry.js --alias <alias> --apply'
+      )
+    }
+    for (const name of extraPlatformConfigs(configs)) {
+      functions.logger.error(
+        `platform registry: "${name}" is stored but not in PLATFORM_CONFIGS — ` +
+          'it IS being served. Remove it, or add it to the code, deliberately.'
       )
     }
     return [...configs, ...installed]

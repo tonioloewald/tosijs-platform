@@ -194,8 +194,13 @@ export class CollectionRegistry {
       if (this.source.epoch) {
         // Confirm nothing changed, cheaply, so an invalidation on ANOTHER
         // instance reaches this one.
+        // Which generation this check started under: if another request sees
+        // the change first and starts a fresh load while we await the epoch,
+        // we JOIN that load rather than starting a competing one.
+        const startedUnder = this.generation
         try {
           const current = await this.source.epoch()
+          if (this.generation !== startedUnder) return this.joinNewer()
           if (current === snap.epoch) {
             snap.checkedAt = now
             // Past the hard TTL but CONFIRMED current: serve the snapshot and
@@ -214,6 +219,7 @@ export class CollectionRegistry {
           // An epoch we cannot read is an epoch we cannot trust. Reload rather
           // than keep serving rules whose freshness is unknown.
           this.options.onError?.(`registry: epoch check failed: ${String(e)}`)
+          if (this.generation !== startedUnder) return this.joinNewer()
           return this.reload({ fresh: true })
         }
       } else if (fresh) {
@@ -223,6 +229,17 @@ export class CollectionRegistry {
         return snap
       }
     }
+    return this.reload()
+  }
+
+  /**
+   * A newer generation began while this request was checking: use ITS result —
+   * the load still in flight, or the snapshot it already stored — rather than
+   * start another. Both are newer than anything this request saw.
+   */
+  private joinNewer(): Promise<RegistrySnapshot> {
+    if (this.inFlight) return this.inFlight
+    if (this.snapshot) return Promise.resolve(this.snapshot)
     return this.reload()
   }
 
@@ -244,8 +261,15 @@ export class CollectionRegistry {
     { background = false, fresh = false }: { background?: boolean; fresh?: boolean } = {}
   ): Promise<RegistrySnapshot> {
     if (fresh) {
+      // Drop the snapshot too, not just the in-flight load. Leaving the old
+      // snapshot in place (with its old epoch) made every concurrent request
+      // re-see the change and start ANOTHER fresh load — each staling the one
+      // before, so under steady traffic none ever stored (40 loads for 40
+      // requests on a probe; 0.2.0-beta.5 re-review, M1). With it gone, every
+      // later request takes the no-snapshot path and joins this one load.
       this.generation++
       this.inFlight = null
+      this.snapshot = null
     }
     // Collapse concurrent refreshes: a cold instance serving a burst should do
     // ONE load, not one per request.

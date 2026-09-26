@@ -151,6 +151,18 @@ const SCHEMA_FIXTURES: Record<string, Array<Record<string, unknown>>> = {
     { title: 't', description: 'd', path: 'p', source: 's', tags: ['x'] },
     { title: 't', description: 'd', path: 'p', source: 's', tags: 'x' },
   ],
+  role: [
+    { name: 'r', contacts: [], roles: [], userIds: [] },
+    { name: 'r', contacts: [{ type: 'email', value: 'a@b.org' }], roles: ['author'], userIds: [] },
+    { name: 'r', contacts: [{ type: 'email', value: 'not-an-email' }], roles: [], userIds: [] },
+    { name: 'r', contacts: [{ type: 'twitter', value: '@x' }], roles: [], userIds: [] },
+    { name: 'r', contacts: [{ type: 'phone', value: '+1 555-123-4567' }], roles: [], userIds: [] },
+    { name: 'r', contacts: [{ type: 'phone', value: 'call me' }], roles: [], userIds: [] },
+    { name: 'r', contacts: [{ type: 'address', value: '' }], roles: [], userIds: [] },
+    { name: 'r', contacts: [{ type: 'email', value: 'a@b.org', extra: 1 }], roles: [], userIds: [] },
+    { name: 'r', contacts: ['a@b.org'], roles: [], userIds: [] },
+    { name: 'r', roles: [], userIds: [] },
+  ],
   module: [
     { name: 'm', source: 's', version: '1.0.0' },
     { name: 'm', source: 's', version: 'not-semver' },
@@ -186,5 +198,27 @@ test('post: saving a LEGACY path leaves it exactly as stored — code and data (
     const fromData = await dataValidate(body(), who([ROLES.author]), { path })
     expect((fromCode as { path: string }).path).toBe(path)
     expect((fromData as { path: string }).path).toBe(path)
+  }
+})
+
+test('post: a NEW post with no path — ACCEPTED divergence, owner-approved 2026-09-26', async () => {
+  // Compiled blog.ts generates with `toLocaleLowerCase().replace(/[^\\w]+/g, '-')`
+  // (keeps `_`, leaves a trailing `-`, no length cap). The seeded derive uses
+  // slugify — the same rule the editor uses. The owner accepted slugify for new
+  // posts; EXISTING paths never change (see the legacy-path test above).
+  // (The client's slugify lives in a DOM-dependent module; its outputs for
+  // these titles are pinned in src/blog-pure.test.ts — same values.)
+  const dataValidate = seeded.post.validate
+  if (!dataValidate) throw new Error('seeded post has no validate')
+  const expected: Record<string, string> = {
+    'Hello, World!': 'hello-world',
+    'What’s in a name?': 'what-s-in-a-name',
+    'snake_case title': 'snake-case-title',
+  }
+  for (const [title, path] of Object.entries(expected)) {
+    const out = (await dataValidate({ title, content: 'c' }, who([ROLES.author]), {})) as {
+      path: string
+    }
+    expect(out.path).toBe(path)
   }
 })

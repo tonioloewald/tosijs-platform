@@ -12,7 +12,7 @@ import {
 import { isPublished, UNPUBLISHED_DATE } from '../functions/shared/post'
 import {
   formatBlogDate,
-  slugify,
+  resolvePostPath,
   computeProofNotes,
   inferResolutions,
   type ProofNote,
@@ -1053,10 +1053,10 @@ export class XinPostEditor extends Component<PostEditorParts> {
     data._path = path
 
     // Ensure a URL slug. A new post has an empty `path`; without one the permalink
-    // becomes /undefined and the post can't be found by its slug. Generate from the
-    // title when empty; normalise whatever the author typed either way.
-    const typedSlug = String(data.path ?? '').trim()
-    data.path = typedSlug ? slugify(typedSlug) : slugify(String(data.title ?? ''))
+    // becomes /undefined and the post can't be found by its slug. Generate from
+    // the title when empty; a URL-safe path the author has (or a legacy post
+    // carries) is kept EXACTLY — see resolvePostPath.
+    data.path = resolvePostPath(data.path, data.title)
     // reflect the resolved slug in the Metadata field
     ;(blog.editorPost.path as any).value = data.path
 

@@ -14,6 +14,7 @@ import { describe, test, expect } from 'bun:test'
 import {
   formatBlogDate,
   slugify,
+  resolvePostPath,
   computeProofNotes,
   inferResolutions,
 } from './blog-pure'
@@ -163,5 +164,33 @@ describe('computeProofNotes — where the markers land', () => {
 
   test('an unchanged document produces no notes', () => {
     expect(computeProofNotes('same', 'same', [])).toEqual([])
+  })
+})
+
+describe('resolvePostPath — saving never moves an existing URL (0.2.0-beta.5, M2)', () => {
+  test('a legacy path is kept EXACTLY, even where slugify would change it', () => {
+    for (const legacy of ['what-s-in-a-name-', 'x'.repeat(86), 'under_score', '-leading']) {
+      expect(resolvePostPath(legacy, 'Any Title')).toBe(legacy)
+    }
+  })
+
+  test('an unsafe typed path is slugified', () => {
+    expect(resolvePostPath('Hello World!', 'x')).toBe('hello-world')
+    expect(resolvePostPath('Café', 'x')).toBe('cafe')
+  })
+
+  test('an empty path is generated from the title', () => {
+    expect(resolvePostPath('', 'Hello, World')).toBe('hello-world')
+    expect(resolvePostPath('   ', 'Hello, World')).toBe('hello-world')
+    expect(resolvePostPath(undefined, 'Hello, World')).toBe('hello-world')
+  })
+})
+
+describe('slugify agrees with the server derive for new posts (D19 accepted divergence)', () => {
+  // Pinned in functions/src/collections/seed-parity.isolated.ts too.
+  test('same outputs', () => {
+    expect(slugify('Hello, World!')).toBe('hello-world')
+    expect(slugify('What’s in a name?')).toBe('what-s-in-a-name')
+    expect(slugify('snake_case title')).toBe('snake-case-title')
   })
 })

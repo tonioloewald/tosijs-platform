@@ -38,6 +38,26 @@ export function slugify(text: string): string {
   )
 }
 
+/**
+ * The path to save a post under.
+ *
+ * A typed path that is already URL-safe is kept EXACTLY — only an unsafe one
+ * (spaces, punctuation, capitals) is slugified, and an empty one is generated
+ * from the title. `savePost` used to slugify every save, so opening a legacy
+ * post (`what-s-in-a-name-`, an 86-character path, `under_score` — the old
+ * server rule kept all of these) and saving it UNCHANGED moved its URL and
+ * broke every link to it: 96 of 791 published posts (0.2.0-beta.5 re-review,
+ * M2). Every path the old server ever generated matches SAFE_PATH, so none of
+ * them moves.
+ */
+const SAFE_PATH = /^[a-z0-9_-]+$/
+
+export function resolvePostPath(typed: unknown, title: unknown): string {
+  const path = String(typed ?? '').trim()
+  if (!path) return slugify(String(title ?? ''))
+  return SAFE_PATH.test(path) ? path : slugify(path)
+}
+
 // ── Proofreader margin notes ─────────────────────────────────────────────────
 // After a proofread diff resolves, each edit that LANDED (diffing the pre-proofread
 // text against the result) becomes a margin annotation over that line in the editor.

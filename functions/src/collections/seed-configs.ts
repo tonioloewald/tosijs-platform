@@ -178,7 +178,45 @@ export const PLATFORM_CONFIGS: StoredCollectionConfig[] = [
         type: 'object',
         properties: {
           name: { type: 'string' },
-          contacts: { type: 'array' },
+          // Exactly RoleSchema's contacts (shared/role.ts). A contact is
+          // AUTHORITY — `findRoleDocs` resolves a principal by it — so the
+          // seed's bare `{type:'array'}` accepted contacts the shipped code
+          // refuses (0.2.0-beta.5 re-review). Pinned by seed-parity's role
+          // schema fixtures.
+          contacts: {
+            type: 'array',
+            items: {
+              anyOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    type: { const: 'email' },
+                    value: { type: 'string', format: 'email' },
+                  },
+                  required: ['type', 'value'],
+                  additionalProperties: false,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { const: 'phone' },
+                    value: { type: 'string', pattern: '^\\+?[\\d\\s\\-().]{7,}$' },
+                  },
+                  required: ['type', 'value'],
+                  additionalProperties: false,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    type: { const: 'address' },
+                    value: { type: 'string', minLength: 1 },
+                  },
+                  required: ['type', 'value'],
+                  additionalProperties: false,
+                },
+              ],
+            },
+          },
           roles: { type: 'array', items: { type: 'string' } },
           userIds: { type: 'array', items: { type: 'string' } },
           _created: { type: 'string' },

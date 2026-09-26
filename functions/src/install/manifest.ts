@@ -35,6 +35,13 @@ import {
 export type JsonSchema = Record<string, unknown>
 
 export type DeriveOp =
+  /**
+   * `when: 'absent'` (default) GENERATES `to` from `from` only when `to` is
+   * empty, and leaves a supplied value exactly as written. `'always'`
+   * regenerates it on every write. (Until 0.2.0-beta.5, `'absent'` also
+   * rewrote a supplied value through slugify on every write — which silently
+   * moved existing URLs.)
+   */
   | { op: 'slug'; to: string; from: string; when?: 'absent' | 'always' }
   | { op: 'shortId'; to: string; length?: number }
   | { op: 'now'; to: string }

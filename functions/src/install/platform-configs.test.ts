@@ -4,6 +4,7 @@ import {
   platformDocId,
   platformFromRegistry,
   missingPlatformConfigs,
+  extraPlatformConfigs,
 } from './platform-configs'
 import { PLATFORM_CONFIGS } from '../collections/seed-configs'
 import { compileStored } from '../collections/registry'
@@ -91,5 +92,13 @@ describe('missingPlatformConfigs — an unseeded or partial registry is loud', (
   })
   test('an empty registry reports every platform name', () => {
     expect(missingPlatformConfigs([]).sort()).toEqual(PLATFORM_CONFIGS.map((c) => c.name).sort())
+  })
+})
+
+describe('extraPlatformConfigs — a stored config the code does not know is reported', () => {
+  test('a stale post/comment is reported; the seeded set is not', () => {
+    const stale = platformConfigsFrom([doc('post/comment')])
+    expect(extraPlatformConfigs(stale)).toEqual(['post/comment'])
+    expect(extraPlatformConfigs(PLATFORM_CONFIGS)).toEqual([])
   })
 })

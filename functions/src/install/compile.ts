@@ -159,7 +159,8 @@ export interface DeriveContext {
  * never carries code. An unknown op cannot appear (the validator refuses it) and
  * would be ignored here rather than guessed at.
  *
- * Ops only ever ADD or NORMALISE fields the caller could have sent. None of them
+ * Ops only ever ADD fields the caller could have sent, or fill defaults; none
+ * rewrites a value the caller supplied (the slug op used to — 0.2.0-beta.5). None of them
  * touches the envelope, so provenance stays unforgeable (§5).
  */
 export function compileDerive(

@@ -91,3 +91,15 @@ export function missingPlatformConfigs(loaded: StoredCollectionConfig[]): string
   const have = new Set(loaded.map((c) => c.name))
   return PLATFORM_CONFIGS.map((c) => c.name).filter((n) => !have.has(n))
 }
+
+/**
+ * Loaded platform names the code does NOT know. Served — a collection defined
+ * by the owner directly in the datastore is legitimate (D14) — but never
+ * silently: a stale seed left `post~comment` (public read, schemaless admin
+ * write) in a registry once, and it would have been served the moment the
+ * switch flipped (0.2.0-beta.5 re-review). Pure.
+ */
+export function extraPlatformConfigs(loaded: StoredCollectionConfig[]): string[] {
+  const known = new Set(PLATFORM_CONFIGS.map((c) => c.name))
+  return loaded.map((c) => c.name).filter((n) => !known.has(n))
+}
