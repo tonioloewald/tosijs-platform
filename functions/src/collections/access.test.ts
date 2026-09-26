@@ -565,3 +565,51 @@ describe('getMethodAccess — filterFields argument (known bug; see docs/archive
     expect(publicRead).toEqual({ name: ALL, email: ALL })
   })
 })
+
+describe('capability-token caveats narrow every grant — behaviour, not source text (0.2.0 review)', () => {
+  // Until now only a regex over access.ts checked this. A token is the
+  // principal's authority ATTENUATED: a caveat miss must look exactly like
+  // "no such collection" (undefined), never like a grant.
+  const map: CollectionMap = {
+    'lib:task': { access: { [ROLES.author]: { read: ALL, list: ALL, write: ALL } } },
+    'lib:task/comment': { access: { [ROLES.author]: { read: ALL, write: ALL } } },
+    'lib:taskish': { access: { [ROLES.author]: { read: ALL } } },
+  }
+  const withToken = (methods: string[], collections?: string[]): UserRoles => ({
+    name: 'agent',
+    contacts: [],
+    roles: [ROLES.author],
+    userIds: ['u1'],
+    token: { id: 't', label: 'Tosi × test', methods, ...(collections ? { collections } : {}) },
+  })
+
+  test('a method outside the caveats is undefined', () => {
+    const agent = withToken(['GET'], ['lib:task'])
+    expect(getMethodAccess(map, 'lib:task', 'GET', agent)).toBe(ALL)
+    expect(getMethodAccess(map, 'lib:task', 'PUT', agent)).toBeUndefined()
+  })
+
+  test('LIST is its own method, distinct from GET', () => {
+    const agent = withToken(['GET'], ['lib:task'])
+    expect(getMethodAccess(map, 'lib:task', 'LIST', agent)).toBeUndefined()
+  })
+
+  test('a collection outside scope is undefined; a sub-collection of an allowed one is allowed', () => {
+    const agent = withToken(['GET', 'PUT'], ['lib:task'])
+    expect(getMethodAccess(map, 'lib:task/comment', 'PUT', agent)).toBe(ALL)
+    // A NAME that merely starts the same is a different collection.
+    expect(getMethodAccess(map, 'lib:taskish', 'GET', agent)).toBeUndefined()
+  })
+
+  test('no collections caveat means every collection — the methods caveat still applies', () => {
+    const agent = withToken(['GET'])
+    expect(getMethodAccess(map, 'lib:taskish', 'GET', agent)).toBe(ALL)
+    expect(getMethodAccess(map, 'lib:taskish', 'PUT', agent)).toBeUndefined()
+  })
+
+  test('a caveat never ADDS authority the roles do not grant', () => {
+    const agent = { ...withToken(['GET', 'PUT', 'DELETE'], ['lib:taskish']) }
+    // author has read only on lib:taskish
+    expect(getMethodAccess(map, 'lib:taskish', 'PUT', agent)).toBeUndefined()
+  })
+})

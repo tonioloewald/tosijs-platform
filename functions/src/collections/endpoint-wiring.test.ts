@@ -124,38 +124,20 @@ describe('doc.ts denial branches do not disclose existence', () => {
     expect(pipelineTs).not.toMatch(/message: `[^`]*\$\{path\}/)
   })
 
-  test('doc.ts maps existence rejections to 403, not the opaque 404', () => {
-    // This is the half that stayed behind, and it is the one that can regress:
-    // the pipeline returns a typed reason and doc.ts chooses the status. Sending
-    // 404 here would be "safer" and wrong — the caller already holds write
-    // access, so hiding existence only degrades an author's error messages
-    // (review F5). Pinned because nothing else would notice the change.
+  test('both write routes map refusals through ONE status map, never the opaque 404', () => {
+    // Existence refusals stay 403 (not 404): they come after the access gate,
+    // so the caller already holds write access (review F5). /doc and /docs had
+    // DRIFTED (validate/unique: 400 vs 403) until both called rejectionStatus.
     const write = docTs.slice(docTs.indexOf("case 'POST':"))
-    // Widened when `unattributed` joined the branch (#18). The property is
-    // unchanged — post-authorization refusals are 403, not the opaque 404 —
-    // so the assertion is on the branch's membership and its status, not on
-    // the exact shape of the condition.
     const branch = write.slice(
       write.indexOf("outcome.status === 'rejected'"),
       write.indexOf("outcome.status === 'noop'")
     )
-    for (const reason of ['exists', 'missing', 'unattributed']) {
-      expect(branch).toContain(`outcome.reason === '${reason}'`)
-    }
-    // The pipeline's own reason becomes the stable error CODE (#20), so a
-    // client switches on it rather than on the prose.
-    expect(branch).toMatch(/fail\(res, 403, outcome\.reason, outcome\.message\)/)
-  })
-
-  test('an immutable refusal is a 409 on both write routes (#25)', () => {
-    // Not 403: the caller is authorized and the request is well-formed; it
-    // conflicts with what is stored. A client retrying on 403-means-transient
-    // would loop; 409 says "send what is there, or nothing".
-    const write = docTs.slice(docTs.indexOf("case 'POST':"))
-    expect(write).toMatch(
-      /outcome\.reason === 'immutable'\)\s*\{[\s\S]*?fail\(res, 409, 'immutable'/
-    )
-    expect(docsTs).toMatch(/refusal\.reason === 'immutable'\s*\?\s*409/)
+    expect(branch).toContain('rejectionStatus(outcome.reason)')
+    expect(branch).not.toMatch(/notFound\(/)
+    expect(docsTs).toContain('rejectionStatus(refusal.reason')
+    // The pipeline's reason is the stable error CODE (#20).
+    expect(branch).toMatch(/outcome\.reason,\s*outcome\.message/)
   })
 
   test('an immutable document cannot be DELETED either (M3)', () => {
@@ -409,5 +391,25 @@ describe('platform API responses are never CDN-cached (#27)', () => {
     const utilities = src('utilities.ts')
     expect(utilities).toMatch(/noStore\(res\)\s*\n\s*res\.status\(429\)/)
     expect(utilities).toMatch(/noStore\(res\)\s*\n\s*res\.status\(403\)/)
+  })
+})
+
+describe('rejectionStatus — the one refusal-to-status map (0.2.0 review)', () => {
+  test('content refusals are 400, conflicts with state or principal 403, immutable 409', async () => {
+    const { rejectionStatus } = await import('../errors')
+    expect(rejectionStatus('schema')).toBe(400)
+    expect(rejectionStatus('validate')).toBe(400)
+    expect(rejectionStatus('unique')).toBe(400)
+    expect(rejectionStatus('exists')).toBe(403)
+    expect(rejectionStatus('missing')).toBe(403)
+    expect(rejectionStatus('unattributed')).toBe(403)
+    expect(rejectionStatus('immutable')).toBe(409)
+  })
+
+  test('a /docs batch runs afterWrite after its commit, like /doc', () => {
+    // A post committed through a batch otherwise left the blog cache stale.
+    const commit = docsTs.slice(docsTs.indexOf('async function commitWriteSet'))
+    const afterTx = commit.slice(commit.indexOf('await db.runTransaction'))
+    expect(afterTx).toMatch(/results\.committed[\s\S]*config\.afterWrite\(data, userRoles\)/)
   })
 })

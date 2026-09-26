@@ -1,6 +1,6 @@
 {
   "name": "service-compris",
-  "version": "0.2.0-beta.5",
+  "version": "0.2.0",
   "description": "Service compris — the decision layer of a backend: RBAC, a write pipeline, and role resolution, with no I/O and no vendor.",
   "keywords": [
     "rbac",
@@ -44,7 +44,7 @@
     "test": "bun test src scripts && cd functions && bun test",
     "typecheck": "tsc --noEmit",
     "build:lib": "tsc -p tsconfig.lib.json",
-    "install:ci": "cd functions && npm install --no-audit --no-fund",
+    "install:ci": "cd functions && npm install --ignore-scripts --no-audit --no-fund",
     "prepublishOnly": "bun scripts/preflight.js",
     "deploy:sandbox": "firebase deploy -P sandbox",
     "deploy:sandbox-functions": "firebase deploy -P sandbox --only functions",
@@ -71,6 +71,7 @@
     "@types/web": "^0.0.99",
     "bun-types": "canary",
     "chokidar": "^3.6.0",
+    "firebase": "^12.16.0",
     "happy-dom": "^20.14.0",
     "http-server": "^14.1.1",
     "marked": "^16.4.2",
@@ -79,11 +80,8 @@
     "tosijs": "^1.8.2",
     "tosijs-schema": "^1.8.1",
     "tosijs-ui": "^1.12.8",
+    "turndown": "^7.2.4",
     "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "firebase": "^12.16.0",
-    "turndown": "^7.2.4"
   },
   "main": "./dist-lib/lib/index.js",
   "types": "./dist-lib/lib/index.d.ts",

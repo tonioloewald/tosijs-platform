@@ -38,7 +38,7 @@ import {
   type WriteMethod,
 } from './collections/write-pipeline'
 import { FirestoreStore } from './firestore-store'
-import { fail, notFound, noStore } from './errors'
+import { fail, notFound, noStore, rejectionStatus } from './errors'
 import { commitWithSeq } from './collections/sequence'
 
 // Schema validation moved into `runWritePipeline` at the 2026-09-16 cutover —
@@ -497,32 +497,18 @@ export const doc = onRequest({}, async (req, res) => {
       )
 
       if (outcome.status === 'rejected') {
-        // Existence rejections stay 403 (not 404): this point is reached only
-        // AFTER the access gate, so the caller already holds write access and
-        // telling them a document exists is not a disclosure. 404-ing them would
-        // degrade an author's error messages for no security gain (review F5).
-        if (
-          outcome.reason === 'exists' ||
-          outcome.reason === 'missing' ||
-          outcome.reason === 'unattributed'
-        ) {
-          fail(res, 403, outcome.reason, outcome.message)
-        } else if (outcome.reason === 'immutable') {
-          // 409: the request is well-formed and authorized, and conflicts with
-          // what is stored. Retrying it cannot succeed; sending what is stored
-          // would.
-          fail(res, 409, 'immutable', outcome.message)
-        } else if (outcome.reason === 'schema') {
-          fail(res, 400, 'schema', outcome.message, {
-            details: outcome.details,
-          })
-        } else {
-          // `validate` and `unique`. Note this now surfaces the validator's own
-          // message where the inline path sent a fixed 'validation failed' and
-          // discarded it — a deliberate improvement, and the reason a rejected
-          // write is finally debuggable.
-          fail(res, 400, outcome.reason, outcome.message)
-        }
+        // One status map for /doc and /docs (errors.ts rejectionStatus). These
+        // refusals come AFTER the access gate, so none is the opaque 404: the
+        // caller already holds write access, and telling them a document exists
+        // (or conflicts) is not a disclosure (review F5). The pipeline's reason
+        // is the stable error code (#20); `schema` carries its details.
+        fail(
+          res,
+          rejectionStatus(outcome.reason),
+          outcome.reason,
+          outcome.message,
+          outcome.details ? { details: outcome.details } : {}
+        )
         return
       }
 

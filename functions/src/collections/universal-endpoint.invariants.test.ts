@@ -1,15 +1,16 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
-import { describe, test } from 'bun:test'
+import { describe, test, expect } from 'bun:test'
+import { runWritePipeline } from './write-pipeline'
 
 /**
  * Universal-endpoint acceptance invariants — §9 of UNIVERSAL-ENDPOINT.md.
  *
  * "Invariants (for the implementer; each should be a test)." This file is the
- * executable form of that list. Every invariant is a `test.todo` today: the
- * beforeWrite / isWriteAllowed / procedures machinery does not exist yet (see
- * UNIVERSAL-ENDPOINT-GAP-ANALYSIS.md — most rows are "New" or "Replace"), so
- * these are the Phase-1 acceptance criteria, not passing tests.
+ * executable form of that list. Most are still `test.todo`: the isWriteAllowed /
+ * procedures machinery does not exist yet (see UNIVERSAL-ENDPOINT-GAP-ANALYSIS.md),
+ * so those are acceptance criteria, not passing tests. 9.8 and 9.9 have SHIPPED
+ * in the write pipeline and are real tests below.
  *
  * As the pieces land, convert each `test.todo(name)` to `test(name, () => …)`.
  * Where an invariant *preserves* current behavior, the existing oracle already
@@ -88,14 +89,48 @@ describe('§9 universal-endpoint invariants (Phase-1 acceptance)', () => {
     // 8. A write whose NORMALIZED body equals the stored body is a no-op: no
     //    commit, no stamp. Requires the canonical normalization (Decision #… in
     //    the gap analysis). Assert re-submitting a stored record stamps nothing.
-    test.todo('9.8 body-equal write is a no-op (no commit, no new stamp)')
+    test('9.8 body-equal write is a no-op (no commit, no new stamp)', async () => {
+      const out = await runWritePipeline(
+        {
+          method: 'PUT',
+          body: { t: 'same' },
+          existing: { t: 'same', _created: 'a', _modified: 'a', _by: { uid: 'x' } },
+          config: {},
+          userRoles: { name: 'n', contacts: [], roles: [], userIds: ['u'] },
+        },
+        { now: () => 'b', isUnique: async () => true }
+      )
+      expect(out.status).toBe('noop')
+    })
 
     // 9. Envelope fields (savedAt, version, author, createdAt, seq) are written
     //    ONLY by the endpoint at commit — never by caller/beforeWrite/procedure.
     //    Precursor behavior today: doc.ts stamps _created/_modified server-side
     //    (write-path.integration.test.ts). Port that to the envelope and assert
     //    a caller-supplied envelope field is ignored/overwritten.
-    test.todo('9.9 envelope fields are server-written at commit only')
+    test('9.9 envelope fields are server-written, never taken from the body', async () => {
+      const out = (await runWritePipeline(
+        {
+          method: 'POST',
+          body: {
+            t: 'x',
+            _id: 'forged',
+            _path: 'other/doc',
+            _created: '1999',
+            _by: { uid: 'someone-else' },
+          },
+          existing: null,
+          config: {},
+          userRoles: { name: 'n', contacts: [], roles: [], userIds: ['u'] },
+        },
+        { now: () => 'NOW', isUnique: async () => true }
+      )) as { status: string; data: Record<string, unknown> }
+      expect(out.status).toBe('write')
+      expect(out.data._id).toBeUndefined()
+      expect(out.data._path).toBeUndefined()
+      expect(out.data._created).toBe('NOW')
+      expect(out.data._by).toEqual({ uid: 'u', name: 'n' })
+    })
   })
 
   // ── Observability (§4.3, §7) ───────────────────────────────────────────

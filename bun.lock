@@ -4,10 +4,6 @@
   "workspaces": {
     "": {
       "name": "tosijs-platform",
-      "dependencies": {
-        "firebase": "^12.16.0",
-        "turndown": "^7.2.4",
-      },
       "devDependencies": {
         "@happy-dom/global-registrator": "^20.14.0",
         "@types/bun": "^1.3.14",
@@ -16,6 +12,7 @@
         "@types/web": "^0.0.99",
         "bun-types": "canary",
         "chokidar": "^3.6.0",
+        "firebase": "^12.16.0",
         "happy-dom": "^20.14.0",
         "http-server": "^14.1.1",
         "marked": "^16.4.2",
@@ -24,7 +21,11 @@
         "tosijs": "^1.8.2",
         "tosijs-schema": "^1.8.1",
         "tosijs-ui": "^1.12.8",
+        "turndown": "^7.2.4",
         "typescript": "^5.9.3",
+      },
+      "peerDependencies": {
+        "tosijs-schema": "^1.8.0",
       },
     },
   },

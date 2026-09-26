@@ -40,7 +40,13 @@ import { runWritePipeline, type WriteMethod } from './collections/write-pipeline
 import { validateWriteSet } from './collections/write-set'
 import { SEQ_COLLECTION } from './collections/sequence'
 import { physicalPath } from './collections/namespace'
-import { fail, notFound, noStore } from './errors'
+import {
+  fail,
+  notFound,
+  noStore,
+  rejectionStatus,
+  type RejectionReason,
+} from './errors'
 
 const compressResponse = compression()
 
@@ -326,11 +332,14 @@ async function commitWriteSet(
             // cannot slip a colliding document in between the check and the
             // commit — the exact race a batch makes more likely.
             isUnique: async (field, value) => {
-              const collection = collectionPath(w.p)
+              // The document's PARENT collection path, as /doc uses — not the
+              // logical `collectionPath`, which for a sub-collection
+              // (`post/comment`) is not a Firestore collection path at all.
+              const parent = physicalPath(w.p).split('/').slice(0, -1).join('/')
               const found = await tx.get(
                 admin
                   .firestore()
-                  .collection(physicalPath(collection))
+                  .collection(parent)
                   .where(field, '==', value)
                   .limit(2)
               )
@@ -381,20 +390,35 @@ async function commitWriteSet(
       for (const { ref, next } of counters.values()) {
         tx.set(ref, { value: next - 1, at: now }, { merge: true })
       }
-      return out
+      return { out, committed: prepared }
     })
 
-    res.json({ status: 'committed', written: results.length, results })
+    // Post-commit side effects, exactly as /doc runs them (0.2.0 review): a
+    // `post` committed through a batch otherwise left the blog cache stale for
+    // up to a day — the very bug `afterWrite` exists to fix. After the commit,
+    // never inside the transaction (which may retry); failures are logged,
+    // never surfaced, because the writes have already landed.
+    for (const { w, data } of results.committed) {
+      const config = collections[collectionPath(w.p)]
+      if (!config?.afterWrite) continue
+      try {
+        await config.afterWrite(data, userRoles)
+      } catch (e) {
+        functions.logger.warn(`afterWrite failed for ${w.p}:`, e)
+      }
+    }
+
+    res.json({
+      status: 'committed',
+      written: results.out.length,
+      results: results.out,
+    })
   } catch (e) {
     const refusal = (e as { refusal?: Record<string, unknown> }).refusal
     if (refusal) {
       fail(
         res,
-        refusal.reason === 'schema'
-          ? 400
-          : refusal.reason === 'immutable'
-            ? 409
-            : 403,
+        rejectionStatus(refusal.reason as RejectionReason),
         refusal.reason as never,
         refusal.message as string,
         {

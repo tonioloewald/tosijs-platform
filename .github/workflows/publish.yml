@@ -131,19 +131,7 @@ jobs:
           echo "Publishing $NAME@$VERSION under '$DIST_TAG' (latest is currently $LATEST_BEFORE)"
 
       - name: Install
-        run: |
-          set -euo pipefail
-          bun install --frozen-lockfile
-          # A repo with a second package tree (tosijs-platform's npm-managed functions/) names
-          # the script that installs it: package.json releaseDoctor.install. Declared, never
-          # guessed — and it must exist.
-          SETUP=$(node -p "(require('./package.json').releaseDoctor||{}).install||''")
-          if [ -n "$SETUP" ]; then
-            node -e "process.exit((require('./package.json').scripts||{})[process.argv[1]]?0:1)" "$SETUP" \
-              || { echo "::error::releaseDoctor.install names '$SETUP', which is not a script"; exit 1; }
-            echo "extra install: bun run $SETUP"
-            bun run "$SETUP"
-          fi
+        run: bun install --frozen-lockfile
 
       # Build, then require every tracked file THAT SHIPS to be unchanged. A repo that commits its
       # build output must reproduce it exactly, so what ships is what was tested locally; a repo
@@ -207,6 +195,22 @@ jobs:
       - name: Consumer smoke test (packed tarball)
         if: ${{ !inputs.verify_only }}
         run: bun .practices/tools/publish-smoke.ts "${{ steps.pack.outputs.tarball }}"
+
+      # A repo with a second package tree (tosijs-platform's npm-managed functions/) names the
+      # script that installs it for its test lane: package.json releaseDoctor.install.
+      # Deliberately AFTER Pack: the tarball is sealed (its integrity recorded) before any
+      # extra install runs, so an unlocked install's dependencies cannot touch what ships.
+      # It still runs in the job holding id-token: write — keep it `--ignore-scripts`.
+      - name: Extra install (releaseDoctor.install)
+        if: ${{ !inputs.verify_only }}
+        run: |
+          set -euo pipefail
+          SETUP=$(node -p "(require('./package.json').releaseDoctor||{}).install||''")
+          if [ -z "$SETUP" ]; then echo "none declared"; exit 0; fi
+          node -e "process.exit((require('./package.json').scripts||{})[process.argv[1]]?0:1)" "$SETUP" \
+            || { echo "::error::releaseDoctor.install names '$SETUP', which is not a script"; exit 1; }
+          echo "extra install: bun run $SETUP"
+          bun run "$SETUP"
 
       # Tier 0: tests, typecheck, build, changelog entry, packaged exports, bin shebangs, …
       # Lanes CI cannot run (e.g. live-LLM suites) are declared in package.json

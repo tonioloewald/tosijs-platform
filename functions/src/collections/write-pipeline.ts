@@ -1,26 +1,18 @@
 /**
- * The write pipeline (UNIVERSAL-ENDPOINT.md §3), extracted as a pure unit.
+ * The write pipeline (UNIVERSAL-ENDPOINT.md §3), as a pure unit.
  *
- * ROADMAP Phase 1 rung 1 is "the universal `doc`/`docs` behaviourally replace the
- * existing endpoints — run in shadow mode until the diff is clean, then cut over."
- * This is the shadow-mode half: the same ordering as `doc.ts`'s inline write path,
- * but with every ambient dependency injected and every outcome *returned* rather
- * than written to an `express` response.
- *
- * NOT WIRED IN YET, deliberately. `doc.ts` still owns the production path; this
- * runs beside it (and under test) until the diff is clean. Cutting over is a
- * separate, reviewable change.
+ * `/doc` and `/docs` both run their writes through this (the cutover from the
+ * old inline path landed 2026-09-16); it DECIDES and returns a typed outcome,
+ * and the endpoint COMMITS. Every ambient dependency is injected.
  *
  * Why this shape:
  *
  * - **Injected clock** (§4.1: "`Date.now()` … not available; time comes from the
- *   injected clock"). `doc.ts` calls `new Date()` mid-pipeline, which is why its
- *   stamping can only be tested against a live emulator.
+ *   injected clock"), so stamping is testable without an emulator.
  * - **Injected privileged read** (`isUnique`) — §4.2 puts uniqueness behind a rule
- *   with a privileged read and no write. Here it stays an injected capability, so
- *   the pipeline is testable without Firestore.
+ *   with a privileged read and no write; here it stays an injected capability.
  * - **Typed outcome, no side effects.** The caller commits; the pipeline decides.
- *   The endpoint keeps its own HTTP mapping.
+ *   The endpoint keeps its own HTTP mapping (`rejectionStatus` in errors.ts).
  * - **Ordering is a security property** (§3): the no-op check and `isWriteAllowed`
  *   both see post-transform data, so a transform cannot launder a write past a rule.
  *
@@ -112,7 +104,6 @@ export type WriteOutcome =
       details?: Array<{ path: string; message: string }>
     }
 
-/** Strip endpoint-owned envelope fields from a body (§5). */
 /**
  * Fields the ENDPOINT writes, which a caller neither sends nor declares.
  *
@@ -176,6 +167,7 @@ export function withoutStamps(
   return content
 }
 
+/** Strip endpoint-owned envelope fields from a body (§5). */
 export function stripEnvelope(
   data: Record<string, unknown>
 ): Record<string, unknown> {
@@ -352,7 +344,13 @@ export async function runWritePipeline(
   // Uniqueness (§4.2): privileged read, reject-only — it can refuse a duplicate
   // but never mint a value.
   for (const field of config.unique || []) {
-    if (!(await deps.isUnique(field, data[field]))) {
+    // A missing, boolean or object value cannot be checked for uniqueness —
+    // and handed to a store query as-is, `undefined` THROWS inside a
+    // transaction (the batch path answered 500). Refused here, once, so /doc
+    // and /docs cannot disagree (0.2.0 review, M1).
+    const value = data[field]
+    const checkable = typeof value === 'string' || typeof value === 'number'
+    if (!checkable || !(await deps.isUnique(field, value))) {
       return {
         status: 'rejected',
         reason: 'unique',

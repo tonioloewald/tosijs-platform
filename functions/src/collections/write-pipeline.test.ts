@@ -748,3 +748,32 @@ describe('an immutable collection is a log, not a table (#25)', () => {
     expect(o.status).toBe('write')
   })
 })
+
+describe('a unique field must be a checkable scalar (0.2.0 review, M1)', () => {
+  // Handed to a store query as-is, `undefined` THROWS inside a transaction —
+  // the /docs batch answered 500. Refused once, here, for both routes.
+  const cfg: CollectionConfig = { unique: ['slug'] }
+  for (const [label, body] of [
+    ['missing', { t: 'x' }],
+    ['boolean', { slug: true }],
+    ['object', { slug: { a: 1 } }],
+  ] as const) {
+    test(`${label} → rejected unique, with no store query`, async () => {
+      let queried = false
+      const o = await runWritePipeline(
+        { method: 'POST', body: body as never, existing: null, config: cfg, userRoles: roles },
+        deps({ isUnique: async () => ((queried = true), true) })
+      )
+      expect(o).toMatchObject({ status: 'rejected', reason: 'unique' })
+      expect(queried).toBe(false)
+    })
+  }
+
+  test('a string or number is checked as before', async () => {
+    const o = await runWritePipeline(
+      { method: 'POST', body: { slug: 'a' }, existing: null, config: cfg, userRoles: roles },
+      deps()
+    )
+    expect(o.status).toBe('write')
+  })
+})

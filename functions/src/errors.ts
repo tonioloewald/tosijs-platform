@@ -100,3 +100,39 @@ export function notFound(res: Response, status = 404): void {
   noStore(res)
   res.status(status).json({ error: 'not-found', message: 'not found' })
 }
+
+/**
+ * The HTTP status for a write-pipeline refusal — ONE map for /doc and /docs.
+ *
+ * They had drifted: a `unique` or `validate` refusal was 400 from /doc and
+ * 403 from a /docs batch (0.2.0 review). These are post-authorization
+ * refusals, so none is the opaque 404:
+ *   - the request is malformed or breaks a rule about its content → 400;
+ *   - it contradicts what is stored or who is asking → 403;
+ *   - it conflicts with an immutable stored document → 409.
+ * Exhaustive over the pipeline's reasons, so a new one will not compile here
+ * until it has a status.
+ */
+export type RejectionReason =
+  | 'schema'
+  | 'validate'
+  | 'unique'
+  | 'exists'
+  | 'missing'
+  | 'unattributed'
+  | 'immutable'
+
+export function rejectionStatus(reason: RejectionReason): number {
+  switch (reason) {
+    case 'schema':
+    case 'validate':
+    case 'unique':
+      return 400
+    case 'exists':
+    case 'missing':
+    case 'unattributed':
+      return 403
+    case 'immutable':
+      return 409
+  }
+}

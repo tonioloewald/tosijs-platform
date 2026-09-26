@@ -189,7 +189,10 @@ export interface AccessConfig {
 
 export interface CollectionConfig {
   /**
-   * Assign a monotonic per-collection `_seq` on commit (#14).
+   * Assign a monotonic per-collection `_seq` on commit (#14). HOST-enforced:
+   * the endpoint assigns it inside its commit transaction; the kernel's write
+   * pipeline does not read this field, so setting it on a config the kernel
+   * alone runs does nothing. (Manifest: `envelope.seq`.)
    *
    * Opt-in, because a total order SERIALISES writes to the collection — that
    * is what "total order" means, not a Firestore quirk — and a collection that
@@ -226,6 +229,10 @@ export interface CollectionConfig {
    *
    * Opt-in, like `seq`: most collections are tables and are meant to be
    * edited. Once declared, an upgrade may not drop it (#22's rule).
+   *
+   * Enforcement is split: the KERNEL refuses a changed rewrite (given the
+   * caller passes a correct `exists`); the HOST refuses deletes, which never
+   * reach the write pipeline. (Manifest: top-level `immutable`.)
    */
   immutable?: boolean
 
