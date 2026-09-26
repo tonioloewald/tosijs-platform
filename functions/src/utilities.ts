@@ -1,4 +1,4 @@
-import { noStore } from './errors'
+import { fail, noStore } from './errors'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 import * as crypto from 'crypto'
@@ -153,8 +153,9 @@ function checkRateLimit(
       'X-RateLimit-Reset',
       String(Math.ceil((entry.windowStart + config.windowMs) / 1000))
     )
-    noStore(res)
-    res.status(429).send('Too Many Requests')
+    // The shared error shape (#20): `rate-limited` is in the stable code set,
+    // and a client told to switch on `error` got a plain-text body here.
+    fail(res, 429, 'rate-limited', 'too many requests — retry after the Retry-After interval')
     return true // Rate limited
   }
 

@@ -1,13 +1,15 @@
-# service-compris beta — standing up a host and installing onto it
+# service-compris — standing up a host and installing onto it
 
-**This release exists to be broken.** It is the first version where a third party
-can take a blank Firebase project, deploy this repo onto it, claim it, install a
-library, and give an agent its own identity — without anyone handing over a
-secret or deploying a function per feature.
+The walkthrough for the **repository**: take a blank Firebase project, deploy
+this repo onto it, claim it, install a library, and give an agent its own
+identity. Nobody hands over a secret, and nobody deploys a function per feature.
 
-Every flow below is verified end to end against a real deployed host on each
-change (`scripts/verify-*.js`, 64 assertions). That is not the same as *used*,
-which is what this beta is for.
+As of 0.2.0 this runs in production: tosijs-virta's host and loewald.com. Every
+flow below is verified end to end against a real deployed host on each change
+(`scripts/verify-*.js`, six ceremonies, 94 assertions). Read
+[What is NOT ready](#what-is-not-ready) before you design around something.
+
+(The file keeps the name BETA.md because other projects link to it.)
 
 ---
 
@@ -294,9 +296,37 @@ document`, and `400` with schema details all say what they mean.
 | sub-collections | `virta:task/abc/comment/xyz` works; declaring one in a manifest does not yet |
 | reserved fields | `_id`, `_collection`, `_path` are stripped from writes. `_created`, `_modified`, `_seq`, `_by` are endpoint-managed — stamped on the document and **hidden from your schema**, so `additionalProperties: false` works. You cannot set them. |
 | provenance | every write carries `_by: {uid, role, name, token?, label?}`. Unforgeable. All of one person's agents share a `uid` — the token **label** is what tells them apart, and from their human. |
-| errors | `{"error": "<stable code>", "message": "<prose>", "details"?: […]}`. Switch on `error`; the prose may be reworded. Opaque `404`s carry no detail by design. |
-| rate limit | 100 requests/minute per IP, `429` with `Retry-After`. A bulk import needs to pace itself. |
+| errors | `{"error": "<stable code>", "message": "<prose>", "details"?: […]}`. Switch on `error`; the prose may be reworded. The codes are listed in [Errors](#errors) below. |
+| rate limit | 100 requests/minute per IP: `429 {"error":"rate-limited"}` with `Retry-After`. A bulk import needs to pace itself. |
 | unchanged writes | a PUT whose content matches returns `200 unchanged …` and does **not** re-stamp `_modified` |
+
+### Errors
+
+Every error has the same shape, `{"error": "<code>", "message": "<prose>", …}`.
+**The codes below are the 0.2.x contract.** Switch on `error`, never on
+`message`. A new code is a minor release.
+
+| `error` | HTTP | When | Retry? |
+|---|---|---|---|
+| `bad-request` | 400 | The request is malformed: no `p`, a bad body, an unsupported method. | No: fix the request |
+| `unauthenticated` | 401 | The endpoint needs a principal and none was presented (`/install`, `/token`, `/claim`, `/authorize`). | After signing in |
+| `forbidden` | 403 | A **privileged** caller lacks this access. Non-privileged callers get `not-found` instead. | No |
+| `not-found` | 404 | Missing, **or not visible to you**: opaque on purpose (see above). | No |
+| `exists` | 403 | `POST` to a document that exists. Use `PUT`, or an upsert through `POST /docs`. | No |
+| `missing` | 403 | `PUT`/`PATCH`/`DELETE` on a document that does not exist. | No |
+| `schema` | 400 | The body fails the collection's schema. `details` lists `{path, message}`. | No: fix the body |
+| `validate` | 400 | The collection's transform refused the write. | No |
+| `unique` | 400 | A `unique` field is missing, not a string or number, or already used. | No |
+| `unattributed` | 403 | The collection requires attribution (`envelope.requireAttribution`) and the caller has no principal. | After signing in |
+| `immutable` | 409 | A changed rewrite, or a delete, of a document in an `immutable` collection. An identical rewrite is a no-op instead. | No |
+| `refused` | 400 / 403 | An install, token, claim or batch decision refused the request. `problems` lists why. | No: fix what it names |
+| `conflict` | 409 | Re-installing a published manifest version with different content. | No: bump the version |
+| `not-sequenced` | 400 | `since=` on a collection without `envelope.seq`. | No |
+| `rate-limited` | 429 | More than 100 requests/minute from one IP. | Yes, after `Retry-After` |
+| `internal` | 500 | Something failed on the host. | Yes |
+
+A `POST /docs` batch refuses with the same codes and statuses as `/doc`. It
+names the document in `p`, and nothing in the batch is written.
 
 ---
 
@@ -337,16 +367,17 @@ re-minted, never retrieved.
 
 ## What is NOT ready
 
-Said plainly, because a beta that oversells itself wastes your time:
+Said plainly, because a release that oversells itself wastes your time:
 
 | | |
 |---|---|
 | **Capability enforcement** | The manifest *shape* for capabilities is settled and validated (`blob`, `email`, `sms`, `outbound`, `turn`), but **nothing consults them yet**. The install response reports `unenforced: [...]` so you are never told you have a power you do not. See #11. |
 | **Sub-collections in manifests** | A manifest declares one segment. `virta:task/comment` works at runtime but cannot be declared. |
-| **Multi-field unique constraints** | Refused in v1 — they need a composite index, which is a deployment, and "install without deploying" is the point. |
+| **Composite (tuple) uniqueness** | Not supported. `unique: ["a", "b"]` makes each field unique **on its own**; there is no "the pair is unique" constraint. That would need a composite index, which is a deployment. |
 | **`docs.ts` query port** | `/docs` still queries Firestore directly; the substrate port (#7) covers writes only. |
 | **Stored ajs** | Install v2. Grounded on tjs-lang, re-validated per ROADMAP before anything is built on it. |
-| **The 12 universal-endpoint invariants** | Still `test.todo`. They are acceptance criteria, not passing tests — do not read a green suite as covering them. |
+| **10 of the 12 universal-endpoint invariants** | Still `test.todo` (`isWriteAllowed`, procedures, capability VM enforcement, observability). They are acceptance criteria, not passing tests, so don't read a green suite as covering them. The no-op and server-written envelope invariants are real tests now. |
+| **The platform's own rules as data** | A host can serve `post`, `page`, `role` and the rest from stored configs (`PLATFORM_CONFIGS_FROM_REGISTRY=true`; loewald.com does). It is **off by default**. Before turning it on, run `scripts/seed-registry.js --alias <a> --apply` and then `--check`: with the switch on and the registry unseeded, those collections are inaccessible. |
 
 ## Where to push hardest
 

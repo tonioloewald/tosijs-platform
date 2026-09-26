@@ -5,10 +5,10 @@
 > no function deployment, no code review, no redeploy. Agents authenticate with
 > scoped tokens that attenuate their human's authority and die when it does.
 
-Status: **0.2.0-beta.2**, 2026-09-21. beta.1 was cut to be broken; the first
-consumer broke it within a day and filed eight issues, all now closed. Verified
-against a real deployed host on every change — 94 assertions across six
-ceremonies (`scripts/verify-*.js`).
+Status: **0.2.0**, 2026-09-26: the first stable release. Two production hosts run it:
+tosijs-virta's (the first consumer, which broke the betas and got every break fixed) and
+loewald.com. Verified against a real deployed host on every change: 94 assertions across
+six ceremonies (`scripts/verify-*.js`).
 
 ## Start here
 
@@ -30,13 +30,15 @@ ceremonies (`scripts/verify-*.js`).
 3. **Mutating requests put the path in the BODY.** `GET`/`DELETE` use `?p=`;
    `POST`/`PUT`/`PATCH` send `{"p": "...", "data": {...}}`. `POST /docs
    {writes:[…]}` commits several documents atomically.
-4. **`access` is an array, not a role-keyed object.** Grants join as a lattice, so
-   order is meaningless and holding more roles never grants less.
+4. **In a manifest, `access` is an array, not a role-keyed object.** (The kernel's
+   compiled `CollectionConfig` keys it by role.) Grants join as a lattice, so order is
+   meaningless and holding more roles never grants less.
 5. **A fresh function may answer `401` with HTML from *Google*, not from us.** It needs
    an `allUsers` run.invoker binding. Ours carry CORS and rate-limit headers; that is
    the tell. `provision-sandbox.js` grants them.
 6. **Errors are `{error: "<code>", message, details?}`.** Switch on the code; the
-   prose is free to change. Opaque `404`s carry no detail, by design.
+   prose is free to change. Opaque `404`s carry no detail, by design. The codes, with
+   statuses and when each fires, are the table under "Errors" in BETA.md.
 7. **Endpoint-managed fields are hidden from your schema** — `_created`,
    `_modified`, `_seq`, `_by` — so `additionalProperties: false` works.
 
@@ -63,6 +65,9 @@ ceremonies (`scripts/verify-*.js`).
 
 ## Rules a manifest lives by
 
+- **`unique: ["a", "b"]` makes each field unique on its own.** There is no composite
+  (tuple) uniqueness. A missing or non-scalar value in a unique field is refused
+  (`400 unique`).
 - **Upgrades are additive-only.** Removing a collection or field, newly *requiring* a
   field, or changing a unique constraint are refused as migrations rather than
   guessed at. A newly-required field would invalidate every stored document.
@@ -103,8 +108,13 @@ secret is shown once and never stored, only hashed.
 
 ## Repository shape
 
-- `functions/src/collections/` — the portable decision kernel. No Firebase imports;
-  this is what the `service-compris` npm package publishes.
+- `functions/src/collections/` — the portable decision kernel. No Firebase imports.
+  The `service-compris` npm package publishes part of it: `write-pipeline`, `access`
+  and `roles` (plus `auth/caveats`), through `lib/index.ts`.
+- The platform's OWN collections (`post`, `page`, `role`, …) can be served from stored
+  configs in `system:registry` (`PLATFORM_CONFIGS_FROM_REGISTRY=true`, off by default).
+  Seed them with `scripts/seed-registry.js` and `--check` BEFORE turning it on; with the
+  switch on and nothing seeded, those collections are inaccessible.
 - `functions/src/install/`, `functions/src/auth/` — install and auth, each split into
   pure decisions plus a thin HTTP handler. If it is a judgement, it belongs in the
   pure half where it runs without a cloud.

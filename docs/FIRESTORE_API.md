@@ -444,23 +444,18 @@ fb.service.post['123'].comment.get()     // GET /docs/post/123/comment
 
 ## Error Handling
 
-Errors are returned as JSON:
+Errors share one shape. `error` is a **stable code**; `message` is prose that may be
+reworded:
 
 ```json
-{
-  "error": "Validation failed: Title is required"
-}
+{ "error": "schema", "message": "schema validation failed",
+  "details": [{ "path": "title", "message": "required" }] }
 ```
 
-Client receives rejected promise:
-
-```typescript
-try {
-  await fb.service.post.post({ content: 'No title' })
-} catch (error) {
-  console.error(error) // "Validation failed: Title is required"
-}
-```
+Switch on `error`, never on `message`. The full list of codes, their HTTP statuses and when
+each fires is the **Errors** table in [BETA.md](../BETA.md#errors), which is the 0.2.x
+contract (a test keeps that table and the code set identical). A `404 not-found` also covers
+"not visible to you" for non-privileged callers, by design.
 
 ## Performance Considerations
 

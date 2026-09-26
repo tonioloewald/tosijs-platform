@@ -389,7 +389,7 @@ describe('platform API responses are never CDN-cached (#27)', () => {
     // Those run for EVERY endpoint, including the SSR ones that keep CDN
     // caching for successes — an error is never someone else's answer.
     const utilities = src('utilities.ts')
-    expect(utilities).toMatch(/noStore\(res\)\s*\n\s*res\.status\(429\)/)
+    expect(utilities).toMatch(/fail\(res, 429, 'rate-limited'/)
     expect(utilities).toMatch(/noStore\(res\)\s*\n\s*res\.status\(403\)/)
   })
 })

@@ -117,3 +117,18 @@ describe('errors are never cached by a shared CDN (#27)', () => {
     expect(sent.headers['Cache-Control']).toBe('no-store')
   })
 })
+
+describe('the documented error codes ARE the code set (0.2.0 review, M3)', () => {
+  // BETA.md's Errors table is the consumer contract; ERROR_CODES is what the
+  // code can send. They must name the same set, so neither can drift.
+  test('BETA.md lists exactly ERROR_CODES', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const doc = readFileSync(join(__dirname, '..', '..', 'BETA.md'), 'utf8')
+    const section = doc.slice(doc.indexOf('### Errors'), doc.indexOf('## 6.'))
+    const documented = [...section.matchAll(/^\| `([a-z-]+)` \|/gm)]
+      .map((m) => m[1])
+      .filter((c) => c !== 'error') // the header row
+    expect([...documented].sort()).toEqual([...ERROR_CODES].sort())
+  })
+})

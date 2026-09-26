@@ -1,5 +1,104 @@
 # Changelog
 
+## 0.2.0 — 2026-09-26
+
+The first stable release since 0.1.0. The npm package is the decision kernel:
+RBAC, the write pipeline, and role resolution. The repository is a host you can
+deploy, claim, install onto and hand to agents. Two production hosts run it:
+tosijs-virta's, the consumer that broke the betas and got every break fixed, and
+loewald.com. The beta entries below are the detailed history. This entry is
+what changed since **0.1.0**, which is what `npm install service-compris`
+gave you until now.
+
+**Verified for this release:**
+- **Unit tests:** 746 functions and 795 root, all passing.
+- **Emulator integration suites:** 53 pass, 0 fail, run against this code with
+  the registry switch on, as production runs.
+- **Live host checks** on the sandbox: the signed-in suite 17/17, and six
+  ceremonies with 94 assertions.
+
+### Upgrading the npm package from 0.1.0
+
+- **Authorization results can change.** `getMethodAccess` now joins every
+  applicable grant as a lattice. In 0.1.0 the last matching role in key order
+  won, so whether a principal with two roles got more or less depended on how
+  the map was written. Now holding more roles never grants less, and key order
+  is irrelevant.
+- **Token caveats deny.** When `userRoles.token` is present, a method or
+  collection outside its caveats resolves to `undefined`, the same as no
+  access. Sub-collections of an allowed collection are allowed. `LIST` is its
+  own method, distinct from `GET`. (`TokenContext` is exported.)
+- **`RoleName` gains `configurator`,** the role that installs libraries.
+- **`WriteOutcome`'s rejection reasons gain `unattributed` and `immutable`.**
+  This breaks an exhaustive `switch` over `reason`.
+- **Provenance:** `data._by` is stamped from `userRoles` (uid, role document,
+  name, and the token's id and label when there is one). It is never taken from
+  the body. `STAMPED_FIELDS` is exported.
+- **The schema validates content, not stamps.** A closed schema
+  (`additionalProperties: false`) now works; in 0.1.0 it rejected every write.
+  `isUnchanged` ignores `_seq` and `_by`.
+- **`unique` may list several fields, each unique on its own.** A missing or
+  non-scalar value in a unique field is refused as `unique`.
+- **What the kernel enforces, and what only a host does.**
+  - Kernel: `requireAttribution`, and `immutable` for rewrites. This needs a
+    correct `exists` from the caller.
+  - Host: `seq`, `afterWrite`, and refusing deletes of an immutable document.
+- **0.1.0 could not be imported under Node ESM** (extensionless specifiers).
+  0.2.0 can, and the publish workflow smoke-tests the packed tarball and the
+  registry's copy.
+- **Packaging:** the package has no runtime dependencies besides its
+  `tosijs-schema` peer. It used to pull the Firebase SDK for nothing.
+
+### Upgrading a host (from 0.1.0 or 0.2.0-beta.1/beta.2)
+
+- **Errors have one shape**, `{error: <code>, message, details?}`, and the
+  codes are a contract: see BETA.md, "Errors". New since the betas:
+  - `immutable` (409);
+  - `rate-limited` (429), in that shape (it used to be plain text);
+  - a `/docs` batch now uses the same statuses as `/doc`, so its `validate` and
+    `unique` refusals are 400, not 403.
+- **`immutable: true`** makes a collection a log: an identical rewrite is a
+  no-op; a different rewrite, or a delete, is refused (409). An upgrade may add
+  it but never drop it.
+- **An upgrade may not switch `envelope.seq` on or off** for an existing
+  collection.
+- **A contact-email grant resolves only for a VERIFIED email.** A user who held
+  a role only through a contact and signs in with a password loses it. Bind them
+  by uid, or have them use Google.
+- **`system` is a reserved namespace.**
+- **`derive: slug, when: 'absent'`** leaves a supplied value exactly as written.
+  It used to re-slugify it on every write.
+- **API responses are `Cache-Control: no-store`.** Behind Firebase Hosting, error
+  responses used to be CDN-cached across credentials.
+- **The platform's own rules can be served as data**
+  (`PLATFORM_CONFIGS_FROM_REGISTRY`, off by default). Seed with
+  `scripts/seed-registry.js`, and run `--check` before turning it on.
+- **Audit an existing host with `scripts/audit-host.js`.** See the beta.3
+  "Action required" section: older seeds granted `owner` to a claimable address.
+
+### Security: what was affected
+
+Each of these was a HOST issue. The npm kernel was not affected by any of them.
+
+| Issue | Affected | Fixed |
+|---|---|---|
+| Seeded role documents granted `owner` to claimable real addresses | hosts seeded from 0.1.0 – beta.2 (remediate with `audit-host.js`) | beta.3 |
+| A contact-email grant resolved for an UNVERIFIED email | hosts with password sign-in, 0.1.0 – beta.2 | beta.3 |
+| A library named `system` could declare the platform's `system:*` collections | beta.1 – beta.2 | beta.3 |
+| Error responses cached by the Hosting CDN across credentials | hosts behind Hosting rewrites, ≤ beta.3 | beta.4 |
+
+### Repository
+
+- **Published through GitHub OIDC with npm staged publishing.** No token
+  exists; a maintainer's 2FA approval publishes. The workflow is the shared
+  template (`.github/workflows/publish.yml`). It builds the package with
+  `build:lib`, and a declared extra install runs after the tarball is packed.
+- **Tasks moved to the virta board** (project `tosijs-platform`). `TODO.md` is a
+  pointer, and the old contents are in `docs/archive/`.
+- **loewald.com serves its own rules from the registry.**
+- **`bun seed` seeds the emulator's registry too,** so the emulator matches
+  production.
+
 ## 0.2.0-beta.5 — 2026-09-26
 
 The platform's own collections can run on the same rules engine as everyone
