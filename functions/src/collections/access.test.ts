@@ -518,7 +518,7 @@ describe('getMethodAccess — write-side field maps', () => {
   })
 })
 
-describe('getMethodAccess — filterFields argument (see TODO.md: known bug)', () => {
+describe('getMethodAccess — filterFields argument (known bug; see docs/archive/TODO-2026-09-26.md)', () => {
   const collections: CollectionMap = {
     profiles: {
       access: {

@@ -4,7 +4,7 @@
  * The roadmap blocks Phase 1 internals on "re-run the VM spike against tjs-lang
  * 0.13.x before building the backend contract". The 2026-08 spike lived in an
  * ephemeral scratchpad and was lost, so its findings survived only as prose in
- * TODO.md. This file is the spike as a *test*, so the next re-validation is
+ * TODO.md (now docs/archive/TODO-2026-09-26.md). This file is the spike as a *test*, so the next re-validation is
  * `bun test` rather than an archaeology exercise.
  *
  * Three kinds of assertion live here:

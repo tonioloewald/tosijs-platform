@@ -5,5 +5,27 @@
       "Bash(md5 *)",
       "mcp__claude-in-chrome__tabs_context_mcp"
     ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "virta brief"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "virta brief --changes"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -84,7 +84,7 @@ export function fail(
   // Every error sent through here, on any endpoint — including the SSR ones
   // that DO want CDN caching for their successes. An error is never someone
   // else's answer. (Some SSR error paths still write raw responses and bypass
-  // this — see TODO.md, #27 follow-ups.)
+  // this — tracked on the virta board as #1175.)
   noStore(res)
   res.status(status).json({ error, message, ...extra })
 }

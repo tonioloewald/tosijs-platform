@@ -7,7 +7,7 @@
 > Rewritten 2026-08-24. **Supersedes** the prior "ajs / universal-endpoint" roadmap (whose
 > center of gravity — a server-side interpreter that *rebuilds* the content system as data —
 > predated the **tosijs-ui build/dev/doc-site system**, which now owns page generation). See
-> [TODO.md](TODO.md) for near-term tasks.
+> the virta board (project `tosijs-platform`; see [TODO.md](TODO.md)) for near-term tasks.
 
 ## The thesis (settled)
 
