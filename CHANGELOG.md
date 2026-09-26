@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.2.1 — 2026-09-26
+
+Two fixes reported by tosijs-virta, the proving consumer.
+
+### Fixed
+
+- **Provenance recorded the wrong person** (#28). `_by.uid` was the first uid
+  on the role document that matched, so a principal matched by contact email,
+  or one sharing a role document, was recorded as whoever is listed first. On
+  virta's host, every board write from a human was stamped as the host's
+  service principal. `_by.uid` is now **who authenticated**. `_by.role` still
+  names the document that granted the authority.
+  - **Kernel (npm):** `UserRoles` gains an optional `principal: {uid, name?}`,
+    which a host sets from the verified credential. `principalIdentity(userRoles)`
+    is the one rule every attribution uses: provenance, a manifest's
+    `derive: {op: 'principal'}` (which had the same bug), and `/token`. If you
+    don't set `principal`, you get the 0.2.0 behaviour.
+  - **`_by.name`, "curated when owned":**
+    - The principal is the role document's sole owner: its operator-curated
+      name.
+    - A contact or shared match: the principal's own display name, or no name
+      at all, never the document's.
+    - Never an email address, because `_by` is published with public documents.
+    - Display names are self-asserted, so spoofing is confined to the case
+      where no curated name exists.
+  - **An agent's writes carry its human's name.** The minting human's display
+    name is stored on the token (`principalName`, captured at `/token` mint or
+    at `/authorize` approval). Tokens minted before 0.2.1 fall back.
+- **An immutable or sequenced collection could be re-sequenced by concurrent
+  `/doc` writes** (board #1184). `/doc` read existence outside its commit, so
+  concurrent creates of one new id all saw "missing" and all committed. Those
+  collections now commit through the same transaction as `/docs` batches: the
+  existence check, the pipeline, uniqueness and the sequence counter all
+  happen inside it.
+
+**Verified:**
+- **Unit tests:** 768 passing.
+- **Emulator suites:** 54 pass, including a new step: a contact-matched writer
+  on a document listing someone else first is stamped as themselves.
+- **Live on the sandbox:** a 5-way race on one id gives exactly one `200`,
+  four `403`s, one `_seq`, and a changed rewrite gets `409`. All six ceremonies
+  pass (99 checks), plus the signed-in suite (17).
+
 ## 0.2.0 — 2026-09-26
 
 The first stable release since 0.1.0. The npm package is the decision kernel:

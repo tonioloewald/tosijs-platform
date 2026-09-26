@@ -8,7 +8,7 @@ without a cloud.
 npm install service-compris
 ```
 
-> **0.2.0, 2026-09-26.** Two things live here. The **npm package** is the pure decision kernel:
+> **0.2.1, 2026-09-26.** Two things live here. The **npm package** is the pure decision kernel:
 > RBAC, a write pipeline and role resolution, with no I/O and no vendor. The **repository** is a
 > host you can deploy onto a blank Firebase project, claim without anyone handing you a secret,
 > install a library onto from a JSON manifest, and give an agent its own scoped identity. Two

@@ -93,17 +93,31 @@ export const anonymousUser: UserRoles = Object.freeze({
  *
  * `uid`: who AUTHENTICATED when the host supplied it, else the matched
  * document's first uid (a kernel consumer that sets no principal).
- * `name`: the credential's name when the host supplied one, else the role
- * document's name.
+ *
+ * `name` (owner's decision, 2026-09-26, "curated when owned"):
+ *   - the principal is the role document's SOLE owner → the document's name,
+ *     which an operator curated (the credential's name only if it has none);
+ *   - a contact or shared match → the credential's display name, or nothing.
+ *     Never the document's name: it names someone else (#28's visible
+ *     symptom). A display name is self-asserted, so spoofing is confined to
+ *     the case where no curated name exists for this person;
+ *   - no principal (a kernel consumer) → the document's name, as before.
+ * Never an email address: `_by` is published with public documents.
  */
 export function principalIdentity(userRoles: UserRoles | null | undefined): {
   uid?: string
   name?: string
 } {
   if (!userRoles) return {}
-  const uid = userRoles.principal?.uid ?? userRoles.userIds?.[0]
-  const name =
-    userRoles.principal?.name ??
-    (userRoles.name && userRoles.name !== 'unknown' ? userRoles.name : undefined)
-  return { ...(uid ? { uid } : {}), ...(name ? { name } : {}) }
+  const docName =
+    userRoles.name && userRoles.name !== 'unknown' ? userRoles.name : undefined
+  const principal = userRoles.principal
+  if (!principal) {
+    const uid = userRoles.userIds?.[0]
+    return { ...(uid ? { uid } : {}), ...(docName ? { name: docName } : {}) }
+  }
+  const soleOwner =
+    userRoles.userIds?.length === 1 && userRoles.userIds[0] === principal.uid
+  const name = soleOwner ? (docName ?? principal.name) : principal.name
+  return { uid: principal.uid, ...(name ? { name } : {}) }
 }

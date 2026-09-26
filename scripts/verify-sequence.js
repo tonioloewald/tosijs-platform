@@ -75,9 +75,12 @@ ok('a later write appears at the held cursor', after.rows.length===1&&after.rows
 // a no-op must not burn a sequence number
 const same = await fetch(`${BASE}/doc`,{method:'PUT',headers:H,body:JSON.stringify({p:'seqtest:event/e9',data:{id:'e9',kind:'tagged'}})})
 const afterNoop = await fetch(`${BASE}/docs?p=seqtest:event&since=9&c=3`,{headers:H}).then(r=>r.json())
-ok('an unchanged PUT is a no-op and burns no sequence',
-   same.status===200 && /unchanged/.test(await same.text().catch(()=>'')) === false ? afterNoop.rows.length===0 : afterNoop.rows.length===0,
-   `rows after=${afterNoop.rows.length}`)
+// (This check used to be a tautology — `c ? x : x` — so a wrong status,
+// e.g. 409 on an identical re-PUT to an immutable collection, still passed.)
+const sameBody = await same.text().catch(()=>'')
+ok('an unchanged PUT answers 200 unchanged — a no-op, not a refusal',
+   same.status===200 && /unchanged/.test(sameBody), `${same.status} ${sameBody.slice(0,60)}`)
+ok('and burns no sequence', afterNoop.rows.length===0, `rows after=${afterNoop.rows.length}`)
 
 // RACE (#1184): concurrent creates of ONE id on an immutable, sequenced
 // collection. /doc used to read existence outside its commit, so several

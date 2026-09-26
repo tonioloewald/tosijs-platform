@@ -79,6 +79,7 @@ export {
 export {
   ROLES,
   anonymousUser,
+  principalIdentity,
   type Role,
   type RoleName,
   type TokenContext,

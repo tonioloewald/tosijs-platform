@@ -26,6 +26,7 @@ describe('service-compris public surface (0.2.x)', () => {
       'hasPrivilegedRole',
       'isUnchanged',
       'opaqueStatus',
+      'principalIdentity',
       'runWritePipeline',
       'setAccessLogger',
       'stripEnvelope',

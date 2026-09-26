@@ -5,7 +5,7 @@
 > no function deployment, no code review, no redeploy. Agents authenticate with
 > scoped tokens that attenuate their human's authority and die when it does.
 
-Status: **0.2.0**, 2026-09-26: the first stable release. Two production hosts run it:
+Status: **0.2.1**, 2026-09-26 (0.2.0 was the first stable release). Two production hosts run it:
 tosijs-virta's (the first consumer, which broke the betas and got every break fixed) and
 loewald.com. Verified against a real deployed host on every change: 94 assertions across
 six ceremonies (`scripts/verify-*.js`).

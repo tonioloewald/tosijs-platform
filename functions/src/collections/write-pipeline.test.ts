@@ -822,3 +822,38 @@ describe('provenance stamps who AUTHENTICATED, not the role document (#28)', () 
     expect((o.data._by as { uid: string }).uid).toBe('service-principal-uid')
   })
 })
+
+describe('_by.name: curated when owned (owner decision 2026-09-26)', () => {
+  const byOf = async (userRoles: UserRoles) =>
+    ((await runWritePipeline(
+      { method: 'POST', body: { t: 'x' }, existing: null, config: {}, userRoles },
+      deps()
+    )) as { data: { _by: Record<string, unknown> } }).data._by
+  const base = { contacts: [], roles: ['author'] as never, _id: 'doc' }
+
+  test('SOLE owner → the role document\'s curated name, even when the credential has another', async () => {
+    const by = await byOf({ ...base, name: 'Curated Name', userIds: ['me'], principal: { uid: 'me', name: 'Whatever I Typed' } })
+    expect(by).toMatchObject({ uid: 'me', name: 'Curated Name' })
+  })
+
+  test('sole owner of a nameless document → the credential name', async () => {
+    const by = await byOf({ ...base, name: 'unknown', userIds: ['me'], principal: { uid: 'me', name: 'Ada' } })
+    expect(by.name).toBe('Ada')
+  })
+
+  test('contact match (someone else on the document) → the credential name, never the document\'s', async () => {
+    const by = await byOf({ ...base, name: 'Service Principal', userIds: ['svc'], principal: { uid: 'me', name: 'Ada' } })
+    expect(by).toMatchObject({ uid: 'me', name: 'Ada' })
+  })
+
+  test('contact match with no credential name → no name at all, not someone else\'s', async () => {
+    const by = await byOf({ ...base, name: 'Service Principal', userIds: ['svc'], principal: { uid: 'me' } })
+    expect(by.uid).toBe('me')
+    expect('name' in by).toBe(false)
+  })
+
+  test('a shared document (several uids) → the credential name', async () => {
+    const by = await byOf({ ...base, name: 'Team', userIds: ['me', 'you'], principal: { uid: 'me', name: 'Ada' } })
+    expect(by.name).toBe('Ada')
+  })
+})
