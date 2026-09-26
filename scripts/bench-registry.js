@@ -2,8 +2,10 @@
 /**
  * Measure what routing a collection through the REGISTRY costs a live read (D19 step 2).
  *
- * The bare-name collections (`post`, `page`, …) are served from compiled
- * TypeScript today; namespaced ones go through `installedRegistry` — a
+ * NOTE: "bare name" is served from compiled TypeScript unless the host runs with
+ * PLATFORM_CONFIGS_FROM_REGISTRY=true, in which case BOTH rows go through the
+ * registry. The bare-name collections (`post`, `page`, …) are served from compiled
+ * TypeScript by default; namespaced ones go through `installedRegistry` — a
  * per-instance cache with a 5 s epoch check and a 60 s reload. The deferred
  * swap would route `post` the second way. This measures the difference on a
  * real deployment rather than guessing it:
@@ -118,10 +120,10 @@ try {
     return performance.now() - t
   }
   const targets = {
-    'doc  compiled (post)': `${BASE}/doc?p=post/${postId}`,
-    'doc  registry (benchreg:post)': `${BASE}/doc?p=benchreg:post/${postId}`,
-    'docs compiled (post)': `${BASE}/docs?p=post&c=10`,
-    'docs registry (benchreg:post)': `${BASE}/docs?p=benchreg:post&c=10`,
+    'doc  bare name (post)': `${BASE}/doc?p=post/${postId}`,
+    'doc  installed (benchreg:post)': `${BASE}/doc?p=benchreg:post/${postId}`,
+    'docs bare name (post)': `${BASE}/docs?p=post&c=10`,
+    'docs installed (benchreg:post)': `${BASE}/docs?p=benchreg:post&c=10`,
   }
   // Warm-up: first requests pay cold starts, which are not what we compare.
   for (let i = 0; i < 3; i++) {
@@ -147,8 +149,8 @@ try {
   for (const k of Object.keys(targets)) console.log(row(k))
   const d = (a, b) => q(samples[b], 0.5) - q(samples[a], 0.5)
   console.log(
-    `\nregistry − compiled, p50:  /doc ${d('doc  compiled (post)', 'doc  registry (benchreg:post)').toFixed(0)} ms,` +
-      `  /docs ${d('docs compiled (post)', 'docs registry (benchreg:post)').toFixed(0)} ms\n`
+    `\ninstalled − bare name, p50:  /doc ${d('doc  bare name (post)', 'doc  installed (benchreg:post)').toFixed(0)} ms,` +
+      `  /docs ${d('docs bare name (post)', 'docs installed (benchreg:post)').toFixed(0)} ms\n`
   )
 } finally {
   await cleanup()

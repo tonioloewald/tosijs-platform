@@ -38,3 +38,39 @@ Latency is not what blocks the swap. The questions that decide it are design, no
    needs a stated answer, for example last-known-good snapshot, or refuse to serve, before
    production.
 3. **The reload tail.** The fix could be a background refresh, so no request pays it. Or accept it.
+
+---
+
+## Swap rehearsal with the switch ON (2026-09-26)
+
+Code at `e33f4cd`. Sandbox seeded with `seed-registry.js --alias sandbox --apply` (9 configs plus
+an epoch bump in one commit). A second run reported all 9 `unchanged`, so the round trip is
+exact. Functions were deployed with `functions/.env.sandbox`
+(`PLATFORM_CONFIGS_FROM_REGISTRY=true`), and the deploy log confirms the file was loaded.
+
+| Check | Result |
+|---|---|
+| verify:sandbox (public) | 17/17 |
+| verify:sandbox:auth | 17/17 |
+| install / batch / sequence / provenance / authorize / token | 27 / 11 / 12 / 7 / 20 / 17 |
+| Browser: home and a post | render; no console errors |
+
+**The switch is really on, and failure is per collection.** I deleted `system:registry/post`
+(with an epoch bump) and then restored it with `seed-registry.js --apply`:
+
+| | `/doc` post | `/docs` post | `/doc` config/app |
+|---|---|---|---|
+| before | 200 | 200 | 200 |
+| `post` config removed | **404** | **404** | 200 |
+| restored by the seed script | 200 | 200 | 200 |
+
+Each change took effect within 8 s. So a missing config makes its collection inaccessible,
+other collections are unaffected, and recovery through outside (datastore) privileges works, as
+the owner specified.
+
+**Latency with post served from the registry:** p50 `/doc` was 209 ms, the same as the compiled
+baseline. p99 was 523–664 ms, down from 952 ms before background refresh. At n=80 a p99 is
+about one request, so read this as indicative.
+
+**Seed parity fixed before rehearsal**, both of which the swap would have shipped: `page` LIST
+leaked unlisted pages, and `unique` was lost on page `path` and post `title` (`bfad021`).
