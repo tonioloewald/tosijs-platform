@@ -64,3 +64,6 @@ src/*.js
 # library build output (published, not committed)
 /dist-lib
 *.tgz
+
+# The publish workflow clones tosijs-coding-practices here (release-doctor reads it).
+/.practices/
