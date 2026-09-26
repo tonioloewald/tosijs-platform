@@ -45,6 +45,7 @@ import {
 } from './token'
 import { fail, noStore } from '../errors'
 import { credentialName } from '../collections/join-roles'
+import { principalIdentity } from '../collections/roles'
 
 const TOKENS = 'token'
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -75,7 +76,7 @@ export const token = onRequest({}, async (request, response: Response) => {
   const user = viaToken ? false : await getUser(req)
   // WHO authenticated — never the role document's first uid (#28).
   const uid = viaToken
-    ? (userRoles.principal?.uid ?? userRoles.userIds[0])
+    ? (principalIdentity(userRoles).uid ?? '')
     : user
       ? user.uid
       : ''

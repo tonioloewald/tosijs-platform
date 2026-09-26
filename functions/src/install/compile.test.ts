@@ -390,3 +390,42 @@ describe('immutable compiles to the pipeline flag (#25)', () => {
     expect(compile(false).immutable).toBeUndefined()
   })
 })
+
+describe('derive: principal names who AUTHENTICATED (#28; 0.2.1 review, B1)', () => {
+  // The derive context read `userIds[0]` and the role document's name, so a
+  // contact-matched writer on a document listing a service principal first
+  // had a derived author field naming the service principal — while `_by`
+  // named the writer. One document, two authors.
+  const c = compileCollection({
+    schema: { type: 'object' },
+    derive: [
+      { op: 'principal', to: 'author', field: 'uid' },
+      { op: 'principal', to: 'authorName', field: 'name' },
+    ],
+    access: [{ role: 'author', write: 'ALL' }],
+  } as never)
+  const roles = {
+    _id: 'shared-doc',
+    name: 'Service Principal',
+    contacts: [],
+    roles: ['author'],
+    userIds: ['service-uid'],
+    principal: { uid: 'human-uid', name: 'Human Being' },
+  }
+
+  test('uid and name come from the principal, not the document', async () => {
+    const validate = c.validate as (d: unknown, r: unknown, e: unknown) => Promise<Record<string, unknown>>
+    const out = await validate({}, roles, {})
+    expect(out.author).toBe('human-uid')
+    expect(out.authorName).toBe('Human Being')
+  })
+
+  test('without a principal, the document is the fallback (old behaviour)', async () => {
+    const validate = c.validate as (d: unknown, r: unknown, e: unknown) => Promise<Record<string, unknown>>
+    const { principal: _p, ...legacy } = roles
+    void _p
+    const out = await validate({}, legacy, {})
+    expect(out.author).toBe('service-uid')
+    expect(out.authorName).toBe('Service Principal')
+  })
+})

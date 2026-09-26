@@ -105,9 +105,14 @@ export function lookupEmail(principal: {
  */
 export function credentialName(credential: {
   name?: unknown
-  email?: unknown
+  [claim: string]: unknown
 }): string | undefined {
-  if (typeof credential.name === 'string' && credential.name) return credential.name
-  if (typeof credential.email === 'string' && credential.email) return credential.email
+  // NEVER the email address (0.2.1 review, B2): `_by` is published with
+  // publicly readable documents (a post), so an email fallback published
+  // every writer's address. No display name → no credential name, and
+  // attribution falls back to the role document's operator-curated name.
+  if (typeof credential.name === 'string' && credential.name.trim()) {
+    return credential.name.trim()
+  }
   return undefined
 }

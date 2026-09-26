@@ -85,3 +85,25 @@ export const anonymousUser: UserRoles = Object.freeze({
   roles: [],
   userIds: [],
 })
+
+/**
+ * The identity a write is attributed to — ONE rule for every path that
+ * attributes (provenance, a manifest's `derive: principal`, /token), so none
+ * can drift back to the role document's first uid (#28; 0.2.1 review, B1).
+ *
+ * `uid`: who AUTHENTICATED when the host supplied it, else the matched
+ * document's first uid (a kernel consumer that sets no principal).
+ * `name`: the credential's name when the host supplied one, else the role
+ * document's name.
+ */
+export function principalIdentity(userRoles: UserRoles | null | undefined): {
+  uid?: string
+  name?: string
+} {
+  if (!userRoles) return {}
+  const uid = userRoles.principal?.uid ?? userRoles.userIds?.[0]
+  const name =
+    userRoles.principal?.name ??
+    (userRoles.name && userRoles.name !== 'unknown' ? userRoles.name : undefined)
+  return { ...(uid ? { uid } : {}), ...(name ? { name } : {}) }
+}

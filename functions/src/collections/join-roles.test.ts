@@ -144,11 +144,15 @@ describe('only a verified email resolves a role by contact', () => {
   })
 })
 
-describe('credentialName — the one name provenance records for who authenticated (#28)', () => {
-  test('display name first, then email, else nothing', () => {
-    expect(credentialName({ name: 'Ada', email: 'a@b.org' })).toBe('Ada')
-    expect(credentialName({ email: 'a@b.org' })).toBe('a@b.org')
-    expect(credentialName({ name: '', email: '' })).toBeUndefined()
+describe('credentialName — never an email address (#28; 0.2.1 review, B2)', () => {
+  // `_by` is published with publicly readable documents, so an email here
+  // published every writer's address.
+  test('the display name, trimmed', () => {
+    expect(credentialName({ name: ' Ada ', email: 'a@b.org' })).toBe('Ada')
+  })
+  test('no display name → nothing, NOT the email', () => {
+    expect(credentialName({ email: 'a@b.org' })).toBeUndefined()
+    expect(credentialName({ name: '  ', email: 'a@b.org' })).toBeUndefined()
     expect(credentialName({})).toBeUndefined()
   })
 })

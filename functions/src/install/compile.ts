@@ -19,6 +19,7 @@
  */
 
 import { ALL, type AccessConfig, type CollectionConfig } from '../collections/access'
+import { principalIdentity, type UserRoles } from '../collections/roles'
 import type {
   InstalledCollection,
   Manifest,
@@ -325,18 +326,12 @@ export function compileCollection(
       // The principal comes from the REQUEST, through the argument the write
       // pipeline already passes. A collection is compiled once and cached, so
       // anything captured at compile time would be whoever triggered it.
-      const r = roles as {
-        userIds?: string[]
-        name?: string
-        _id?: string
-      } | null
+      const r = roles as UserRoles | null
       let out = data
       if (derive) {
-        out = derive(out, {
-          uid: r?.userIds?.[0],
-          name: r?.name,
-          roleId: r?._id,
-        })
+        // The same identity provenance records — never the role document's
+        // first uid (#28; 0.2.1 review, B1).
+        out = derive(out, { ...principalIdentity(r), roleId: r?._id })
       }
       if (bump) out = bump(out, existing ?? {})
       return out
