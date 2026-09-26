@@ -177,30 +177,47 @@ export class CollectionRegistry {
     const now = this.clock()
     const snap = this.snapshot
 
-    if (snap && now - snap.loadedAt < this.ttl) {
-      // Inside the hard TTL. Still confirm nothing changed, cheaply, so an
-      // invalidation on ANOTHER instance reaches this one.
-      if (now - snap.checkedAt < this.epochTtl) return snap
+    if (snap) {
+      const fresh = now - snap.loadedAt < this.ttl
+      if (fresh && now - snap.checkedAt < this.epochTtl) return snap
       if (this.source.epoch) {
+        // Confirm nothing changed, cheaply, so an invalidation on ANOTHER
+        // instance reaches this one.
         try {
           const current = await this.source.epoch()
           if (current === snap.epoch) {
-            // Unchanged: extend the confirmation without reloading anything.
             snap.checkedAt = now
+            // Past the hard TTL but CONFIRMED current: serve the snapshot and
+            // re-read in the background. The epoch is what vouches for
+            // freshness; the TTL reload is belt-and-braces, and paying it
+            // inline put a full load + compile on one request per instance per
+            // minute — a p99 of ~950 ms against ~330 ms on a production clone
+            // (reviews/2026-09-25-registry-swap-measurement.md). A change still
+            // reloads INLINE below, so a revocation is never served stale.
+            if (!fresh) void this.reload()
             return snap
           }
-          // Changed — fall through to a full reload.
+          // Changed — fall through to a full, inline reload.
         } catch (e) {
           // An epoch we cannot read is an epoch we cannot trust. Reload rather
           // than keep serving rules whose freshness is unknown.
           this.options.onError?.(`registry: epoch check failed: ${String(e)}`)
         }
-      } else {
-        // No epoch support: TTL is all there is.
+      } else if (fresh) {
+        // No epoch support: TTL is all there is, and nothing vouches for the
+        // snapshot once it expires — so that reload stays inline.
         snap.checkedAt = now
         return snap
       }
     }
+    return this.reload()
+  }
+
+  /**
+   * Load and compile. Never rejects: a failed load yields an EMPTY snapshot
+   * (fail closed), so it is safe to fire without awaiting.
+   */
+  private reload(): Promise<RegistrySnapshot> {
     // Collapse concurrent refreshes: a cold instance serving a burst should do
     // ONE load, not one per request.
     if (this.inFlight) return this.inFlight

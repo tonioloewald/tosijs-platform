@@ -51,7 +51,8 @@ export const PLATFORM_CONFIGS: StoredCollectionConfig[] = [
         },
         required: ['title', 'content'],
       },
-      unique: ['path'],
+      // Both, each on its own, matching blog.ts (D19: per-field unique).
+      unique: ['title', 'path'],
       // Replaces blog.ts's `validate`, which generates a path from the title.
       derive: [{ op: 'slug', to: 'path', from: 'title', when: 'absent' }],
       access: [
@@ -89,12 +90,26 @@ export const PLATFORM_CONFIGS: StoredCollectionConfig[] = [
         },
         required: ['title', 'description', 'path', 'source'],
       },
+      // page.ts makes `path` unique; the seed had lost it (caught by
+      // seed-parity.test.ts, D19).
+      unique: ['path'],
       tagFields: ['tags'],
       access: [
         {
           role: ROLES.public,
           read: { visible: { field: 'tags', op: 'includes', value: 'public' } },
-          list: { visible: { field: 'tags', op: 'includes', value: 'public' } },
+          // LIST needs `public` AND `visible`: a public-but-not-visible page is
+          // reachable by link and deliberately absent from navigation. The seed
+          // required only `public`, so the swap would have listed unlisted
+          // pages to everyone.
+          list: {
+            visible: {
+              all: [
+                { field: 'tags', op: 'includes', value: 'public' },
+                { field: 'tags', op: 'includes', value: 'visible' },
+              ],
+            },
+          },
         },
         { role: ROLES.admin, read: 'ALL', write: 'ALL', list: 'ALL' },
       ],

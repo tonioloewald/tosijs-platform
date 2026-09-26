@@ -52,7 +52,7 @@ const POST_AS_DATA: InstalledCollection = {
     },
     required: ['title', 'content'],
   },
-  unique: ['path'],
+  unique: ['title', 'path'],
   // Replaces blog.ts's `validate`, which auto-generates a path from the title.
   derive: [{ op: 'slug', to: 'path', from: 'title', when: 'absent' }],
   access: [

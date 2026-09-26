@@ -25,6 +25,8 @@ import './module'
 import './config'
 import './role'
 import './install-records'
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { validateManifest } from '../install/manifest'
 
 const who = (roles: string[]): UserRoles => ({
@@ -154,5 +156,27 @@ describe('the rules that must not drift', () => {
       }
     }
     expect(writes).toEqual([])
+  })
+})
+
+describe('uniqueness matches the shipped TypeScript (D19)', () => {
+  // `post` makes title AND path unique, each on its own. The seed used to carry
+  // only `path`, because manifest v1 refused several fields — so the swap would
+  // have silently allowed duplicate titles.
+  for (const entry of PLATFORM_CONFIGS) {
+    const shipped = COLLECTIONS[entry.name]
+    if (!shipped) continue // post/page live in endpoint modules; see below
+    test(`${entry.name}: unique is ${JSON.stringify(shipped.unique ?? [])}`, () => {
+      expect([...(seeded[entry.name]?.unique ?? [])].sort()).toEqual(
+        [...(shipped.unique ?? [])].sort()
+      )
+    })
+  }
+
+  test('post: title AND path, as blog.ts declares', () => {
+    // blog.ts initialises firebase-admin at import, so it is read, not loaded.
+    const blog = readFileSync(join(__dirname, '..', 'blog.ts'), 'utf-8')
+    expect(blog).toContain("unique: ['title', 'path']")
+    expect([...(seeded.post?.unique ?? [])].sort()).toEqual(['path', 'title'])
   })
 })

@@ -188,9 +188,10 @@ describe('unique constraints', () => {
     ).toEqual([])
   })
 
-  test('a composite constraint is refused — it would need a deploy', () => {
-    // firestore.indexes.json is a deployment artifact, and "install without
-    // deploying" is the entire premise.
+  test('several fields are each unique ON THEIR OWN — no composite index needed', () => {
+    // The pipeline checks one field at a time with a single-field equality
+    // query. The old refusal read this as a composite constraint, which it is
+    // not — and it kept `post` (unique title AND path) out of data (D19).
     const errs = validateManifest(
       ok({
         collections: {
@@ -202,7 +203,7 @@ describe('unique constraints', () => {
       }),
       opts
     )
-    expect(messages(errs)).toContain('needs an index, which is a deployment')
+    expect(errs).toEqual([])
   })
 })
 

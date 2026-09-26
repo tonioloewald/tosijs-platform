@@ -92,6 +92,7 @@ export interface AccessRule {
 
 export interface InstalledCollection {
   schema: JsonSchema
+  /** Fields that must each be unique ON THEIR OWN (not as a combination). */
   unique?: string[]
   tagFields?: string[]
   derive?: DeriveOp[]
@@ -420,15 +421,13 @@ export function validateManifest(
     if (c.unique !== undefined) {
       if (!Array.isArray(c.unique) || c.unique.some((f) => typeof f !== 'string')) {
         fail(`${where}.unique: must be an array of field names`)
-      } else if (c.unique.length > 1) {
-        // A multi-field unique constraint needs a COMPOSITE INDEX, which is a
-        // deploy artifact — and "install without deploying" is the whole point.
-        // Refused in v1 rather than silently not enforced.
-        fail(
-          `${where}.unique: v1 supports one field per collection; ` +
-            'a composite constraint needs an index, which is a deployment'
-        )
       }
+      // Several fields are allowed, and each is unique ON ITS OWN — the write
+      // pipeline checks them one at a time, each a single-field equality query
+      // that Firestore indexes automatically. This used to be refused as a
+      // "composite constraint needing an index", which misread it: nothing
+      // here asks for the COMBINATION to be unique. The refusal kept `post`
+      // (unique title AND unique path) from being expressible as data (D19).
     }
 
     // Refused rather than coerced, like the envelope flags: `immutable: "yes"`

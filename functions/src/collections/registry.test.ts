@@ -479,3 +479,66 @@ describe('a rule change reaches OTHER instances', () => {
     expect(counter.n).toBe(1)
   })
 })
+
+describe('the TTL reload happens in the BACKGROUND when the epoch vouches for the cache', () => {
+  // Measured on a production clone: paying the 60 s reload inline put a full
+  // load + compile on one request per instance per minute (p99 ~950 ms vs
+  // ~330 ms). The epoch is what makes a snapshot trustworthy; the TTL reload is
+  // belt-and-braces and need not block anyone.
+  const store = () => {
+    const state = { entries: STORED, epoch: 1, loads: 0, release: () => undefined as void }
+    let gate: Promise<void> = Promise.resolve()
+    const source: ConfigSource = {
+      load: async () => {
+        state.loads++
+        await gate
+        return state.entries
+      },
+      epoch: async () => state.epoch,
+    }
+    const hold = () => {
+      gate = new Promise((r) => (state.release = r))
+    }
+    return { state, source, hold }
+  }
+
+  test('past the TTL, an unchanged epoch serves the snapshot WITHOUT waiting for the reload', async () => {
+    const { state, source, hold } = store()
+    let clock = 1000
+    const reg = new CollectionRegistry(source, { now: () => clock, ttlMs: 500, epochTtlMs: 100 })
+    await reg.collections()
+    expect(state.loads).toBe(1)
+
+    hold() // the next load will not finish until released
+    clock += 501
+    // Resolves even though the reload is blocked — i.e. it was not awaited.
+    expect(await reg.resolve('post')).toBeDefined()
+    expect(state.loads).toBe(2) // but it WAS started
+    state.release()
+  })
+
+  test('a CHANGED epoch still reloads inline — a revocation is never served stale', async () => {
+    const { state, source } = store()
+    let clock = 1000
+    const reg = new CollectionRegistry(source, { now: () => clock, ttlMs: 500, epochTtlMs: 100 })
+    await reg.collections()
+    state.entries = STORED.filter((e) => e.name !== 'post')
+    state.epoch = 2
+    clock += 501
+    expect(await reg.resolve('post')).toBeUndefined()
+  })
+
+  test('a background reload collapses with any concurrent one', async () => {
+    const { state, source, hold } = store()
+    let clock = 1000
+    const reg = new CollectionRegistry(source, { now: () => clock, ttlMs: 500, epochTtlMs: 100 })
+    await reg.collections()
+    hold()
+    clock += 501
+    await reg.collections()
+    clock += 101 // re-check the epoch while the first background reload is still running
+    await reg.collections()
+    expect(state.loads).toBe(2)
+    state.release()
+  })
+})
