@@ -13,6 +13,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -406,6 +407,15 @@ async function main() {
   await seedAuth()
   // Then seed firestore (roles will get userIds populated from contacts)
   await seedFirestore()
+
+  // The platform's collection rules, as production stores them (D19). The
+  // emulator loads the production switch file (.env.<projectId>), so without
+  // this every platform collection is inaccessible in the emulator.
+  console.log('\nSeeding platform registry...')
+  execSync('bun scripts/seed-registry.js --emulator --apply', {
+    cwd: projectRoot,
+    stdio: 'inherit',
+  })
   await seedStorage()
 
   console.log('\nSeeding complete!\n')

@@ -36,13 +36,20 @@
 import { readRc, token, parseArgs, productionProjectId } from './sandbox-lib.js'
 
 const { has, val } = parseArgs(process.argv)
-const alias = val('alias')
+// --emulator: seed the LOCAL Firestore emulator (what `bun seed` calls), so the
+// emulator's registry matches production's. The emulator loads the production
+// switch file too (.env.<projectId>), and an unseeded registry makes every
+// platform collection inaccessible — which is how the integration suites went
+// red on 2026-09-26. `Bearer owner` is the emulator's admin credential.
+const EMULATOR = has('emulator')
+const alias = val('alias') ?? (EMULATOR ? 'default' : undefined)
 const projectId = alias ? readRc().projects?.[alias] : null
 if (!projectId) {
-  console.error('usage: bun scripts/seed-registry.js --alias <alias> [--apply] [--production]')
+  console.error('usage: bun scripts/seed-registry.js --alias <alias> [--apply] [--production] | --emulator [--apply]')
   process.exit(2)
 }
-const isProduction = alias === 'default' || projectId === productionProjectId()
+const isProduction =
+  !EMULATOR && (alias === 'default' || projectId === productionProjectId())
 if (isProduction && !has('production')) {
   console.error(`Refusing: "${alias}" is PRODUCTION (${projectId}). Add --production to confirm.`)
   process.exit(2)
@@ -85,12 +92,16 @@ const stable = (v) =>
 
 // --- read what is stored ----------------------------------------------------
 const root = `projects/${projectId}/databases/(default)/documents`
-const headers = { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' }
+const API = EMULATOR ? 'http://127.0.0.1:8080/v1' : 'https://firestore.googleapis.com/v1'
+const headers = {
+  Authorization: `Bearer ${EMULATOR ? 'owner' : token()}`,
+  'Content-Type': 'application/json',
+}
 const stored = new Map()
 let pageToken
 do {
   const url = new URL(
-    `https://firestore.googleapis.com/v1/${root}/${encodeURIComponent(PLATFORM_REGISTRY_COLLECTION)}`
+    `${API}/${root}/${encodeURIComponent(PLATFORM_REGISTRY_COLLECTION)}`
   )
   url.searchParams.set('pageSize', '300')
   if (pageToken) url.searchParams.set('pageToken', pageToken)
@@ -119,7 +130,7 @@ for (const [id, doc] of wanted) {
 }
 const extra = [...stored.keys()].filter((id) => id !== 'epoch' && !wanted.has(id))
 
-console.log(`\nseed-registry → ${projectId}${isProduction ? '  (PRODUCTION)' : ''}\n`)
+console.log(`\nseed-registry → ${projectId}${EMULATOR ? '  (EMULATOR)' : isProduction ? '  (PRODUCTION)' : ''}\n`)
 for (const id of wanted.keys()) {
   const c = changes.find((x) => x.id === id)
   console.log(`   ${c ? c.kind.padEnd(9) : 'unchanged'} ${id}`)
@@ -152,7 +163,7 @@ writes.push({
   updateMask: { fieldPaths: ['at'] },
   updateTransforms: [{ fieldPath: 'value', increment: { integerValue: '1' } }],
 })
-const res = await fetch(`https://firestore.googleapis.com/v1/${root}:commit`, {
+const res = await fetch(`${API}/${root}:commit`, {
   method: 'POST',
   headers,
   body: JSON.stringify({ writes }),
