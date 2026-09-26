@@ -44,6 +44,8 @@ src/firebase-config.ts
 # Per-project variants that `bun run use <alias>` copies into place, including
 # the one provision-sandbox.js generates. The .example is tracked; nothing else is.
 src/firebase-config.*.ts
+# …but the type declaration is the SHAPE, not a config: committed so CI can typecheck.
+!src/firebase-config.d.ts
 !src/firebase-config.example.ts
 functions/shared/project.ts
 .firebaserc
