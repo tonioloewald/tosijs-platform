@@ -115,6 +115,30 @@ cases on 2026-09-11).
 - [ ] **Enumerate-then-map the blog** — inventory `blog.ts` + editors, map each feature to
   {web component | rules+proc | missing tosijs-ui primitive}. No silent third bucket.
 
+## Pre-release review follow-ups (0.2.0-beta.5, registry swap, 2026-09-26)
+
+From `reviews/0.2.0-beta.5-registry-swap.md`. The blockers, the races, the compiled-map leaks,
+drift detection and the parity gaps were fixed in `26edce7`. What remains:
+
+- [ ] **Cold start with the switch on is unmeasured.** Measure the first inline load (grants,
+  manifests, `system:registry`, compile) and what `prefetch` serves while it is in flight or has
+  failed. The instance-lifetime default `blogConfig` cache in `blog.ts` is the one to watch.
+- [ ] **A whole-map load failure was never forced live.** Only one config was deleted. Force a
+  `load()` failure on the sandbox (a temporary rules change or IAM revoke) and observe it: every
+  platform collection goes dark on that instance until the next good load, by design.
+- [ ] **Switch-on emulator integration test.** Today only the manual sandbox run covers the
+  switch. Add an emulator suite that seeds `system:registry` and runs the write-path oracle with
+  the switch on.
+- [ ] **Twin policy implementations: record the end state.** When do the compiled platform configs
+  and the switch get deleted? Candidate DECISIONS.md entry, for the owner.
+- [ ] **Docs stale under the switch:** CLAUDE.md, `docs/FIRESTORE_API.md`, and the `installed.ts`
+  header describe bare names as compiled-only. Candidates; don't edit unprompted.
+- [ ] **`bench-registry.js` cleanup on SIGINT.** Leftovers are limited to the sandbox. Add a
+  handler, or print the leftover paths.
+- [ ] **Live check of B1.** Save a post whose stored path is non-canonical (trailing `-`) through
+  `/doc` on the switched sandbox, and confirm the path is unchanged. Unit-tested on both sides;
+  not yet exercised live.
+
 ## Registry design (2026-09-26)
 
 - [ ] **Shared rules, scoped to one root collection's subcollections.** No mechanism exists today:
