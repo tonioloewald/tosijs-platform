@@ -1,5 +1,6 @@
 import * as functions from 'firebase-functions'
 import { COLLECTIONS } from './collections'
+import { PLATFORM_HOOKS } from './collections/hooks'
 import { ALL } from './collections/access'
 import { ROLES } from './collections/roles'
 import { getDocs } from './docs'
@@ -157,6 +158,15 @@ onPrefetch(
   }
 )
 
+async function clearBlogCacheAfterWrite(): Promise<void> {
+  await clearBlogCache()
+}
+
+// The same side effect, attached by name when `post`'s config comes from the
+// registry as data (D19) — data cannot carry code, and a cache clear is not
+// authority. See collections/hooks.ts.
+PLATFORM_HOOKS.post = { afterWrite: clearBlogCacheAfterWrite }
+
 COLLECTIONS.post = {
   schema: PostSchema,
   unique: ['title', 'path'],
@@ -177,9 +187,7 @@ COLLECTIONS.post = {
   // stamp it fresh. The blog then served stale content for up to the cache
   // duration (24h by default), which is the "I saved but the site still shows the
   // old post" failure. Clearing after the write closes the window.
-  async afterWrite(): Promise<void> {
-    await clearBlogCache()
-  },
+  afterWrite: clearBlogCacheAfterWrite,
   access: {
     [ROLES.public]: {
       read: ALL,

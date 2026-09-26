@@ -21,7 +21,9 @@ import {
   configsFromInstalled,
   mergePlatformLast,
   collectionsFor,
+  withPlatformHooks,
 } from './installed'
+import { PLATFORM_HOOKS } from '../collections/hooks'
 import { compileStored } from '../collections/registry'
 import { COLLECTIONS } from '../collections'
 import { ALL, getMethodAccess, type CollectionMap } from '../collections/access'
@@ -191,7 +193,7 @@ describe('a broken install fails closed, and only for itself', () => {
   })
 })
 
-describe('the platform hot path is untouched', () => {
+describe('the platform hot path is untouched (switch OFF)', () => {
   test('a bare name returns COLLECTIONS itself — same object, no read', async () => {
     // The whole safety argument for shipping this to a live blog. If this ever
     // returns a copy, every /doc request has started paying for a datastore
@@ -211,5 +213,62 @@ describe('the platform hot path is untouched', () => {
     expect(map['virta:task']).toBeUndefined()
     // Platform collections survive a failed load, because they are compiled.
     expect(map.role).toBe(COLLECTIONS.role)
+  })
+})
+
+describe('the switch ON: bare names come from the registry (D19)', () => {
+  const withSwitch = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const before = process.env.PLATFORM_CONFIGS_FROM_REGISTRY
+    process.env.PLATFORM_CONFIGS_FROM_REGISTRY = 'true'
+    try {
+      return await fn()
+    } finally {
+      if (before === undefined) delete process.env.PLATFORM_CONFIGS_FROM_REGISTRY
+      else process.env.PLATFORM_CONFIGS_FROM_REGISTRY = before
+    }
+  }
+
+  test('COLLECTIONS is no longer consulted — a failed load means NOTHING is served', async () => {
+    // The owner's rule (2026-09-26): rules that do not load make their
+    // collections inaccessible; there is no compiled fallback. No Firebase
+    // here, so the load fails — and `role`, `post`, everything is absent.
+    const map = await withSwitch(() => collectionsFor('post'))
+    expect(map).not.toBe(COLLECTIONS)
+    for (const name of ['post', 'page', 'role', 'config']) {
+      expect(map[name]).toBeUndefined()
+    }
+  })
+
+  test('a reserved path stays denied', async () => {
+    const map = await withSwitch(() => collectionsFor('system:claim'))
+    expect(map['system:claim']).toBeUndefined()
+  })
+})
+
+describe('withPlatformHooks', () => {
+  const noop = async () => undefined
+
+  test('attaches a hook to the BARE name only — never to a library that shares the name', () => {
+    PLATFORM_HOOKS['zz-bench'] = { afterWrite: noop }
+    try {
+      const map = withPlatformHooks({
+        'zz-bench': { access: {} },
+        'lib:zz-bench': { access: {} },
+      } as CollectionMap)
+      expect(map['zz-bench'].afterWrite).toBe(noop)
+      expect(map['lib:zz-bench'].afterWrite).toBeUndefined()
+    } finally {
+      delete PLATFORM_HOOKS['zz-bench']
+    }
+  })
+
+  test('drops reserved keys, like the merge', () => {
+    const map = withPlatformHooks({ 'system:claim': { access: {} } } as CollectionMap)
+    expect('system:claim' in map).toBe(false)
+  })
+
+  test('memoised per snapshot — a request pays a lookup, not a copy', () => {
+    const snapshot = { post: { access: {} } } as CollectionMap
+    expect(withPlatformHooks(snapshot)).toBe(withPlatformHooks(snapshot))
   })
 })

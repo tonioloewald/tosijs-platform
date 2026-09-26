@@ -54,6 +54,12 @@ import {
   refuseDeclaration,
 } from '../collections/namespace'
 import { readEpoch } from './epoch'
+import {
+  PLATFORM_REGISTRY_COLLECTION,
+  platformConfigsFrom,
+  platformFromRegistry,
+} from './platform-configs'
+import { PLATFORM_HOOKS } from '../collections/hooks'
 import type { Grant } from './apply'
 import type { Manifest } from './manifest'
 
@@ -135,7 +141,22 @@ export class InstalledConfigSource implements ConfigSource {
         }
       })
     )
-    return configsFromInstalled(pairs, (m) => functions.logger.error(m))
+    const installed = configsFromInstalled(pairs, (m) =>
+      functions.logger.error(m)
+    )
+    if (!platformFromRegistry()) return installed
+
+    // The platform's own configs, stored as data (D19). One load, one epoch,
+    // one snapshot with the installed libraries: a rule change anywhere is a
+    // single consistent view everywhere.
+    const platform = await db.collection(PLATFORM_REGISTRY_COLLECTION).get()
+    return [
+      ...platformConfigsFrom(
+        platform.docs.map((d) => ({ id: d.id, data: d.data() })),
+        (m) => functions.logger.error(m)
+      ),
+      ...installed,
+    ]
   }
 
   async epoch(): Promise<number> {
@@ -168,20 +189,52 @@ export const mergePlatformLast = (installed: CollectionMap): CollectionMap => {
 /**
  * The collection map to use for one request.
  *
- * A bare name returns `COLLECTIONS` ITSELF — the same object, no copy, no read,
- * no await that resolves anywhere. That identity is the property worth pinning:
- * it is what guarantees a live blog's request path is unchanged by any of this.
+ * Without `PLATFORM_CONFIGS_FROM_REGISTRY`, a bare name returns `COLLECTIONS`
+ * ITSELF — the same object, no copy, no read. That identity is what guarantees
+ * a live blog's request path is unchanged until the switch is deliberately
+ * thrown (D19). With it, every name — bare or namespaced — resolves from the
+ * registry, and the compiled `COLLECTIONS` are no longer consulted at all.
  */
+/**
+ * The registry's map with the platform's side-effect hooks attached (D19).
+ *
+ * Memoised per snapshot map, so a request pays one lookup, not a copy: the
+ * registry returns the same object until it reloads.
+ */
+const hooked = new WeakMap<CollectionMap, CollectionMap>()
+export function withPlatformHooks(map: CollectionMap): CollectionMap {
+  const cached = hooked.get(map)
+  if (cached) return cached
+  const out: CollectionMap = {}
+  for (const [key, config] of Object.entries(map)) {
+    // Reserved keys are dropped here too, for the same reason as the merge.
+    if (isReservedCollection(key)) continue
+    const hooks = PLATFORM_HOOKS[key]
+    // Hooks attach only to BARE names: a library's `virta:post` must never
+    // inherit the blog's cache invalidation because the names end alike.
+    out[key] =
+      hooks && !key.includes(NAMESPACE_SEPARATOR) ? { ...config, ...hooks } : config
+  }
+  hooked.set(map, out)
+  return out
+}
+
 export async function collectionsFor(
   collectionPath: string
 ): Promise<CollectionMap> {
   // A reserved namespace is the platform's, like a bare name — and the
   // platform registers none of it, so it is unreachable. Checked here as well
   // as at install and load: a planted registry entry must not reopen it.
-  if (
-    !collectionPath.includes(NAMESPACE_SEPARATOR) ||
-    isReservedCollection(collectionPath.split('/')[0])
-  ) {
+  const reserved = isReservedCollection(collectionPath.split('/')[0])
+
+  if (platformFromRegistry()) {
+    // D19: bare names come from the registry too. A reserved path resolves
+    // against the same map, from which every `system:*` key has been dropped
+    // — so it is denied, exactly as before.
+    return withPlatformHooks(await installedRegistry.collections())
+  }
+
+  if (!collectionPath.includes(NAMESPACE_SEPARATOR) || reserved) {
     return COLLECTIONS
   }
   return mergePlatformLast(await installedRegistry.collections())

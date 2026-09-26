@@ -27,6 +27,7 @@ const { PLATFORM_CONFIGS } = await import('./seed-configs')
 const { compileStored } = await import('./registry')
 const { ALL, getMethodAccess } = await import('./access')
 const { ROLES } = await import('./roles')
+const { PLATFORM_HOOKS } = await import('./hooks')
 
 const seeded = compileStored(PLATFORM_CONFIGS).collections
 const METHODS = ['GET', 'LIST', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
@@ -94,4 +95,15 @@ test('the comparison exercises real filters, not deny-vs-deny', async () => {
   const list = getMethodAccess(seeded, 'page', 'LIST', who([ROLES.public]))
   expect(typeof list).toBe('function')
   expect(await outcome(list, FIXTURES.page[3])).toStartWith('shown')
+})
+
+test('every compiled afterWrite is registered as a platform hook (D19)', () => {
+  // Data configs cannot carry code, so a side effect the compiled config runs
+  // after a write must be attached by name on the registry path — or the swap
+  // silently drops it (for `post`: stale pages for up to a day).
+  const withHook = Object.entries(COLLECTIONS).filter(([, c]) => c.afterWrite)
+  expect(withHook.length).toBeGreaterThan(0)
+  for (const [name, config] of withHook) {
+    expect(PLATFORM_HOOKS[name]?.afterWrite).toBe(config.afterWrite)
+  }
 })
