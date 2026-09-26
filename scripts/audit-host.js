@@ -27,6 +27,7 @@ import {
   parseArgs,
   claimableGrant,
   fixtureUser,
+  namePublishesContact,
 } from './sandbox-lib.js'
 
 const { val } = parseArgs(process.argv)
@@ -114,7 +115,8 @@ async function fixtureUsers() {
 
 console.log(`\naudit-host → ${projectId} (read-only)\n`)
 
-const roles = (await roleDocs())
+const allRoles = await roleDocs()
+const roles = allRoles
   .map(({ id, doc }) => ({ id, doc, ...(claimableGrant(id, doc) ?? {}) }))
   .filter((r) => r.severity)
 const users = await fixtureUsers()
@@ -149,6 +151,35 @@ if (claimable.length) {
 if (leftover.length) {
   console.log('\nLeftover — not claimable (random passwords), worth deleting:\n')
   for (const line of leftover) console.log(`   ${line}`)
+}
+
+// Names that would publish contact details (0.2.1). Reported, not failed:
+// `_by.name` already filters them for new writes; these lose their curated
+// name until renamed, and earlier documents carry them.
+const tokenList = await (async () => {
+  const res = await fetch(
+    `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/token?pageSize=300&mask.fieldPaths=principalName`,
+    { headers }
+  )
+  if (!res.ok) return []
+  return ((await res.json()).documents ?? []).map((d) => ({
+    id: d.name.split('/').pop(),
+    principalName: d.fields?.principalName?.stringValue,
+  }))
+})()
+const named = [
+  ...allRoles
+    .map(({ id, doc }) => ({ id, why: namePublishesContact(doc.name, doc.contacts ?? []) }))
+    .filter((r) => r.why)
+    .map((r) => `role/${r.id} — its name ${r.why}; rename it to the name you want shown`),
+  ...tokenList
+    .map((t) => ({ id: t.id, why: namePublishesContact(t.principalName) }))
+    .filter((t) => t.why)
+    .map((t) => `token/${t.id} — principalName ${t.why} (minted before 0.2.1; re-mint to refresh)`),
+]
+if (named.length) {
+  console.log('\nNames that publish contact details — not claimable, but fix them:\n')
+  for (const line of named) console.log(`   ${line}`)
 }
 
 if (users === null) {

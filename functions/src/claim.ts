@@ -187,7 +187,10 @@ export const claim = onRequest({}, async (request, response: Response) => {
           // Never the email: a role document's name is what "curated when
           // owned" publishes as `_by.name` (0.2.1 re-review). The display name
           // if there is one; otherwise a neutral label an operator can edit.
-          name: credentialName(user) ?? 'Host owner',
+          // Role names are UNIQUE, so the fallback carries a uid prefix (the
+          // uid is already public in `_by.uid`); a constant would collide on a
+          // second claimer and block edits to both documents.
+          name: credentialName(user) ?? `Host owner ${user.uid.slice(0, 8)}`,
           contacts: contactEmail
             ? [{ type: 'email', value: contactEmail }]
             : [],

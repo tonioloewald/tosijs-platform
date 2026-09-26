@@ -301,3 +301,21 @@ export function claimableGrant(id, doc) {
   }
   return null
 }
+
+/**
+ * Why a stored NAME would publish contact details, or null (0.2.1).
+ *
+ * `_by.name` never publishes an email or a contact value now (enforced where
+ * `_by` is made), but role documents named that way before 0.2.1 — /claim
+ * named every host's first owner after their email — lose their curated name
+ * until renamed, and documents written before 0.2.1 still carry it. Same rule
+ * as principalIdentity: contains `@`, or equals one of the given contacts.
+ */
+export function namePublishesContact(name, contacts = []) {
+  const n = String(name ?? '').trim()
+  if (!n) return null
+  if (n.includes('@')) return 'looks like an email address'
+  const values = contacts.map((c) => String(c?.value ?? '').trim().toLowerCase())
+  if (values.includes(n.toLowerCase())) return 'equals one of its contacts'
+  return null
+}

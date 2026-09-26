@@ -440,5 +440,7 @@ describe('/claim never names a role document after an email (0.2.1 re-review)', 
     const claim = src('claim.ts')
     expect(claim).not.toMatch(/name: user\.email/)
     expect(claim).toContain('credentialName(user)')
+    // …and its fallback is unique per claimer (role names are unique).
+    expect(claim).toMatch(/Host owner \$\{user\.uid\.slice/)
   })
 })

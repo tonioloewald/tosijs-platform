@@ -179,3 +179,13 @@ describe('fixtureUser — Auth users the audit reports', () => {
     expect(fixtureUser('alice@example.org')).toBeNull()
   })
 })
+
+describe('namePublishesContact — the audit for email-named role docs and tokens (0.2.1)', () => {
+  test('an email, or a contact value, is flagged; a curated name is not', async () => {
+    const { namePublishesContact } = await import('./sandbox-lib.js')
+    expect(namePublishesContact('owner@example.org')).toContain('email')
+    expect(namePublishesContact('+1 555 123 4567', [{ type: 'phone', value: '+1 555 123 4567' }])).toContain('contacts')
+    expect(namePublishesContact('Ada Lovelace', [{ type: 'email', value: 'ada@example.org' }])).toBeNull()
+    expect(namePublishesContact('')).toBeNull()
+  })
+})

@@ -22,12 +22,15 @@ Two fixes reported by tosijs-virta, the proving consumer.
       name.
     - A contact or shared match: the principal's own display name, or no name
       at all, never the document's.
-    - Never an email address, nor a value from the principal's contacts,
-      because `_by` is published with public documents. This is enforced where
-      `_by` is produced, so role documents and tokens already stored on live
-      hosts are covered without a migration. `/claim` used to name the first
-      owner's role document after their email; it now uses their display name,
-      or `Host owner`. Rename such a document to set the curated name.
+    - **The rule, exactly:** a candidate name is dropped if it contains `@`
+      or equals one of the principal's contact values (ignoring case). It fails
+      closed, so a curated name like "Team @ Acme" is dropped too; attribution
+      then falls back to the display name, or to no name. `_by.uid` is the
+      identity either way.
+    - Enforced where `_by` is produced, so **future** writes are covered even
+      where role documents and tokens stored on live hosts carry an email.
+      `/claim` used to name the first owner's role document after their email;
+      it now uses their display name, or `Host owner <uid prefix>`.
     - Display names are self-asserted, so spoofing is confined to the case
       where no curated name exists.
   - **An agent's writes carry its human's name.** The minting human's display
@@ -39,6 +42,17 @@ Two fixes reported by tosijs-virta, the proving consumer.
   collections now commit through the same transaction as `/docs` batches: the
   existence check, the pipeline, uniqueness and the sequence counter all
   happen inside it.
+
+### ⚠️ Action required on existing hosts
+
+**Documents written before 0.2.1 may carry an email address in `_by.name`**,
+and publicly readable ones (posts) are still served with it. The filter
+applies to new writes only. To find what to fix:
+- `scripts/audit-host.js` now lists role documents whose `name` is an email
+  or one of their own contacts, and tokens whose `principalName` is.
+- Rename those role documents to the name you want shown.
+- Re-save, or scrub `_by.name` on, public documents written by those
+  principals.
 
 **Verified:**
 - **Unit tests:** 775 passing.
