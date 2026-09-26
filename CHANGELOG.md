@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.2.0-beta.5 — 2026-09-26
+
+The platform's own collections can run on the same rules engine as everyone
+else's (D19, step 2), behind a switch that is **off by default**. With
+`PLATFORM_CONFIGS_FROM_REGISTRY=true`, `post`, `page`, `role`, `config`,
+`module` and the install records are served from stored configs in
+`system:registry` instead of compiled TypeScript. It is rehearsed on a
+production clone and not yet enabled in production.
+
+### Added
+
+- **Platform configs as data.** `scripts/seed-registry.js` writes them (dry
+  run by default; `--apply` is one atomic commit of every changed config plus
+  an epoch bump; it never deletes; production needs `--production`).
+  `--check` exits non-zero unless the stored registry matches the code. Run
+  it before enabling the switch anywhere. `system` is reserved, so only
+  datastore access can change or fix these rules.
+- **Failure is per collection.** A config that is missing or fails to compile
+  makes that collection inaccessible; there is no compiled fallback. Missing
+  and unknown configs are logged. Role *resolution* does not go through the
+  registry, so a broken `role` config never touches anyone's authority.
+- **Side-effect hooks by name.** `post`'s cache clear stays in code
+  (`collections/hooks.ts`), attached to the loaded config; it is not authority.
+- `scripts/bench-registry.js`: interleaved latency, bare-name vs installed.
+
+### Changed
+
+- **The registry refreshes in the background.** Past its 60 s TTL, when the
+  epoch confirms nothing changed, it serves the cached rules and reloads
+  behind the request. The inline reload was a ~950 ms p99 on a production
+  clone. A real change still reloads inline, and concurrent requests share one
+  load. A failed background reload keeps the confirmed rules; a failed first
+  load still denies everything.
+- **`unique` may list several fields, each unique on its own.** This was
+  refused as a "composite constraint needing an index", which misread it.
+- **Behaviour change for installed manifests: `derive: slug, when: 'absent'`
+  now leaves a supplied value exactly as written.** It used to re-slugify it
+  on every write. No known consumer relies on the old behaviour.
+
+### Fixed
+
+- **The blog editor moved existing post URLs on save.** It re-slugified every
+  path, including an unchanged stored one. A URL-safe path is now kept
+  exactly. All 851 production paths are URL-safe, so none moves. This was live
+  in production regardless of the switch.
+- `getRef`/`getRecords` no longer default to the compiled configs; the map is
+  required, so a forgotten call site fails to compile.
+
+### Found by the review before production
+
+The pre-release review (`reviews/0.2.0-beta.5-registry-swap.md`) blocked
+this twice, correctly. The stored configs did not match the shipped code in
+five ways, any of which the swap would have put live:
+
+- existing post paths rewritten on edit (96 of 791);
+- `post/comment` opened, although the code never registers it;
+- unlisted pages listed publicly;
+- page-path and post-title uniqueness lost;
+- looser `module` and `role` schemas. Role contacts are authority.
+
+A behavioural parity test (`seed-parity.isolated.ts`) now runs the real
+compiled rules and the stored ones over fixtures for every role and method,
+and over schemas. The seeded and compiled collection names are pinned equal.
+
 ## 0.2.0-beta.4 — 2026-09-25
 
 One fix, found by the first consumer the day they put the API behind their own

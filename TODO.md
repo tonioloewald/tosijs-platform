@@ -133,11 +133,14 @@ drift detection and the parity gaps were fixed in `26edce7`. What remains:
   and the switch get deleted? Candidate DECISIONS.md entry, for the owner.
 - [ ] **Docs stale under the switch:** CLAUDE.md, `docs/FIRESTORE_API.md`, and the `installed.ts`
   header describe bare names as compiled-only. Candidates; don't edit unprompted.
+- [ ] **Behavioural test of per-request map threading** (re-review nit): a switch-on test resolving a
+  `field=value` parent against a registry map that differs from COLLECTIONS, via
+  `storeFor(collections).isUnique`; and a test that an empty platform registry fires the error log.
 - [ ] **`bench-registry.js` cleanup on SIGINT.** Leftovers are limited to the sandbox. Add a
   handler, or print the leftover paths.
-- [ ] **Live check of B1.** Save a post whose stored path is non-canonical (trailing `-`) through
-  `/doc` on the switched sandbox, and confirm the path is unchanged. Unit-tested on both sides;
-  not yet exercised live.
+- [x] **Live check of B1.** *(done 2026-09-26)* On the switched sandbox, `b1-legacy_check-` survived
+  a create and an edit through `/doc` unchanged. The editor side (M2, `resolvePostPath`) is
+  unit-tested, and all 851 production paths are URL-safe, so none moves.
 
 ## Registry design (2026-09-26)
 

@@ -8,7 +8,7 @@ without a cloud.
 npm install service-compris
 ```
 
-> **Beta, 2026-09-25 (0.2.0-beta.4) — a host you can install onto.** The npm package below is
+> **Beta, 2026-09-26 (0.2.0-beta.5) — a host you can install onto.** The npm package below is
 > still the pure decision kernel. What is new is the *repository*: deploy it to
 > a blank Firebase project, claim it without anyone handing you a secret,
 > install a library from a JSON manifest, and give an agent its own scoped
