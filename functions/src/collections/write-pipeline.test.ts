@@ -813,9 +813,10 @@ describe('provenance stamps who AUTHENTICATED, not the role document (#28)', () 
   })
 
   test('without a principal (a kernel consumer that does not set it), the old behaviour holds', async () => {
-    const { principal: _unused, ...legacy } = shared
+    const legacy: UserRoles = { ...shared }
+    delete legacy.principal
     const o = (await runWritePipeline(
-      { method: 'POST', body: { t: 'x' }, existing: null, config: {}, userRoles: legacy as UserRoles },
+      { method: 'POST', body: { t: 'x' }, existing: null, config: {}, userRoles: legacy },
       deps()
     )) as { data: Record<string, unknown> }
     expect((o.data._by as { uid: string }).uid).toBe('service-principal-uid')
