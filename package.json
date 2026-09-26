@@ -44,6 +44,7 @@
     "test": "bun test src scripts && cd functions && bun test",
     "typecheck": "tsc --noEmit",
     "build:lib": "tsc -p tsconfig.lib.json",
+    "install:ci": "cd functions && npm ci",
     "prepublishOnly": "bun scripts/preflight.js",
     "deploy:sandbox": "firebase deploy -P sandbox",
     "deploy:sandbox-functions": "firebase deploy -P sandbox --only functions",
@@ -96,6 +97,8 @@
     "tosijs-schema": "^1.8.0"
   },
   "releaseDoctor": {
+    "build": "build:lib",
+    "install": "install:ci",
     "buildOutputs": [
       "dist",
       "dist-lib"

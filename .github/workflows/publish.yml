@@ -131,7 +131,19 @@ jobs:
           echo "Publishing $NAME@$VERSION under '$DIST_TAG' (latest is currently $LATEST_BEFORE)"
 
       - name: Install
-        run: bun install --frozen-lockfile
+        run: |
+          set -euo pipefail
+          bun install --frozen-lockfile
+          # A repo with a second package tree (tosijs-platform's npm-managed functions/) names
+          # the script that installs it: package.json releaseDoctor.install. Declared, never
+          # guessed — and it must exist.
+          SETUP=$(node -p "(require('./package.json').releaseDoctor||{}).install||''")
+          if [ -n "$SETUP" ]; then
+            node -e "process.exit((require('./package.json').scripts||{})[process.argv[1]]?0:1)" "$SETUP" \
+              || { echo "::error::releaseDoctor.install names '$SETUP', which is not a script"; exit 1; }
+            echo "extra install: bun run $SETUP"
+            bun run "$SETUP"
+          fi
 
       # Build, then require every tracked file THAT SHIPS to be unchanged. A repo that commits its
       # build output must reproduce it exactly, so what ships is what was tested locally; a repo
@@ -144,7 +156,13 @@ jobs:
           # is a Bun BUILTIN and a `build` script makes `bun build` and `bun run build` diverge.
           # Resolved exactly as release-doctor resolves it (build, make, build:all), so the two
           # can never build different things.
-          BUILD=$(node -p "const s=require('./package.json').scripts||{}; s.build?'build':s.make?'make':s['build:all']?'build:all':''")
+          # A repo whose PACKAGE is not its main build declares it: releaseDoctor.build (e.g.
+          # tosijs-platform, whose `build` is a site bundle and whose package is `build:lib`).
+          BUILD=$(node -p "const p=require('./package.json'),s=p.scripts||{},d=(p.releaseDoctor||{}).build; d||(s.build?'build':s.make?'make':s['build:all']?'build:all':'')")
+          if [ -n "$BUILD" ] && ! node -e "process.exit((require('./package.json').scripts||{})[process.argv[1]]?0:1)" "$BUILD"; then
+            echo "::error::releaseDoctor.build names '$BUILD', which is not a script"
+            exit 1
+          fi
           if [ -n "$BUILD" ]; then
             echo "building with: bun run $BUILD"
             bun run "$BUILD"
