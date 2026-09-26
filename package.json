@@ -94,5 +94,11 @@
   },
   "peerDependencies": {
     "tosijs-schema": "^1.8.0"
+  },
+  "releaseDoctor": {
+    "buildOutputs": [
+      "dist",
+      "dist-lib"
+    ]
   }
 }
