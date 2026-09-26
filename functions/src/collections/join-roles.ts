@@ -97,3 +97,17 @@ export function lookupEmail(principal: {
 }): string | undefined {
   return principal.email_verified === true ? principal.email : undefined
 }
+
+/**
+ * The display name a credential carries — the name provenance records for
+ * WHO authenticated (#28). Pure, so every path that stamps or stores it
+ * (role resolution, /token mint, /authorize approval) picks the same one.
+ */
+export function credentialName(credential: {
+  name?: unknown
+  email?: unknown
+}): string | undefined {
+  if (typeof credential.name === 'string' && credential.name) return credential.name
+  if (typeof credential.email === 'string' && credential.email) return credential.email
+  return undefined
+}

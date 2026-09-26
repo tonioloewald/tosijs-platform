@@ -82,6 +82,8 @@ export interface AuthorizeRequest {
   expiresAt: string
   createdAt: string
   approvedBy?: string
+  /** The approver's display name at approval, carried onto the token (#28). */
+  approvedByName?: string
   approvedAt?: string
   /** Set once exchanged. A request is good for exactly one token. */
   usedAt?: string
@@ -193,7 +195,9 @@ export function decideApprove(
   record: AuthorizeRequest | null,
   principalUid: string,
   nowMs: number,
-  nowIso: string
+  nowIso: string,
+  /** The approver's display name, from their credential (#28). */
+  principalName?: string
 ): ApproveDecision {
   if (!record) return { status: 'refused', reason: 'unknown' }
   if (record.status !== 'pending') {
@@ -205,13 +209,25 @@ export function decideApprove(
   }
   return {
     status: 'approved',
-    patch: { status: 'approved', approvedBy: principalUid, approvedAt: nowIso },
+    patch: {
+      status: 'approved',
+      approvedBy: principalUid,
+      ...(principalName ? { approvedByName: principalName } : {}),
+      approvedAt: nowIso,
+    },
   }
 }
 
 export type ExchangeDecision =
   | { status: 'pending' }
-  | { status: 'ready'; principalUid: string; label: string; caveats: Record<string, unknown>; ttlMs: number }
+  | {
+      status: 'ready'
+      principalUid: string
+      principalName?: string
+      label: string
+      caveats: Record<string, unknown>
+      ttlMs: number
+    }
   | {
       status: 'refused'
       reason: 'unknown' | 'expired' | 'denied' | 'used' | 'bad-verifier'
@@ -253,6 +269,9 @@ export function decideExchange(
   return {
     status: 'ready',
     principalUid: record.approvedBy as string,
+    ...(typeof record.approvedByName === 'string' && record.approvedByName
+      ? { principalName: record.approvedByName }
+      : {}),
     label: record.label,
     caveats: record.caveats,
     ttlMs: record.ttlMs,

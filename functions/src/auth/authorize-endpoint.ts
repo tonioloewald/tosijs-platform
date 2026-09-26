@@ -54,6 +54,7 @@ import {
 import { decideMint, hashToken, newTokenSecret } from './token'
 import { consentPage } from './consent-page'
 import { fail, noStore } from '../errors'
+import { credentialName } from '../collections/join-roles'
 
 const db = () => admin.firestore()
 const requests = () => db().collection(AUTHORIZE_COLLECTION)
@@ -171,7 +172,13 @@ export const authorize = onRequest({}, async (request, response: Response) => {
       }
 
       const now = new Date()
-      const decision = decideApprove(record, user.uid, now.getTime(), now.toJSON())
+      const decision = decideApprove(
+        record,
+        user.uid,
+        now.getTime(),
+        now.toJSON(),
+        credentialName(user)
+      )
       if (decision.status === 'refused') {
         functions.logger.warn(`authorize: approve refused (${decision.reason})`)
         fail(response, 400, 'refused', `authorization ${decision.reason}`, {
@@ -245,6 +252,8 @@ export const authorize = onRequest({}, async (request, response: Response) => {
       const batch = db().batch()
       batch.set(tokenRef, {
         ...mint.record,
+        // The approver's name, captured when they approved (#28).
+        ...(decision.principalName ? { principalName: decision.principalName } : {}),
         hash: hashToken(secret),
         _created: createdAt,
         _modified: createdAt,

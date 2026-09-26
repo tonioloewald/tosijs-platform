@@ -111,6 +111,13 @@ export interface TokenRecord {
   hash: string
   /** The uid whose authority this attenuates. */
   principalUid: string
+  /**
+   * The minting human's display name, from THEIR credential at mint time, so
+   * an agent's writes carry the same `_by.name` as the human's own (#28). A
+   * token minted before this has none, and falls back to the role document's
+   * name.
+   */
+  principalName?: string
   /** Agent context: machine × repo. Travels with every write. */
   label: string
   caveats: Caveats

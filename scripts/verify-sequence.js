@@ -34,10 +34,11 @@ const ok=(l,c,d='')=>{n++;console.log(`${c?'  ok':'FAIL'}  ${n}. ${l}${d?` — $
 await fsq('DELETE','grant/seqtest'); await fsq('DELETE','manifest/seqtest@1.0.0')
 await fsq('DELETE','system%3Aseq/seqtest%3Aevent')
 for (let i=1;i<=12;i++) await fsq('DELETE',`seqtest%3Aevent/e${i}`)
+await fsq('DELETE','seqtest%3Aevent/race')
 
 const M={manifest:1,name:'seqtest',version:'1.0.0',collections:{'seqtest:event':{
   schema:{type:'object',properties:{id:{type:'string'},kind:{type:'string'}},required:['id'],additionalProperties:false},
-  envelope:{seq:true},
+  envelope:{seq:true}, immutable:true,
   access:[{role:'author',read:'ALL',write:'ALL',list:'ALL'}]}}}
 const inst=await fetch(`${BASE}/install`,{method:'POST',headers:H,body:JSON.stringify({manifest:M})})
 ok('a manifest may declare envelope.seq', inst.status===200, `${inst.status} ${(await inst.text()).slice(0,70)}`)
@@ -78,6 +79,24 @@ ok('an unchanged PUT is a no-op and burns no sequence',
    same.status===200 && /unchanged/.test(await same.text().catch(()=>'')) === false ? afterNoop.rows.length===0 : afterNoop.rows.length===0,
    `rows after=${afterNoop.rows.length}`)
 
+// RACE (#1184): concurrent creates of ONE id on an immutable, sequenced
+// collection. /doc used to read existence outside its commit, so several
+// creates could all see "missing" and all commit — the later ones
+// re-sequencing the earlier. Now exactly one lands, once, at one _seq.
+const racers = await Promise.all([1,2,3,4,5].map(i =>
+  fetch(`${BASE}/doc`,{method:'POST',headers:H,
+    body:JSON.stringify({p:'seqtest:event/race',data:{id:'race',kind:`attempt-${i}`}})})))
+const raceStatuses = racers.map(r=>r.status)
+ok('concurrent creates of one id: exactly ONE succeeds',
+   raceStatuses.filter(s=>s===200).length===1, raceStatuses.join(','))
+ok('the others are refused, not silently overwritten',
+   raceStatuses.filter(s=>s!==200).every(s=>s===403||s===409), raceStatuses.join(','))
+const raceRows = (await fetch(`${BASE}/docs?p=seqtest:event&since=0&c=50`,{headers:H}).then(r=>r.json())).rows.filter(r=>r.id==='race')
+ok('the raced document appears ONCE, at one sequence number', raceRows.length===1, JSON.stringify(raceRows.map(r=>r._seq)))
+const rewrite = await fetch(`${BASE}/doc`,{method:'PUT',headers:H,
+  body:JSON.stringify({p:'seqtest:event/race',data:{id:'race',kind:'rewritten'}})})
+ok('a changed rewrite of an immutable event is refused (409)', rewrite.status===409, String(rewrite.status))
+
 // an unsequenced collection says so rather than returning nothing
 const un = await fetch(`${BASE}/docs?p=post&since=0&c=5`,{headers:H})
 ok('an unsequenced collection is a clear error, not an empty page',
@@ -85,6 +104,7 @@ ok('an unsequenced collection is a clear error, not an empty page',
 
 await fetch(`${BASE}/install?name=seqtest`,{method:'DELETE',headers:H})
 for (let i=1;i<=12;i++) await fsq('DELETE',`seqtest%3Aevent/e${i}`)
+await fsq('DELETE','seqtest%3Aevent/race')
 await fsq('DELETE','system%3Aseq/seqtest%3Aevent')
 console.log(fails ? `\n${fails} of ${n} FAILED\n` : `\nall ${n} checks passed\n`)
 process.exit(fails ? 1 : 0)

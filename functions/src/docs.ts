@@ -35,11 +35,8 @@ import {
 import { collectionsFor } from './install/installed'
 import { getRef } from './doc'
 import { Response } from 'express'
-import * as admin from 'firebase-admin'
-import { runWritePipeline, type WriteMethod } from './collections/write-pipeline'
-import { validateWriteSet, BatchUniqueClaims } from './collections/write-set'
-import { SEQ_COLLECTION } from './collections/sequence'
-import { physicalPath } from './collections/namespace'
+import { validateWriteSet } from './collections/write-set'
+import { commitTransactionally } from './commit'
 import {
   fail,
   notFound,
@@ -295,145 +292,15 @@ async function commitWriteSet(
     }
   }
 
-  const db = admin.firestore()
-  const now = new Date().toJSON()
-
   try {
-    const results = await db.runTransaction(async (tx) => {
-      const prepared: Array<{
-        w: (typeof writes)[number]
-        ref: FirebaseFirestore.DocumentReference
-        data: Record<string, unknown>
-      }> = []
-
-      // ── PHASE 1: every read. ────────────────────────────────────────────
-      const claims = new BatchUniqueClaims()
-      for (const w of writes) {
-        const ref = admin.firestore().doc(physicalPath(w.p))
-        const snapshot = await tx.get(ref)
-        const config = collections[collectionPath(w.p)]
-        // UPSERT when no method was named: dispatch on the existence we just
-        // read, so a first push creates and a retry is a free no-op. Naming a
-        // method keeps the strict guard — POST asserts "not yet", PUT asserts
-        // "already" — which is worth being able to say, just not by default in
-        // a batch where the caller usually cannot know.
-        const method = (w.method ?? (snapshot.exists ? 'PUT' : 'POST')) as WriteMethod
-        const outcome = await runWritePipeline(
-          {
-            method,
-            body: w.data,
-            existing: snapshot.data() ?? {},
-            exists: snapshot.exists,
-            config,
-            userRoles,
-          },
-          {
-            now: () => now,
-            // Uniqueness inside the transaction, so a concurrent writer
-            // cannot slip a colliding document in between the check and the
-            // commit — the exact race a batch makes more likely.
-            isUnique: async (field, value) => {
-              // The document's PARENT collection path, as /doc uses — not the
-              // logical `collectionPath`, which for a sub-collection
-              // (`post/comment`) is not a Firestore collection path at all.
-              const parent = physicalPath(w.p).split('/').slice(0, -1).join('/')
-              const found = await tx.get(
-                admin
-                  .firestore()
-                  .collection(parent)
-                  .where(field, '==', value)
-                  .limit(2)
-              )
-              return found.docs.every((d) => d.ref.path === ref.path)
-            },
-          }
-        )
-
-        if (outcome.status === 'rejected') {
-          // Thrown, not returned: the transaction must not commit a partial
-          // set, and naming the document is safe here because the access gate
-          // above has already passed.
-          throw Object.assign(new Error(outcome.message), {
-            refusal: { p: w.p, reason: outcome.reason, message: outcome.message,
-              details: (outcome as { details?: unknown }).details },
-          })
-        }
-        if (outcome.status === 'noop') continue
-        // Uniqueness WITHIN the batch: the store check above cannot see this
-        // transaction's own pending writes (0.2.0 re-review, M1).
-        const repeated = claims.claim(physicalPath(w.p), config?.unique ?? [], outcome.data)
-        if (repeated) {
-          throw Object.assign(new Error(`"${repeated}" is claimed twice in this commit`), {
-            refusal: {
-              p: w.p,
-              reason: 'unique',
-              message: `"${repeated}" is required to exist and be unique — another write in this commit already uses that value`,
-            },
-          })
-        }
-        prepared.push({ w, ref, data: outcome.data })
-      }
-
-      // Sequenced collections take a CONTIGUOUS range from ONE counter read,
-      // so a replica never observes a torn commit: either every document in it
-      // is at or below the cursor, or none is.
-      const counters = new Map<string, { ref: FirebaseFirestore.DocumentReference; next: number }>()
-      for (const { w } of prepared) {
-        const cp = collectionPath(w.p)
-        if (!collections[cp]?.seq || counters.has(cp)) continue
-        const ref = admin.firestore().collection(SEQ_COLLECTION).doc(cp)
-        const snapshot = await tx.get(ref)
-        counters.set(cp, { ref, next: ((snapshot.data()?.value as number) ?? 0) + 1 })
-      }
-
-      // ── PHASE 2: every write. ───────────────────────────────────────────
-      const out: Array<{ p: string; seq?: number }> = []
-      for (const { w, ref, data } of prepared) {
-        const cp = collectionPath(w.p)
-        const counter = counters.get(cp)
-        if (counter) {
-          const seq = counter.next++
-          tx.set(ref, { ...data, _seq: seq })
-          out.push({ p: w.p, seq })
-        } else {
-          tx.set(ref, data)
-          out.push({ p: w.p })
-        }
-      }
-      for (const { ref, next } of counters.values()) {
-        tx.set(ref, { value: next - 1, at: now }, { merge: true })
-      }
-      return { out, committed: prepared }
-    })
-
-    // Post-commit side effects, exactly as /doc runs them (0.2.0 review): a
-    // `post` committed through a batch otherwise left the blog cache stale for
-    // up to a day — the very bug `afterWrite` exists to fix. After the commit,
-    // never inside the transaction (which may retry); failures are logged,
-    // never surfaced, because the writes have already landed.
-    for (const { w, data } of results.committed) {
-      const config = collections[collectionPath(w.p)]
-      if (!config?.afterWrite) continue
-      try {
-        await config.afterWrite(data, userRoles)
-      } catch (e) {
-        functions.logger.warn(`afterWrite failed for ${w.p}:`, e)
-      }
-    }
-
-    res.json({
-      status: 'committed',
-      written: results.out.length,
-      results: results.out,
-    })
-  } catch (e) {
-    const refusal = (e as { refusal?: Record<string, unknown> }).refusal
-    if (refusal) {
+    const outcome = await commitTransactionally(writes, collections, userRoles)
+    if (outcome.status === 'refused') {
+      const { refusal } = outcome
       fail(
         res,
         rejectionStatus(refusal.reason as RejectionReason),
         refusal.reason as never,
-        refusal.message as string,
+        refusal.message,
         {
           p: refusal.p,
           ...(refusal.details ? { details: refusal.details } : {}),
@@ -442,6 +309,12 @@ async function commitWriteSet(
       )
       return
     }
+    res.json({
+      status: 'committed',
+      written: outcome.out.length,
+      results: outcome.out,
+    })
+  } catch (e) {
     functions.logger.error('batch commit failed', e)
     fail(res, 500, 'internal', 'commit failed')
   }

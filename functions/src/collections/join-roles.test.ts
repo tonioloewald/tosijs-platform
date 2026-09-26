@@ -14,6 +14,7 @@ import { describe, test, expect } from 'bun:test'
 import {
   joinRoleDocs,
   lookupEmail,
+  credentialName,
   MAX_ROLE_DOCS,
   type RoleRecord,
 } from './join-roles'
@@ -140,5 +141,14 @@ describe('only a verified email resolves a role by contact', () => {
     expect(lookupEmail({ email: 'a@b.c' })).toBeUndefined()
     // Truthiness is not verification.
     expect(lookupEmail({ email: 'a@b.c', email_verified: 'true' as never })).toBeUndefined()
+  })
+})
+
+describe('credentialName — the one name provenance records for who authenticated (#28)', () => {
+  test('display name first, then email, else nothing', () => {
+    expect(credentialName({ name: 'Ada', email: 'a@b.org' })).toBe('Ada')
+    expect(credentialName({ email: 'a@b.org' })).toBe('a@b.org')
+    expect(credentialName({ name: '', email: '' })).toBeUndefined()
+    expect(credentialName({})).toBeUndefined()
   })
 })

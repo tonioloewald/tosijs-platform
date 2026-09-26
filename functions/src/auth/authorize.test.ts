@@ -246,3 +246,29 @@ describe('the loopback redirect is not caller-controlled', () => {
     expect(loopbackRedirect(8123, 'a&b=c')).toContain('request=a%26b%3Dc')
   })
 })
+
+describe('the approver\'s name travels to the token (#28)', () => {
+  // An agent's writes must name the same human the human's own writes do.
+  const pending = {
+    label: 'Tosi × repo',
+    caveats: { roles: ['author'] },
+    ttlMs: 60_000,
+    codeChallenge: 'c',
+    mode: 'loopback',
+    status: 'pending',
+    expiresAt: new Date(Date.now() + 60_000).toJSON(),
+    createdAt: new Date().toJSON(),
+  } as never
+
+  test('approval records the approver\'s credential name', async () => {
+    const { decideApprove } = await import('./authorize')
+    const d = decideApprove(pending, 'uid-1', Date.now(), new Date().toJSON(), 'Ada')
+    expect(d).toMatchObject({ status: 'approved', patch: { approvedBy: 'uid-1', approvedByName: 'Ada' } })
+  })
+
+  test('without a name, the patch carries none (older callers)', async () => {
+    const { decideApprove } = await import('./authorize')
+    const d = decideApprove(pending, 'uid-1', Date.now(), new Date().toJSON()) as { patch: object }
+    expect('approvedByName' in d.patch).toBe(false)
+  })
+})

@@ -8,6 +8,7 @@ import { DecodedIdToken } from 'firebase-admin/auth'
 
 import { UserRoles, anonymousUser } from './collections/roles'
 import {
+  credentialName,
   joinRoleDocs,
   lookupEmail,
   MAX_ROLE_DOCS,
@@ -377,7 +378,12 @@ async function rolesForToken(secret: string): Promise<UserRoles> {
     ...principal,
     // The token's OWNER authenticated (through the token), not whoever is
     // listed first on their role document (#28).
-    principal: { uid: record.principalUid },
+    // …named as the human names themselves when they sign in: the credential
+    // name captured at mint (older tokens have none and fall back).
+    principal: {
+      uid: record.principalUid,
+      ...(record.principalName ? { name: record.principalName } : {}),
+    },
     // ATTENUATED. Never `principal.roles` — that would hand the agent the
     // human's full authority, which is the entire thing this design exists to
     // prevent.
@@ -435,14 +441,10 @@ async function getUserRoles(req: AuthenticatedRequest): Promise<UserRoles> {
   // Who AUTHENTICATED, from the verified ID token — not the first uid on the
   // matched role document, which for a contact match or a shared document is
   // someone else (#28). The display name comes from the credential too.
-  const credentialName =
-    (typeof user.name === 'string' && user.name) || user.email || undefined
+  const name = credentialName(user)
   return {
     ...userRole,
-    principal: {
-      uid: user.uid,
-      ...(credentialName ? { name: credentialName } : {}),
-    },
+    principal: { uid: user.uid, ...(name ? { name } : {}) },
   }
 }
 

@@ -38,8 +38,14 @@ import {
   type WriteMethod,
 } from './collections/write-pipeline'
 import { FirestoreStore } from './firestore-store'
-import { fail, notFound, noStore, rejectionStatus } from './errors'
-import { commitWithSeq } from './collections/sequence'
+import {
+  fail,
+  notFound,
+  noStore,
+  rejectionStatus,
+  type RejectionReason,
+} from './errors'
+import { commitTransactionally, type CommitOutcome } from './commit'
 
 // Schema validation moved into `runWritePipeline` at the 2026-09-16 cutover —
 // including the `strict: true` flag that stops tosijs-schema stride-sampling
@@ -474,6 +480,53 @@ export const doc = onRequest({}, async (req, res) => {
       //   2. `isUnique`'s document identity — see the binding note in
       //      write-pipeline.ts. Self-exclusion is bound HERE; a fresh 2-arg
       //      implementation that ignores `ref` would fail every update.
+
+      // An IMMUTABLE or SEQUENCED collection commits through the transactional
+      // path /docs uses (#1184): existence, the pipeline, uniqueness and the
+      // sequence counter are all read INSIDE one transaction. On the path below
+      // they are read outside the commit, so two concurrent creates of one new
+      // id both saw "missing" and both committed — the second re-sequencing the
+      // first, which for a log is corruption.
+      if (config.immutable || config.seq) {
+        let outcome: CommitOutcome
+        try {
+          outcome = await commitTransactionally(
+            [
+              {
+                p: canonicalPath,
+                method: req.method as WriteMethod,
+                data: req.body.data as Record<string, unknown>,
+              },
+            ],
+            { [_collectionPath]: config },
+            userRoles
+          )
+        } catch (e) {
+          functions.logger.error(`Error saving ${path}:`, e)
+          fail(res, 500, 'internal', 'save failed')
+          break
+        }
+        if (outcome.status === 'refused') {
+          const { refusal } = outcome
+          fail(
+            res,
+            rejectionStatus(refusal.reason as RejectionReason),
+            refusal.reason as never,
+            refusal.message,
+            refusal.details ? { details: refusal.details } : {}
+          )
+          break
+        }
+        res
+          .status(200)
+          .send(
+            outcome.out.length === 0
+              ? `unchanged ${path}`
+              : `${req.method === 'POST' ? 'created' : 'updated'} ${path}`
+          )
+        break
+      }
+
       const existing = doc.data
       // Single clock reading for the whole request (§4.1: no ambient time).
       const now = new Date().toJSON()
@@ -523,17 +576,9 @@ export const doc = onRequest({}, async (req, res) => {
 
       const data = outcome.data
       try {
-        if (config.seq) {
-          // Sequenced collections commit through a transaction that also
-          // advances the counter (#14). Assigned HERE rather than in the
-          // pipeline for two reasons: the pipeline is pure and has no I/O, and
-          // it decides `noop` only after validation — so a sequence assigned
-          // earlier would be burnt on writes that never happen, leaving gaps a
-          // replica cannot distinguish from missed events.
-          await commitWithSeq(_collectionPath, canonicalPath, data, ref)
-        } else {
-          await store.set(canonicalPath, data)
-        }
+        // (Sequenced and immutable collections never reach here: they commit
+        // transactionally above.)
+        await store.set(canonicalPath, data)
         // Post-commit side effects (cache invalidation, etc). Deliberately
         // after the write — see CollectionConfig.afterWrite. Failures are
         // logged, never surfaced: the write already succeeded, and turning a

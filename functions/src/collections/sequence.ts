@@ -33,35 +33,14 @@
  * is a counter that makes replicas skip events.
  */
 
-import * as admin from 'firebase-admin'
 
 export const SEQ_COLLECTION = 'system:seq'
 
-/**
- * Commit `data` at `path` with the next `_seq` for `collection`.
- *
- * The counter read, the counter write and the document write are ONE
- * transaction. Split them and two concurrent writers can read the same value
- * and commit the same `_seq` — at which point a replica resuming from that
- * number skips one of them, which is precisely the failure this exists to
- * prevent.
+/*
+ * Assigning the sequence lives in `commit.ts` (commitTransactionally): one
+ * transaction reads the counter, runs every write's pipeline, and writes the
+ * documents with a CONTIGUOUS range — for /docs batches and, since #1184, for
+ * single /doc writes to a sequenced collection too. A separate single-write
+ * helper here re-read neither the document nor uniqueness inside its
+ * transaction, which is how a concurrent create could re-sequence a log.
  */
-export async function commitWithSeq(
-  collection: string,
-  path: string,
-  data: Record<string, unknown>,
-  ref: FirebaseFirestore.DocumentReference
-): Promise<number> {
-  const db = admin.firestore()
-  const counter = db.collection(SEQ_COLLECTION).doc(collection)
-
-  return db.runTransaction(async (tx) => {
-    const snapshot = await tx.get(counter)
-    // A missing counter starts at 0, so the first document is `_seq: 1` and a
-    // client may use `since=0` to mean "everything from the beginning".
-    const next = ((snapshot.data()?.value as number) ?? 0) + 1
-    tx.set(counter, { value: next, at: new Date().toJSON() }, { merge: true })
-    tx.set(ref, { ...data, _seq: next })
-    return next
-  })
-}

@@ -131,10 +131,10 @@ describe('uniqueness WITHIN one batch (0.2.0 re-review, M1)', () => {
     expect(c.claim('m/b', ['n'], { n: 1 })).toBeNull()
   })
 
-  test('/docs refuses the repeat inside the transaction — nothing is written', async () => {
+  test('the transactional commit refuses the repeat inside the transaction — nothing is written', async () => {
     const { readFileSync } = await import('fs')
     const { join } = await import('path')
-    const docs = readFileSync(join(__dirname, '..', 'docs.ts'), 'utf8')
+    const docs = readFileSync(join(__dirname, '..', 'commit.ts'), 'utf8')
     const phase1 = docs.slice(docs.indexOf('PHASE 1'), docs.indexOf('PHASE 2'))
     expect(phase1).toContain('new BatchUniqueClaims()')
     expect(phase1).toMatch(/claims\.claim\([\s\S]*?reason: 'unique'/)

@@ -406,11 +406,23 @@ describe('rejectionStatus — the one refusal-to-status map (0.2.0 review)', () 
     expect(rejectionStatus('immutable')).toBe(409)
   })
 
-  test('a /docs batch runs afterWrite after its commit, like /doc', () => {
+  test('a transactional commit runs afterWrite after the transaction, like /doc', () => {
     // A post committed through a batch otherwise left the blog cache stale.
-    const commit = docsTs.slice(docsTs.indexOf('async function commitWriteSet'))
-    const afterTx = commit.slice(commit.indexOf('await db.runTransaction'))
+    const commitTs = src('commit.ts')
+    const afterTx = commitTs.slice(commitTs.indexOf('await db.runTransaction'))
     expect(afterTx).toMatch(/results\.committed[\s\S]*config\.afterWrite\(data, userRoles\)/)
+    expect(docsTs).toContain('commitTransactionally(writes, collections, userRoles)')
+  })
+
+  test('/doc commits an immutable or sequenced collection TRANSACTIONALLY (#1184)', () => {
+    // Existence read outside the commit let two concurrent creates of one id
+    // both commit, the second re-sequencing the first.
+    const write = docTs.slice(docTs.indexOf("case 'POST':"))
+    expect(write).toMatch(/if \(config\.immutable \|\| config\.seq\) \{[\s\S]*?commitTransactionally\(/)
+    // …and that branch comes BEFORE the non-transactional pipeline.
+    expect(write.indexOf('commitTransactionally(')).toBeLessThan(write.indexOf('runWritePipeline('))
+    // No second way to assign a sequence remains.
+    expect(docTs).not.toContain('commitWithSeq')
   })
 })
 
@@ -419,6 +431,6 @@ describe('role resolution records WHO AUTHENTICATED (#28)', () => {
     expect(utilitiesTs).toMatch(/principal: \{\s*uid: user\.uid/)
   })
   test('a token caller gets principal.uid from the token record\'s owner', () => {
-    expect(utilitiesTs).toContain('principal: { uid: record.principalUid }')
+    expect(utilitiesTs).toMatch(/principal: \{\s*uid: record\.principalUid,[\s\S]*?record\.principalName/)
   })
 })

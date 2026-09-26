@@ -44,6 +44,7 @@ import {
   type TokenRecord,
 } from './token'
 import { fail, noStore } from '../errors'
+import { credentialName } from '../collections/join-roles'
 
 const TOKENS = 'token'
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -72,7 +73,12 @@ export const token = onRequest({}, async (request, response: Response) => {
   // latter case, and a token may not mint another token.
   const viaToken = Boolean(userRoles.token)
   const user = viaToken ? false : await getUser(req)
-  const uid = viaToken ? userRoles.userIds[0] : user ? user.uid : ''
+  // WHO authenticated — never the role document's first uid (#28).
+  const uid = viaToken
+    ? (userRoles.principal?.uid ?? userRoles.userIds[0])
+    : user
+      ? user.uid
+      : ''
   if (!uid) {
     fail(response, 401, 'unauthenticated', 'authentication required')
     return
@@ -123,8 +129,12 @@ export const token = onRequest({}, async (request, response: Response) => {
 
         const secret = newTokenSecret()
         const ref = db().collection(TOKENS).doc()
+        // The minting human's own name, so the agent's writes read as theirs
+        // (#28). A token cannot mint, so `user` is the human's credential.
+        const principalName = user ? credentialName(user) : undefined
         await ref.set({
           ...decision.record,
+          ...(principalName ? { principalName } : {}),
           hash: hashToken(secret),
           // `_created` so the same indexed ordering every other collection
           // uses applies here too — `getRecords` appends it unconditionally.
