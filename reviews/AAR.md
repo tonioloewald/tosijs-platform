@@ -2,6 +2,22 @@
 
 Newest first. Facts, not analysis (tosijs-coding-practices releasing.md step 10).
 
+## 0.2.1 — 2026-09-26
+
+- Went well: both virta-reported fixes landed with live evidence. A 5-way same-id race gave
+  exactly one 200, one `_seq`, and a 409 on a changed rewrite. The provenance ceremony caught an
+  inconsistency the first fix introduced, where a human and their agent were named differently.
+  Staged to served in about 3 minutes.
+- Didn't: the #28 fix took three reviews. The first found that `derive:principal` still used
+  `userIds[0]`, and that the name could fall back to an email. The second found that `/claim` named
+  owners' role documents after their email, so "curated when owned" published it. The third had 0
+  blockers.
+- Surprised: the email exposure predates 0.2.1 (0.2.0 already published a claimed owner's email),
+  and the audit found one email-named role document on virta.
+- Friction: the owner's `_by.name` decision was needed mid-release, since no default was safe.
+- Cycle: correctness/security B2 → the remediation was incomplete (it missed /claim) → the fix
+  was moved to where `_by` is produced → cleared.
+
 ## 0.2.0 — 2026-09-26
 
 - Went well: the first publish through the shared OIDC + staged workflow. It was staged,
