@@ -12,7 +12,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "virta brief"
+            "command": "virta brief tosijs-platform"
           }
         ]
       }
@@ -22,7 +22,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "virta brief --changes"
+            "command": "virta brief tosijs-platform --changes"
           }
         ]
       }
