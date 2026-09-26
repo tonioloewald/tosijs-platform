@@ -146,3 +146,40 @@ export function byCollection(
   }
   return groups
 }
+
+/**
+ * Tracks the `unique` values claimed by earlier writes in ONE batch.
+ *
+ * A batch checks uniqueness against committed state (`tx.get`), and a
+ * Firestore transaction cannot see its own buffered writes — so two writes in
+ * the same batch carrying the same unique value both passed, and both
+ * committed, silently (0.2.0 re-review, M1). `/doc` cannot hit this: it writes
+ * one document. Pure, so it is tested without a store.
+ *
+ * Keyed by the document's PARENT collection path, field and value — the same
+ * scope the store-side check uses — so `post/a` and `post/b` collide on
+ * `path=x`, while two different sub-collections do not.
+ */
+export class BatchUniqueClaims {
+  private readonly claimed = new Map<string, string>()
+
+  /**
+   * Record `docPath`'s values for `fields`. Returns the first field whose value
+   * an EARLIER write in this batch already claimed, or null.
+   */
+  claim(docPath: string, fields: readonly string[], data: Record<string, unknown>): string | null {
+    const parent = docPath.split('/').slice(0, -1).join('/')
+    const keys: Array<[string, string]> = []
+    for (const field of fields) {
+      const value = data[field]
+      // Non-scalars never get here: the pipeline refuses them first.
+      if (typeof value !== 'string' && typeof value !== 'number') continue
+      const key = `${parent}\u0000${field}\u0000${typeof value}:${value}`
+      const holder = this.claimed.get(key)
+      if (holder !== undefined && holder !== docPath) return field
+      keys.push([key, docPath])
+    }
+    for (const [key, path] of keys) this.claimed.set(key, path)
+    return null
+  }
+}

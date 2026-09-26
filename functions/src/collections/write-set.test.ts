@@ -104,3 +104,39 @@ describe('grouping for contiguous sequences', () => {
     expect(groups.get('b:y')?.map((x) => x.p)).toEqual(['b:y/1'])
   })
 })
+
+describe('uniqueness WITHIN one batch (0.2.0 re-review, M1)', () => {
+  // A transaction cannot see its own pending writes, so the store-side check
+  // let two same-value writes in one batch both commit.
+  test('a second write claiming the same value in the same collection is caught', async () => {
+    const { BatchUniqueClaims } = await import('./write-set')
+    const c = new BatchUniqueClaims()
+    expect(c.claim('post/a', ['title', 'path'], { title: 'A', path: 'x' })).toBeNull()
+    expect(c.claim('post/b', ['title', 'path'], { title: 'B', path: 'x' })).toBe('path')
+  })
+
+  test('different collections, and different sub-collection parents, do not collide', async () => {
+    const { BatchUniqueClaims } = await import('./write-set')
+    const c = new BatchUniqueClaims()
+    expect(c.claim('post/a', ['path'], { path: 'x' })).toBeNull()
+    expect(c.claim('page/a', ['path'], { path: 'x' })).toBeNull()
+    expect(c.claim('post/a/comment/1', ['slug'], { slug: 's' })).toBeNull()
+    expect(c.claim('post/b/comment/1', ['slug'], { slug: 's' })).toBeNull()
+  })
+
+  test('the string "1" and the number 1 are different values', async () => {
+    const { BatchUniqueClaims } = await import('./write-set')
+    const c = new BatchUniqueClaims()
+    expect(c.claim('m/a', ['n'], { n: '1' })).toBeNull()
+    expect(c.claim('m/b', ['n'], { n: 1 })).toBeNull()
+  })
+
+  test('/docs refuses the repeat inside the transaction — nothing is written', async () => {
+    const { readFileSync } = await import('fs')
+    const { join } = await import('path')
+    const docs = readFileSync(join(__dirname, '..', 'docs.ts'), 'utf8')
+    const phase1 = docs.slice(docs.indexOf('PHASE 1'), docs.indexOf('PHASE 2'))
+    expect(phase1).toContain('new BatchUniqueClaims()')
+    expect(phase1).toMatch(/claims\.claim\([\s\S]*?reason: 'unique'/)
+  })
+})

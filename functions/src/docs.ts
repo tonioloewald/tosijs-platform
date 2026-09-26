@@ -37,7 +37,7 @@ import { getRef } from './doc'
 import { Response } from 'express'
 import * as admin from 'firebase-admin'
 import { runWritePipeline, type WriteMethod } from './collections/write-pipeline'
-import { validateWriteSet } from './collections/write-set'
+import { validateWriteSet, BatchUniqueClaims } from './collections/write-set'
 import { SEQ_COLLECTION } from './collections/sequence'
 import { physicalPath } from './collections/namespace'
 import {
@@ -307,6 +307,7 @@ async function commitWriteSet(
       }> = []
 
       // ── PHASE 1: every read. ────────────────────────────────────────────
+      const claims = new BatchUniqueClaims()
       for (const w of writes) {
         const ref = admin.firestore().doc(physicalPath(w.p))
         const snapshot = await tx.get(ref)
@@ -358,6 +359,18 @@ async function commitWriteSet(
           })
         }
         if (outcome.status === 'noop') continue
+        // Uniqueness WITHIN the batch: the store check above cannot see this
+        // transaction's own pending writes (0.2.0 re-review, M1).
+        const repeated = claims.claim(physicalPath(w.p), config?.unique ?? [], outcome.data)
+        if (repeated) {
+          throw Object.assign(new Error(`"${repeated}" is claimed twice in this commit`), {
+            refusal: {
+              p: w.p,
+              reason: 'unique',
+              message: `"${repeated}" is required to exist and be unique — another write in this commit already uses that value`,
+            },
+          })
+        }
         prepared.push({ w, ref, data: outcome.data })
       }
 

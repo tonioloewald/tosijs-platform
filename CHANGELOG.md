@@ -11,7 +11,7 @@ what changed since **0.1.0**, which is what `npm install service-compris`
 gave you until now.
 
 **Verified for this release:**
-- **Unit tests:** 746 functions and 795 root, all passing.
+- **Unit tests:** 750 functions and 799 root, all passing.
 - **Emulator integration suites:** 53 pass, 0 fail, run against this code with
   the registry switch on, as production runs.
 - **Live host checks** on the sandbox: the signed-in suite 17/17, and six
@@ -57,6 +57,9 @@ gave you until now.
   - `rate-limited` (429), in that shape (it used to be plain text);
   - a `/docs` batch now uses the same statuses as `/doc`, so its `validate` and
     `unique` refusals are 400, not 403.
+- **A `/docs` batch checks uniqueness within itself too:** two writes in one
+  commit claiming the same `unique` value are refused (`400 unique`), and
+  nothing is written. Before, both committed.
 - **`immutable: true`** makes a collection a log: an identical rewrite is a
   no-op; a different rewrite, or a delete, is refused (409). An upgrade may add
   it but never drop it.
