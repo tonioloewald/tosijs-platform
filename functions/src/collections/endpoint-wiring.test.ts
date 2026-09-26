@@ -413,3 +413,12 @@ describe('rejectionStatus — the one refusal-to-status map (0.2.0 review)', () 
     expect(afterTx).toMatch(/results\.committed[\s\S]*config\.afterWrite\(data, userRoles\)/)
   })
 })
+
+describe('role resolution records WHO AUTHENTICATED (#28)', () => {
+  test('a human caller gets principal.uid from the verified ID token', () => {
+    expect(utilitiesTs).toMatch(/principal: \{\s*uid: user\.uid/)
+  })
+  test('a token caller gets principal.uid from the token record\'s owner', () => {
+    expect(utilitiesTs).toContain('principal: { uid: record.principalUid }')
+  })
+})

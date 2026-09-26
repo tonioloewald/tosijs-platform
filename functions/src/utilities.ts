@@ -375,6 +375,9 @@ async function rolesForToken(secret: string): Promise<UserRoles> {
 
   return {
     ...principal,
+    // The token's OWNER authenticated (through the token), not whoever is
+    // listed first on their role document (#28).
+    principal: { uid: record.principalUid },
     // ATTENUATED. Never `principal.roles` — that would hand the agent the
     // human's full authority, which is the entire thing this design exists to
     // prevent.
@@ -425,7 +428,22 @@ async function getUserRoles(req: AuthenticatedRequest): Promise<UserRoles> {
     await syncRolesToCustomClaims(user.uid, userRole.roles)
   }
 
-  return userRole
+  // No role document: stay the shared anonymous identity (compared by
+  // reference elsewhere), exactly as before.
+  if (userRole === anonymousUser) return userRole
+
+  // Who AUTHENTICATED, from the verified ID token — not the first uid on the
+  // matched role document, which for a contact match or a shared document is
+  // someone else (#28). The display name comes from the credential too.
+  const credentialName =
+    (typeof user.name === 'string' && user.name) || user.email || undefined
+  return {
+    ...userRole,
+    principal: {
+      uid: user.uid,
+      ...(credentialName ? { name: credentialName } : {}),
+    },
+  }
 }
 
 const DAY_IN_MS = 24 * 3600 * 1000

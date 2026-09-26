@@ -777,3 +777,47 @@ describe('a unique field must be a checkable scalar (0.2.0 review, M1)', () => {
     expect(o.status).toBe('write')
   })
 })
+
+describe('provenance stamps who AUTHENTICATED, not the role document (#28)', () => {
+  // A caller matched by contact email on a document whose `userIds` holds a
+  // service principal was stamped as that service principal.
+  const shared: UserRoles = {
+    _id: 'role-doc',
+    name: 'configurator@host.example',
+    contacts: [{ type: 'email', value: 'human@example.org' }] as never,
+    roles: ['author'] as never,
+    userIds: ['service-principal-uid'],
+    principal: { uid: 'human-uid', name: 'Human Being' },
+  }
+
+  test('uid and name come from the credential; role still names the document', async () => {
+    const o = (await runWritePipeline(
+      { method: 'POST', body: { t: 'x' }, existing: null, config: {}, userRoles: shared },
+      deps()
+    )) as { data: Record<string, unknown> }
+    expect(o.data._by).toEqual({ uid: 'human-uid', role: 'role-doc', name: 'Human Being' })
+  })
+
+  test('a principal without a name keeps the uid fix and falls back to the document name', async () => {
+    const o = (await runWritePipeline(
+      {
+        method: 'POST',
+        body: { t: 'x' },
+        existing: null,
+        config: {},
+        userRoles: { ...shared, principal: { uid: 'human-uid' } },
+      },
+      deps()
+    )) as { data: Record<string, unknown> }
+    expect((o.data._by as { uid: string }).uid).toBe('human-uid')
+  })
+
+  test('without a principal (a kernel consumer that does not set it), the old behaviour holds', async () => {
+    const { principal: _unused, ...legacy } = shared
+    const o = (await runWritePipeline(
+      { method: 'POST', body: { t: 'x' }, existing: null, config: {}, userRoles: legacy as UserRoles },
+      deps()
+    )) as { data: Record<string, unknown> }
+    expect((o.data._by as { uid: string }).uid).toBe('service-principal-uid')
+  })
+})

@@ -263,6 +263,25 @@ describe('uid and contact are BOTH grants — neither caches the other', () => {
     }
   })
 
+  test('7b. a contact-matched writer is stamped as THEMSELVES, not the document\'s first uid (#28)', async () => {
+    if (guard()) return expect(true).toBe(true)
+    // The document lists a DIFFERENT principal first — the shape virta hit
+    // (a human given a role through a service principal's document).
+    const w = await setSubjectRoles(['author'], true, ['someone-else-uid'])
+    if (w.status !== 200) return
+    const id = `lifecycle-prov-${Date.now()}`
+    const created = await doc(subjectToken, 'POST', `post/${id}`, {
+      title: `provenance ${id}`,
+      content: 'x',
+    })
+    expect(created.status).toBe(200)
+    const stored = await doc(ownerToken, 'GET', `post/${id}`)
+    const by = (JSON.parse(stored.text) as { _by?: { uid?: string } })._by
+    expect(by?.uid).toBe(subjectUid)
+    expect(by?.uid).not.toBe('someone-else-uid')
+    await doc(ownerToken, 'DELETE', `post/${id}`)
+  })
+
   test('8. a contact grant survives on its own merit, not via a cached uid', async () => {
     if (guard()) return expect(true).toBe(true)
     // Same state as 7 — the point is that it is re-derived every request from

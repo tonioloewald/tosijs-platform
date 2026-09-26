@@ -62,6 +62,21 @@ export interface UserRoles {
   userIds: string[]
   /** Present only when the caller authenticated with a capability token. */
   token?: TokenContext
+  /**
+   * WHO AUTHENTICATED — the credential's own identity, not the role
+   * document's.
+   *
+   * `userIds` lists every uid on the role document(s) that granted authority,
+   * so its first entry is whoever happens to be listed first. A principal
+   * matched by contact email, or one sharing a document, was stamped as that
+   * person (#28, found by tosijs-virta: every board write read as the host's
+   * service principal). Provenance uses this when present; `_by.role` still
+   * records which document granted the authority, so both facts are kept.
+   *
+   * Set by the host's role resolution from the verified credential. Optional,
+   * so a kernel consumer that does not set it gets the old behaviour.
+   */
+  principal?: { uid: string; name?: string }
 }
 
 export const anonymousUser: UserRoles = Object.freeze({

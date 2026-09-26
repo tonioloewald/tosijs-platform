@@ -137,7 +137,9 @@ export const STAMPED_FIELDS = ['_created', '_modified', '_seq', '_by'] as const
 export function provenanceOf(
   userRoles: UserRoles
 ): Record<string, unknown> | undefined {
-  const uid = userRoles.userIds?.[0]
+  // The AUTHENTICATED uid when the host supplied it (#28); the role
+  // document's first uid is only a fallback for callers that do not.
+  const uid = userRoles.principal?.uid ?? userRoles.userIds?.[0]
   const token = userRoles.token
   if (!uid && !token) return undefined
   return {
@@ -148,9 +150,14 @@ export function provenanceOf(
     // later rename does not rewrite history. That is the behaviour an audit
     // record wants, and the opposite of what a foreign key wants — hence
     // both are here.
-    ...(userRoles.name && userRoles.name !== 'unknown'
-      ? { name: userRoles.name }
-      : {}),
+    // The credential's own name first: the role document's `name` describes
+    // the DOCUMENT, and for a shared or contact-matched one it names someone
+    // else (#28).
+    ...(userRoles.principal?.name
+      ? { name: userRoles.principal.name }
+      : userRoles.name && userRoles.name !== 'unknown'
+        ? { name: userRoles.name }
+        : {}),
     // The agent's own identity. Every token a person mints attenuates THEIR
     // authority, so `uid` is identical across all of them — the label is the
     // only thing that tells one agent from another, and from its human.
