@@ -46,6 +46,8 @@ export const ERROR_CODES = [
   'conflict',
   'not-sequenced',
   'rate-limited',
+  'too-large',
+  'unsupported-type',
   'internal',
 ] as const
 

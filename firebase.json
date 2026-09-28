@@ -46,6 +46,10 @@
         "function": "stored"
       },
       {
+        "source": "/blob/**",
+        "function": "blob"
+      },
+      {
         "source": "**",
         "function": "prefetch"
       }

@@ -511,3 +511,14 @@ describe('a sequence cannot change under stored documents (#22)', () => {
     expect((d as { problems: string[] }).problems.join()).toContain('envelope.seq')
   })
 })
+
+describe('a collection may not become, or stop being, a storage area by upgrade (#1136)', () => {
+  const task = manifest().collections['virta:task']
+  test('adding blob is refused; removing it is refused; keeping it is fine', () => {
+    const plain = manifest()
+    const asArea = manifest({ version: '1.0.1', collections: { 'virta:task': { ...task, blob: { maxBytes: 10 } } as never } })
+    expect(additiveProblems(plain, asArea).join()).toContain('became a storage area')
+    expect(additiveProblems(asArea, plain).join()).toContain('stopped being a storage area')
+    expect(additiveProblems(asArea, asArea)).toEqual([])
+  })
+})

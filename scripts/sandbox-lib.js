@@ -65,6 +65,8 @@ export const PLATFORM_FUNCTIONS = [
   'install',
   'token',
   'authorize',
+  // Storage areas (#1136): files permissioned like collections.
+  'blob',
 ]
 
 /** Everything else this repo deploys — loewald.com's own surface. */

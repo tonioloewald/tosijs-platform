@@ -490,3 +490,39 @@ describe('the "system" namespace is reserved (M2)', () => {
     expect(problems.join()).toContain('reserved namespace')
   })
 })
+
+describe('storage areas in a manifest (#1136)', () => {
+  const area = (blob: unknown, schema?: unknown) =>
+    validateManifest(
+      ok({
+        collections: {
+          'virta:files': {
+            ...(schema === undefined ? {} : { schema }),
+            blob,
+            access: [{ role: ROLES.author, read: 'ALL', write: 'ALL' }],
+          },
+        },
+      } as never),
+      opts
+    ).map((e) => e.message)
+
+  test('an area with limits and NO schema is valid — the metadata schema is the default', () => {
+    expect(area({ maxBytes: 1000, contentTypes: ['image/*', 'audio/mpeg'] })).toEqual([])
+  })
+  test('maxBytes is required and positive: an unbounded store is a bill', () => {
+    expect(area({}).join()).toContain('maxBytes')
+    expect(area({ maxBytes: 0 }).join()).toContain('maxBytes')
+    expect(area({ maxBytes: 1.5 }).join()).toContain('maxBytes')
+  })
+  test('content types must look like types or families; unknown keys are refused', () => {
+    expect(area({ maxBytes: 1, contentTypes: ['png'] }).join()).toContain('contentTypes')
+    expect(area({ maxBytes: 1, public: true }).join()).toContain('unknown key')
+  })
+  test('an ordinary collection still requires a schema', () => {
+    const errs = validateManifest(
+      ok({ collections: { 'virta:x': { access: [{ role: ROLES.author, read: 'ALL' }] } } } as never),
+      opts
+    ).map((e) => e.message)
+    expect(errs.join()).toContain('schema: required')
+  })
+})

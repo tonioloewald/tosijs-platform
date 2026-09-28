@@ -63,6 +63,24 @@ export interface BlobMeta {
   height?: number
 }
 
+/**
+ * The JSON Schema of a metadata document — the default schema of a storage
+ * area. Only the /blob endpoint writes these documents (direct /doc writes to
+ * an area are refused), so this describes exactly what it writes.
+ */
+export const BLOB_META_SCHEMA = {
+  type: 'object',
+  properties: {
+    path: { type: 'string' },
+    contentType: { type: 'string' },
+    bytes: { type: 'integer', minimum: 0 },
+    sha256: { type: 'string', pattern: '^[0-9a-f]{64}$' },
+    width: { type: 'integer', minimum: 1 },
+    height: { type: 'integer', minimum: 1 },
+  },
+  required: ['path', 'contentType', 'bytes', 'sha256'],
+} as const
+
 /** Refusal reasons. `forbidden` is answered opaquely to non-privileged callers. */
 export type BlobRefusal =
   | { status: 'refused'; reason: 'forbidden'; message: string }
@@ -302,4 +320,28 @@ export function decideMove(
     { ...meta, path: to.path },
     userRoles
   )
+}
+
+/** Problems with a declared `blob` limits object (manifest validation). */
+export function blobLimitsProblems(blob: unknown, where: string): string[] {
+  if (blob === null || typeof blob !== 'object' || Array.isArray(blob)) {
+    return [`${where}: must be an object with maxBytes`]
+  }
+  const b = blob as Record<string, unknown>
+  const problems: string[] = []
+  if (typeof b.maxBytes !== 'number' || !Number.isInteger(b.maxBytes) || b.maxBytes <= 0) {
+    problems.push(`${where}.maxBytes: required, a positive integer — an unbounded store is a bill`)
+  }
+  if (b.contentTypes !== undefined) {
+    if (
+      !Array.isArray(b.contentTypes) ||
+      b.contentTypes.some((t) => typeof t !== 'string' || !/^[a-z0-9.+-]+\/(\*|[a-z0-9.+-]+)$/i.test(t))
+    ) {
+      problems.push(`${where}.contentTypes: must be types like "image/png" or families like "image/*"`)
+    }
+  }
+  for (const k of Object.keys(b)) {
+    if (k !== 'maxBytes' && k !== 'contentTypes') problems.push(`${where}.${k}: unknown key`)
+  }
+  return problems
 }

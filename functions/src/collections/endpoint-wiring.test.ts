@@ -444,3 +444,24 @@ describe('/claim never names a role document after an email (0.2.1 re-review)', 
     expect(claim).toMatch(/Host owner \$\{user\.uid\.slice/)
   })
 })
+
+describe('storage areas are written ONLY through /blob (#1136)', () => {
+  test('/doc refuses writes and deletes to an area, before any commit path', () => {
+    const write = docTs.slice(docTs.indexOf("case 'POST':"))
+    expect(write).toMatch(/if \(config\.blob\) \{[\s\S]*?'refused'/)
+    expect(write.indexOf('config.blob')).toBeLessThan(write.indexOf('commitTransactionally('))
+    const del = docTs.slice(docTs.indexOf("case 'DELETE':"), docTs.indexOf("case 'POST':"))
+    expect(del).toMatch(/config\.blob\)[\s\S]*?'refused'/)
+    expect(del.indexOf('config.blob')).toBeLessThan(del.indexOf('store.delete('))
+  })
+  test('a /docs batch refuses a write to an area', () => {
+    expect(docsTs).toMatch(/collections\[cp\]\?\.blob[\s\S]*?'refused'/)
+  })
+  test('the endpoint is exported, marks responses no-store first, and ships in the platform profile', () => {
+    expect(src('index.ts')).toContain("export { blob } from './blob-endpoint'")
+    const ep = src('blob-endpoint.ts')
+    expect(ep.indexOf('noStore(response)')).toBeLessThan(ep.indexOf('optionsResponse('))
+    const lib = readFileSync(join(__dirname, '..', '..', '..', 'scripts', 'sandbox-lib.js'), 'utf8')
+    expect(lib).toMatch(/PLATFORM_FUNCTIONS = \[[\s\S]*?'blob'/)
+  })
+})

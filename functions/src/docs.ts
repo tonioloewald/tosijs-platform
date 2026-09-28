@@ -280,6 +280,10 @@ async function commitWriteSet(
       (w.method ?? 'PUT') as never,
       userRoles
     )
+    if (access !== undefined && collections[cp]?.blob) {
+      fail(res, 403, 'refused', 'files in a storage area are written through /blob', { p: w.p })
+      return
+    }
     if (access === undefined) {
       // Opaque, matching /doc: the caller learns the commit failed, not which
       // collection they were not allowed to touch.

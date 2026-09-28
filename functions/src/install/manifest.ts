@@ -25,6 +25,7 @@
  * cannot be expected to know.
  */
 
+import { blobLimitsProblems } from '../collections/blob'
 import {
   refuseDeclaration,
   NAMESPACE_PATTERN,
@@ -110,6 +111,12 @@ export interface InstalledCollection {
    * `CollectionConfig.immutable`.
    */
   immutable?: boolean
+  /**
+   * Makes this collection a STORAGE AREA (#1136): its documents describe
+   * files, its access rules govern them, and these are its limits. `schema`
+   * is then optional (defaults to the metadata schema). See collections/blob.ts.
+   */
+  blob?: { maxBytes: number; contentTypes?: string[] }
   cacheLatencySeconds?: number
   /**
    * Endpoint-managed provenance the caller may never send.
@@ -417,7 +424,14 @@ export function validateManifest(
     }
     const c = raw as Record<string, unknown>
 
-    if (c.schema === null || typeof c.schema !== 'object') {
+    if (c.blob !== undefined) {
+      for (const problem of blobLimitsProblems(c.blob, `${where}.blob`)) fail(problem)
+    }
+
+    // A storage area's schema is optional: it defaults to the metadata schema.
+    if (c.schema === undefined && c.blob !== undefined) {
+      // nothing to check
+    } else if (c.schema === null || typeof c.schema !== 'object') {
       fail(`${where}.schema: required`)
     } else {
       problems.push(

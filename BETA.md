@@ -323,6 +323,8 @@ Every error has the same shape, `{"error": "<code>", "message": "<prose>", …}`
 | `conflict` | 409 | Re-installing a published manifest version with different content. | No: bump the version |
 | `not-sequenced` | 400 | `since=` on a collection without `envelope.seq`. | No |
 | `rate-limited` | 429 | More than 100 requests/minute from one IP. | Yes, after `Retry-After` |
+| `too-large` | 413 | A file exceeds its storage area's `maxBytes`, or the endpoint's upload limit. | No |
+| `unsupported-type` | 415 | A file's content type isn't in its storage area's `contentTypes`. | No |
 | `internal` | 500 | Something failed on the host. | Yes |
 
 A `POST /docs` batch refuses with the same codes and statuses as `/doc`. It

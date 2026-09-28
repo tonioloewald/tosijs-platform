@@ -181,6 +181,14 @@ export function additiveProblems(
               'silently stop receiving new documents'
       )
     }
+    // A collection may not become a storage area, or stop being one, by
+    // upgrade: its documents are either file metadata written only by /blob,
+    // or ordinary documents — never both over its lifetime.
+    if (Boolean(before.blob) !== Boolean(after.blob)) {
+      problems.push(
+        `"${name}" ${after.blob ? 'became' : 'stopped being'} a storage area — that is a migration, not an upgrade`
+      )
+    }
     // `immutable` may be ADDED by upgrade — it only restricts future writes —
     // but never dropped. Dropping it would reopen upsert re-sequencing and
     // delete-then-recreate on a log already stored under the promise, and an

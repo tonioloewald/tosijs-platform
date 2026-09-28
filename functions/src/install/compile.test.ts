@@ -446,3 +446,15 @@ describe('derive:principal never derives an email name (0.2.1 re-review)', () =>
     expect(out.authorName).toBe('Ada')
   })
 })
+
+describe('a storage area compiles with its limits and the metadata schema (#1136)', () => {
+  test('blob passes through; schema defaults to BLOB_META_SCHEMA', async () => {
+    const { BLOB_META_SCHEMA } = await import('../collections/blob')
+    const c = compileCollection({
+      blob: { maxBytes: 1000 },
+      access: [{ role: 'author', read: 'ALL' }],
+    } as never)
+    expect(c.blob).toEqual({ maxBytes: 1000 })
+    expect(c.schema).toBe(BLOB_META_SCHEMA as never)
+  })
+})

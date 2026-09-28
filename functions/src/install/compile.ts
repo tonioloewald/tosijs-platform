@@ -20,6 +20,7 @@
 
 import { ALL, type AccessConfig, type CollectionConfig } from '../collections/access'
 import { principalIdentity, type UserRoles } from '../collections/roles'
+import { BLOB_META_SCHEMA } from '../collections/blob'
 import type {
   InstalledCollection,
   Manifest,
@@ -339,6 +340,12 @@ export function compileCollection(
   }
 
   if (collection.schema) config.schema = collection.schema as never
+  if (collection.blob) {
+    config.blob = { ...collection.blob }
+    // A storage area's metadata documents are written only by /blob, which
+    // writes exactly BLOB_META_SCHEMA's shape.
+    if (!collection.schema) config.schema = BLOB_META_SCHEMA as never
+  }
   if (collection.unique) config.unique = collection.unique
   if (collection.tagFields) config.tagFields = collection.tagFields
   if (collection.cacheLatencySeconds !== undefined) {

@@ -417,7 +417,10 @@ export const doc = onRequest({}, async (req, res) => {
       return
 
     case 'DELETE':
-      if (doc.exists && access === ALL && config.immutable) {
+      if (doc.exists && access === ALL && config.blob) {
+        // Deleting the metadata alone would orphan the file's bytes (#1136).
+        fail(res, 403, 'refused', 'files in a storage area are deleted through /blob')
+      } else if (doc.exists && access === ALL && config.immutable) {
         // An immutable collection refuses deletes too (0.2.0-beta.3 review,
         // M3). Refusing only rewrites would leave delete-then-recreate, which
         // lands the same id with a FRESH `_seq` — exactly the re-sequencing
@@ -480,6 +483,14 @@ export const doc = onRequest({}, async (req, res) => {
       //   2. `isUnique`'s document identity — see the binding note in
       //      write-pipeline.ts. Self-exclusion is bound HERE; a fresh 2-arg
       //      implementation that ignores `ref` would fail every update.
+
+      // A storage area's documents describe files and are written ONLY by
+      // /blob, which stores the bytes first (#1136). A direct write here could
+      // make a metadata document with no file behind it.
+      if (config.blob) {
+        fail(res, 403, 'refused', 'files in a storage area are written through /blob')
+        break
+      }
 
       // An IMMUTABLE or SEQUENCED collection commits through the transactional
       // path /docs uses (#1184): existence, the pipeline, uniqueness and the
