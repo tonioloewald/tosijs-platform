@@ -12,7 +12,8 @@ checkout (1.15.5); the surprising claims below were spot-verified by hand.
 | **`tosijs-assets`** (web components) | Asset manager: list, upload (with WebP), rename, delete, insert snippet, `dimensions.ts`. **Blocked on** the platform blob capability (#1136, with #1139) and an insert-into-editor contract to replace `querySelector('xin-post-editor tosi-code')`. |
 | **Upstream to tosijs-ui** | Line annotations on `tosi-code` (blocked on tosijs-ui#131); caret colour that follows the theme; per-hunk diff resolutions from `diffResolvable`; a persisted light/dark/system theme-mode store; possibly an ESM-module-loader element. |
 | **This repo, server side** (rules and procs) | Draft visibility (already list access); unique/validate/afterWrite (already config plus the hook); the blog cache and `prefetch.ts` → a cached-HTML page server; the proofread/summary **prompts**, if they become stored procs (open decision below); a REST DocStore client (`RestStore`, ROADMAP decision 5). |
-| **Admin suite** (owner, 2026-09-28) | `role-manager.ts` → an exported, extensible role manager; `schema-editor.ts` → the seed of a rules manager; plus a new schema-aware data manager; the asset manager joins them. |
+| **Admin suite** (owner, 2026-09-28) | `role-manager.ts` → an exported, extensible role manager; a new schema-aware data manager and a rules manager; the asset manager joins them. |
+| **Upstream to tosijs-ui: the schema editor** | `schema-editor.ts` → a tosijs-ui schema editor that writes `x-tosi` UI annotations `tosiSchemaForm` honours (tosijs-ui #2454). |
 | **Delete** | `src/page-editor.ts` (0 bytes); `src/youtube.ts` (imported nowhere); the dead direct-Firestore helpers in `firebase.ts` (no callers); `page.ts`, the app shell and `sitemap.ts` → the tosijs-ui build. |
 
 **The owner's decisions (2026-09-28):**
@@ -28,8 +29,13 @@ checkout (1.15.5); the surprising claims below were spot-verified by hand.
    - a **data manager**: general-purpose, schema-aware CRUD (tosijs-ui `tosiCrud` +
      `tosiSchemaForm` are the base);
    - a **rules manager**: create collections, manage their schemas and access rules. It pairs
-     naturally with the data manager, and `schema-editor.ts` is its seed, so it is **not**
-     deleted;
+     naturally with the data manager;
+   - **the schema editor goes upstream to tosijs-ui** (owner, 2026-09-28; tosijs-ui #2454),
+     together with `x-tosi` annotations it writes and `tosiSchemaForm` reads (hide, order,
+     collapse into a details panel, choose a widget). Measured: tosijs-schema treats `x-`
+     keywords as annotations, so the platform's manifest validator accepts them, while the
+     `ui:*` style other libraries use is refused. The rules manager builds on the upstream
+     component;
    - the **role manager** and the **asset manager** alongside them.
 
    Where the suite lives, and what it is called, is still open.
