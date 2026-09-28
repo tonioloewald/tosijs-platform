@@ -4,9 +4,7 @@
 **Date:** 2026-09-26. **Basis:** a read of every client file, checked against the tosijs-ui
 checkout (1.15.5); the surprising claims below were spot-verified by hand.
 
-## Proposed answer for #1282: where each piece goes
-
-This is a proposal. #1282 is the owner's decision.
+## Where each piece goes (#1282, decided 2026-09-28)
 
 | Destination | What |
 |---|---|
@@ -14,14 +12,27 @@ This is a proposal. #1282 is the owner's decision.
 | **`tosijs-assets`** (web components) | Asset manager: list, upload (with WebP), rename, delete, insert snippet, `dimensions.ts`. **Blocked on** the platform blob capability (#1136, with #1139) and an insert-into-editor contract to replace `querySelector('xin-post-editor tosi-code')`. |
 | **Upstream to tosijs-ui** | Line annotations on `tosi-code` (blocked on tosijs-ui#131); caret colour that follows the theme; per-hunk diff resolutions from `diffResolvable`; a persisted light/dark/system theme-mode store; possibly an ESM-module-loader element. |
 | **This repo, server side** (rules and procs) | Draft visibility (already list access); unique/validate/afterWrite (already config plus the hook); the blog cache and `prefetch.ts` → a cached-HTML page server; the proofread/summary **prompts**, if they become stored procs (open decision below); a REST DocStore client (`RestStore`, ROADMAP decision 5). |
-| **Delete** | `src/page-editor.ts` (0 bytes); `src/youtube.ts` (imported nowhere); `schema-editor.ts` → tosijs-ui `tosiSchemaForm`; `role-manager.ts` → `tosiCrud` + `tosiSchemaForm`; the dead direct-Firestore helpers in `firebase.ts` (no callers); `page.ts`, the app shell and `sitemap.ts` → the tosijs-ui build. |
+| **Admin suite** (owner, 2026-09-28) | `role-manager.ts` → an exported, extensible role manager; `schema-editor.ts` → the seed of a rules manager; plus a new schema-aware data manager; the asset manager joins them. |
+| **Delete** | `src/page-editor.ts` (0 bytes); `src/youtube.ts` (imported nowhere); the dead direct-Firestore helpers in `firebase.ts` (no callers); `page.ts`, the app shell and `sitemap.ts` → the tosijs-ui build. |
 
-**Decisions this needs from the owner:**
-1. Where the AI prompts live. Today the client can send ANY prompt to `gen`. As a stored proc, the
-   host decides the prompt and the model; as tosijs-blog config, it stays client-side.
-2. RSS. None exists today. Is it wanted, emitted by the tosijs-ui build?
-3. The role manager: is it replaced by a generic `tosiCrud` admin, or dropped (roles are edited
-   through the datastore anyway, D4)?
+**The owner's decisions (2026-09-28):**
+1. **AI prompts are stored in a collection, owned or shared**, like any other document. They
+   are not hard-coded in the client and not tosijs-blog config. `gen` should run a prompt by
+   reference, under the caller's access to that prompt.
+2. **RSS: yes.** An RSS feed with enclosures also gives podcasts, so feed items should carry
+   media enclosures, not only posts.
+3. **The role manager becomes an exported component**, like the asset manager. It works on the
+   platform's built-in roles and is designed to be extended.
+4. **Direction: an admin suite.** Data, roles, rules and assets are what every host needs and
+   what most platforms do half-heartedly. Firebase's console is a standing annoyance:
+   - a **data manager**: general-purpose, schema-aware CRUD (tosijs-ui `tosiCrud` +
+     `tosiSchemaForm` are the base);
+   - a **rules manager**: create collections, manage their schemas and access rules. It pairs
+     naturally with the data manager, and `schema-editor.ts` is its seed, so it is **not**
+     deleted;
+   - the **role manager** and the **asset manager** alongside them.
+
+   Where the suite lives, and what it is called, is still open.
 
 **Two seams make Phase 2 tractable:**
 - **`getPrefetchedDoc` / `getPrefetched`** (`src/prefetched.ts:56-83`) is the single read seam for
