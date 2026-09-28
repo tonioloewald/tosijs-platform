@@ -261,6 +261,12 @@ export interface CollectionConfig {
   afterWrite?: (data: any, userRoles: UserRoles) => Promise<void>
   access?: { [key: string]: AccessConfig | undefined }
   cacheLatencySeconds?: number // TTL cache for reads; cached data may be stale up to this many seconds
+  /**
+   * Present on a STORAGE AREA (#1136): a collection whose documents describe
+   * files. Its access rules are the collection's; these are its limits. See
+   * collections/blob.ts.
+   */
+  blob?: { maxBytes: number; contentTypes?: string[] }
 }
 
 export interface CollectionMap {
