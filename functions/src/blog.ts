@@ -12,6 +12,7 @@ import { Response } from 'express'
 import { onPrefetch, PageOptions, PrefetchData } from './prefetch'
 import { currentPage } from './page'
 import { PostSchema, isPublished } from '../shared/post'
+import { firstImage } from './social-meta'
 
 interface BlogConfig {
   prefix: string
@@ -132,10 +133,7 @@ onPrefetch(
       const content = post.content as string | undefined
       // blogConfig is guaranteed to be defined at this point (loaded at start of function)
       options.title = (blogConfig as BlogConfig).prefix + (title || '')
-      options.imageUrl =
-        imageUrl ||
-        content?.match(/<img[^>]+src="([^"]+)"/)?.[1] ||
-        options.imageUrl
+      options.imageUrl = imageUrl || firstImage(content) || options.imageUrl
       options.description = summary || options.description
       options.url = `/blog/${path}`
       options.type = 'article'

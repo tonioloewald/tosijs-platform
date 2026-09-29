@@ -5,6 +5,7 @@ import compression from 'compression'
 import { optionsResponse } from './utilities'
 import { asPublicRequest } from './public-request'
 import { DOCTYPE, elements } from './elements'
+import { absoluteUrl, siteOrigin } from './social-meta'
 
 const compressResponse = compression()
 
@@ -81,6 +82,12 @@ const render = async (
   const merged = await getPrefetchData(req, res, url, options)
   const data = JSON.stringify(merged).replace(/"(\w+)":/g, '$1:')
 
+  // Social previews need absolute URLs, and X shows a card only when asked to.
+  const origin = siteOrigin(req.headers ?? {})
+  const pageUrl = absoluteUrl(options.url || url, origin)
+  const ownImage = Boolean(options.imageUrl)
+  const imageUrl = absoluteUrl(options.imageUrl || pageImage, origin)
+
   return (
     DOCTYPE +
     html(
@@ -91,9 +98,10 @@ const render = async (
         meta({ name: 'description', content: options.description }),
         meta({ property: 'og:title', content: options.title }),
         meta({ property: 'og:description', content: options.description }),
-        meta({ property: 'og:url', content: options.url || url }),
-        meta({ property: 'og:image', content: options.imageUrl || pageImage }),
+        meta({ property: 'og:url', content: pageUrl }),
+        meta({ property: 'og:image', content: imageUrl }),
         meta({ property: 'og:type', content: options.type || 'website' }),
+        meta({ name: 'twitter:card', content: ownImage ? 'summary_large_image' : 'summary' }),
         link({ rel: 'icon', href: '/favicon.ico' }),
         meta({
           name: 'viewport',
