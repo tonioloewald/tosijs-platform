@@ -107,6 +107,7 @@ export const blob = onRequest({}, async (request, response) => {
       case 'stream':
         response.set('Cache-Control', result.cacheControl)
         response.set('Content-Type', result.contentType)
+        response.set(result.headers)
         bucket().file(result.key).createReadStream().on('error', () => {
           if (!response.headersSent) fail(response, 404, 'not-found', 'not found')
         }).pipe(response)

@@ -72,6 +72,7 @@ const cleanup = async () => {
   for (const [area, path] of [
     ['blobtest:public', 'hello.txt'],
     ['blobtest:public', 'moved.txt'],
+    ['blobtest:public', 'x.svg'],
     ['blobtest:private', 'secret.txt'],
   ]) {
     await fetch(blobUrl(area, path), { method: 'DELETE', headers: AUTH }).catch(() => {})
@@ -102,6 +103,16 @@ try {
   const mode = (r) => (r.status === 302 ? 'redirect' : r.status === 200 ? 'stream' : `status ${r.status}`)
   ok('a public file is served to anyone, CACHEABLE', (g1.status === 302 || g1.status === 200) && /public/.test(g1.headers.get('cache-control') ?? ''), `${mode(g1)}, ${g1.headers.get('cache-control')}`)
   ok('…which leads to the actual bytes', (await follow(g1)) === body)
+
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+  await put('blobtest:public', 'x.svg', svg, 'image/svg+xml')
+  const gs = await get('blobtest:public', 'x.svg')
+  ok(
+    'an SVG cannot run script as the site: a redirect leaves the origin, a stream is sandboxed + nosniff',
+    gs.status === 302 ||
+      (gs.status === 200 && (gs.headers.get('content-security-policy') ?? '').startsWith('sandbox') && gs.headers.get('x-content-type-options') === 'nosniff'),
+    `${mode(gs)}, csp=${gs.headers.get('content-security-policy')}`
+  )
 
   const list = await fetch(`${BASE}/docs?p=blobtest:public&c=10`).then((r) => r.json()).catch(() => null)
   const rows = Array.isArray(list) ? list : list?.rows ?? []

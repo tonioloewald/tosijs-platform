@@ -7,7 +7,7 @@ import { createHash } from 'crypto'
 import { ALL, type CollectionMap } from './collections/access'
 import { ROLES, anonymousUser, type UserRoles } from './collections/roles'
 import type { BlobMeta } from './collections/blob'
-import { handleBlob, objectKey, parseBlobRoute, type BlobDeps } from './blob-handler'
+import { deliveryHeaders, handleBlob, objectKey, parseBlobRoute, type BlobDeps } from './blob-handler'
 import type { CommitOutcome } from './commit'
 
 const who = (roles: string[]): UserRoles =>
@@ -180,7 +180,15 @@ describe('GET', () => {
     const { deps } = fakes({ canSign: false })
     await handleBlob(putReq('/blob/blog:public/e.txt', 'x'), deps)
     const r = await handleBlob({ method: 'GET', pathname: '/blob/blog:public/e.txt', userRoles: anonymousUser }, deps)
-    expect(r).toMatchObject({ kind: 'stream', contentType: 'text/plain' })
+    expect(r).toMatchObject({ kind: 'stream', contentType: 'text/plain', headers: { 'X-Content-Type-Options': 'nosniff' } })
+  })
+
+  test('streamed bytes come from the SITE origin: never sniffed, and script-capable types are sandboxed', () => {
+    expect(deliveryHeaders('image/png')).toEqual({ 'X-Content-Type-Options': 'nosniff' })
+    expect(deliveryHeaders('application/pdf')['Content-Security-Policy']).toBeUndefined()
+    for (const t of ['image/svg+xml', 'IMAGE/SVG+XML', 'text/html; charset=utf-8', 'application/xhtml+xml', 'text/xml']) {
+      expect(deliveryHeaders(t)['Content-Security-Policy']).toStartWith('sandbox;')
+    }
   })
 
   test('missing file, bad path, or not an area → the same opaque 404', async () => {

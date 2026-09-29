@@ -70,7 +70,24 @@ export type BlobResponse =
   | { kind: 'json'; status: number; body: Record<string, unknown> }
   | { kind: 'error'; status: number; error: string; message: string; extra?: Record<string, unknown> }
   | { kind: 'redirect'; url: string; cacheControl: string }
-  | { kind: 'stream'; key: string; contentType: string; cacheControl: string }
+  | { kind: 'stream'; key: string; contentType: string; cacheControl: string; headers: Record<string, string> }
+
+/**
+ * Headers for bytes served FROM THIS ORIGIN (the stream fallback, and /blob is
+ * rewritten onto the site's own domain). A redirect lands on the storage host,
+ * a different origin; a stream does not — so an uploaded SVG (image/*) or
+ * anything a browser might sniff as HTML would run script as the site. Never
+ * sniff; and a type that can carry script renders sandboxed: no script, no
+ * same-origin, no network.
+ */
+const SCRIPTABLE = /^(image\/svg\+xml|text\/html|application\/xhtml\+xml|text\/xml|application\/xml)\b/i
+export function deliveryHeaders(contentType: string): Record<string, string> {
+  const headers: Record<string, string> = { 'X-Content-Type-Options': 'nosniff' }
+  if (SCRIPTABLE.test(contentType.trim())) {
+    headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+  }
+  return headers
+}
 
 /** Public files: stable URL; the redirect it answers with may be cached. */
 const PUBLIC_CACHE = 'public, max-age=3000'
@@ -147,7 +164,7 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
       const url = await deps.objects.url(key, ttl)
       return url
         ? { kind: 'redirect', url, cacheControl }
-        : { kind: 'stream', key, contentType: meta.contentType, cacheControl }
+        : { kind: 'stream', key, contentType: meta.contentType, cacheControl, headers: deliveryHeaders(meta.contentType) }
     }
 
     case 'PUT': {
