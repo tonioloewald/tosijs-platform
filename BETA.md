@@ -42,7 +42,15 @@ step below, so prefer the provisioner.)
 
 Two operational things that will bite you otherwise, both learned the hard way:
 
-**Deploy indexes before functions.** `getUserRoles` resolves a first-time
+**Deploying afterwards: `bun run deploy`** (or `bun scripts/deploy.js --alias
+<yours>`). It deploys the WHOLE set in the right order: Firestore rules and
+indexes, then functions, storage rules and hosting. Then it checks from outside
+that every endpoint runs our code, the bucket root can't be listed, and the
+site serves. `firebase deploy --only …` still works, but it deploys only what
+you name, and a release that changes rules and code together (0.3.0 did) must
+ship both.
+
+**Deploy indexes before functions** (`bun run deploy` does). `getUserRoles` resolves a first-time
 sign-in by querying `role.contacts`, which needs a composite index. Without it
 the query throws and **every sign-in 500s for anyone not already in a role
 document** — including, notably, not you, because your own uid is in one.
