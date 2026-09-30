@@ -62,6 +62,11 @@ describe('firebase.json: files served from the site origin are sandboxed by HOST
     expect(csp(rules[i])).toStartWith('sandbox;')
     expect(rules[i].headers.some((h) => h.key === 'X-Content-Type-Options' && h.value === 'nosniff')).toBe(true)
   })
+  test('its CSP is exactly SANDBOX_CSP — one policy, not two drifting copies', async () => {
+    const { SANDBOX_CSP } = await import('../functions/src/blob-handler')
+    const i = rules.findIndex((r) => r.source.includes('blob') && r.source.includes('stored'))
+    expect(csp(rules[i])).toBe(SANDBOX_CSP)
+  })
   test('…and it comes after every site-wide CSP rule, so it wins', () => {
     const i = rules.findIndex((r) => r.source.includes('blob') && r.source.includes('stored'))
     const lastWide = rules.map((r, n) => (r.source === '**' && csp(r) ? n : -1)).reduce((a, b) => Math.max(a, b), -1)

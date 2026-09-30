@@ -393,9 +393,10 @@ What to know:
 - **A content type is exactly one type**, `type/subtype` (parameters like
   `; charset=` are dropped). A list such as `image/png, text/html` is `400`.
 - **Streamed files come from your site's origin**, so they are sent `nosniff`
-  and are **sandboxed by default**: only inert media (common image formats,
-  audio, video, PDF, plain text, JSON) render without a sandbox CSP. An
-  uploaded SVG cannot run script as your site.
+  and served under a **sandbox CSP**: an uploaded SVG cannot run script as your
+  site. Through Hosting, every streamed file is sandboxed (images, media and
+  PDFs still display). Called directly, the function sandboxes all but inert
+  media.
 - **Files are reachable only through `/blob`.** Area objects share the default
   bucket with the legacy folders. Everything else that reads the bucket —
   `storage.rules` for direct client access, and `/stored` — reads only an

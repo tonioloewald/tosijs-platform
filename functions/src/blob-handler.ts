@@ -89,12 +89,22 @@ export type BlobResponse =
  * A denylist of scriptable types was bypassed by a comma-joined type, and
  * misses `+xml` and whatever comes next (0.3.0 review B1).
  */
+/**
+ * THE sandbox policy for files served from the site's origin. firebase.json's
+ * Hosting header rule for /blob and /stored must use this exact string (a
+ * test checks): Hosting replaces a function's CSP, so on the real domain the
+ * Hosting rule is what browsers receive — for EVERY streamed file, inert or
+ * not. This function's type-aware choice below applies only when the function
+ * is called directly. Chrome still opens a sandboxed PDF (checked 2026-09-30).
+ */
+export const SANDBOX_CSP = "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
+
 const INERT = /^(image\/(png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+|application\/pdf|text\/plain|application\/json)$/
 export function deliveryHeaders(contentType: string): Record<string, string> {
   const headers: Record<string, string> = { 'X-Content-Type-Options': 'nosniff' }
   const type = contentType.split(';')[0].trim().toLowerCase()
   if (!isSingleMediaType(contentType) || !INERT.test(type) || /\+xml$/.test(type)) {
-    headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
+    headers['Content-Security-Policy'] = SANDBOX_CSP
   }
   return headers
 }
@@ -277,7 +287,11 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
       // Only now is the old object unreferenced (never when the bytes match:
       // then the old key IS the new key).
       if (previous && previous.sha256 !== d.meta.sha256) {
-        await deps.objects.delete(objectKey(area, path, previous.sha256)).catch(() => undefined)
+        const removal = deps.objects.delete(objectKey(area, path, previous.sha256)).catch(() => undefined)
+        // A non-reader must not be able to TIME the difference between a hit
+        // (no delete) and a miss (a delete): don't wait for it. If it never
+        // completes, the old object is orphaned — cost, never corruption.
+        if (canRead) await removal
       }
       // To a non-reader, every successful write to an existing path is
       // "replaced" — including a re-write of identical bytes, which really was

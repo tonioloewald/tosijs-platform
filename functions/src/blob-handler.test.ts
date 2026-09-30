@@ -406,7 +406,7 @@ describe('0.3.0 review remediation', () => {
     expect((g as { url: string }).url).toContain('type=image/webp')
   })
 
-  test('re-review 2: a non-reader\'s matching PUT does the same work as a miss (no timing tell)', async () => {
+  test('re-review 2: a non-reader\'s matching PUT still uploads (no fast path to time)', async () => {
     const admin = who([ROLES.admin, ROLES.author])
     const { deps, objects, metas } = fakes()
     await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'secret', 'text/plain', admin), deps)
@@ -421,5 +421,29 @@ describe('0.3.0 review remediation', () => {
     // …and the live object survives it: same key, same bytes, still referenced.
     expect(objects.size).toBe(1)
     expect(must(metas.get('lib:dropbox/d.txt')).sha256).toBe(createHash('sha256').update('secret').digest('hex'))
+  })
+
+  test('re-review 3: a non-reader\'s MISS does not wait for the old object\'s delete (no timing tell)', async () => {
+    const admin = who([ROLES.admin, ROLES.author])
+    const { deps } = fakes()
+    await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'secret', 'text/plain', admin), deps)
+    deps.objects.delete = () => new Promise(() => undefined) // never completes
+    const r = await Promise.race([
+      handleBlob(putReq('/blob/lib:dropbox/d.txt', 'guess!'), deps),
+      new Promise((resolve) => setTimeout(() => resolve('waited on the delete'), 200)),
+    ])
+    expect(r).toMatchObject({ status: 200, body: { status: 'replaced' } })
+  })
+
+  test('re-review 3: a READER still waits for the delete (nothing to hide, and the cleanup is reliable)', async () => {
+    const admin = who([ROLES.admin, ROLES.author])
+    const { deps } = fakes()
+    await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'one', 'text/plain', admin), deps)
+    deps.objects.delete = () => new Promise(() => undefined)
+    const r = await Promise.race([
+      handleBlob(putReq('/blob/lib:dropbox/d.txt', 'two', 'text/plain', admin), deps),
+      new Promise((resolve) => setTimeout(() => resolve('waited on the delete'), 200)),
+    ])
+    expect(r).toBe('waited on the delete')
   })
 })

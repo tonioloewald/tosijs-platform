@@ -1,26 +1,24 @@
 /**
- * # /stored endpoint
+ * # /stored endpoint — the LEGACY file reader
  *
- * Redirects to signed URLs for files in Firebase Cloud Storage.
+ * Serves files from the legacy folders of the default bucket (`blog/`,
+ * `public/`, `users/` — LEGACY_FOLDERS in legacy-storage.ts) by redirecting to
+ * a signed URL, or streaming when the host cannot sign.
  *
- * ## Usage
- * - GET /stored/blog/spaceship.webp - redirects to signed URL for gs://bucket/blog/spaceship.webp
- * - GET /stored/images/photo.jpg - redirects to signed URL for gs://bucket/images/photo.jpg
+ * - GET /stored/blog/spaceship.webp → gs://<default bucket>/blog/spaceship.webp
+ * - GET /stored/public/logo.png     → gs://<default bucket>/public/logo.png
  *
- * This allows embedding storage files directly in HTML without needing
- * to use the storage API to get signed URLs.
+ * ## Access control — read before changing
+ * This uses the ADMIN SDK, so storage.rules never applies to it. It shares the
+ * bucket with /blob's storage areas, which have their own access rules and are
+ * served only by /blob. So /stored reads ONLY the legacy folders — an
+ * allowlist, never "everything but areas" (0.3.0 re-review 2). To add a
+ * folder, change legacy-storage.ts AND storage.rules; a test checks they agree.
  *
- * ## Caching Strategy
- * - Signed URLs expire after 1 hour
- * - Response includes Cache-Control header matching the URL expiration
- * - Browsers/CDNs cache the redirect, avoiding repeated function calls
- *
- * ## Emulator Support
- * - The Storage emulator doesn't support getSignedUrl()
- * - Falls back to streaming the file directly when signed URL fails
- *
- * ## Access Control
- * Files are served based on storage.rules - currently all files are publicly readable.
+ * ## Delivery
+ * - Signed URLs expire after 1 hour; the redirect's Cache-Control matches.
+ * - Without signing (emulator, or no signBlob permission) it streams, from the
+ *   SITE's origin — so firebase.json sandboxes /stored/** (see SANDBOX_CSP).
  */
 
 import { deliveryHeaders } from './blob-handler'
