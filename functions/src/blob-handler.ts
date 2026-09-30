@@ -47,8 +47,11 @@ export interface ObjectStore {
   put(key: string, bytes: Uint8Array, contentType: string): Promise<void>
   delete(key: string): Promise<void>
   copy(from: string, to: string): Promise<void>
-  /** A URL for the object, or null when this substrate cannot sign (emulator). */
-  url(key: string, ttlSeconds: number): Promise<string | null>
+  /**
+   * A URL for the object that serves it as `contentType`, or null when this
+   * substrate cannot sign (emulator, or no signBlob permission).
+   */
+  url(key: string, ttlSeconds: number, contentType: string): Promise<string | null>
 }
 
 export interface BlobDeps {
@@ -129,9 +132,11 @@ function refused(r: BlobRefusal, deps: BlobDeps, userRoles: UserRoles): BlobResp
 
 /**
  * Roll back an object this request wrote — unless the committed metadata
- * references it. Keys are content-addressed, so the same bytes re-PUT with a
- * new type, or two concurrent PUTs of the same bytes, write the key that is
- * ALREADY live; deleting it blindly left metadata with no file (0.3.0 review M1).
+ * references it. Keys are content-addressed, so a re-PUT of the live bytes is
+ * never rolled back at all (the caller skips it); this covers a NEW object.
+ * NARROWED, not closed: two concurrent PUTs of the same new bytes, one refused
+ * while the other's commit is in flight, can still lose the object — a
+ * check-then-delete outside the transaction (tracked in TODO.md).
  */
 async function releaseIfUnreferenced(deps: BlobDeps, docPath: string, key: string, sha256: string) {
   const current = await deps.getMeta(docPath).catch(() => undefined)
@@ -196,7 +201,9 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
       const key = objectKey(area, path, meta.sha256)
       const ttl = d.status === 'public' ? PUBLIC_SIGN_TTL : d.ttlSeconds
       const isPublic = d.status === 'public'
-      const url = await deps.objects.url(key, ttl)
+      // The signed URL forces the METADATA's (validated, single) type: the
+      // object's own type can lag behind a type-only change.
+      const url = await deps.objects.url(key, ttl, meta.contentType)
       return url
         ? { kind: 'redirect', url, cacheControl: isPublic ? PUBLIC_REDIRECT_CACHE : PRIVATE_CACHE }
         : {
@@ -225,37 +232,51 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
 
       const docPath = metaPath(area, path)
       const previous = await deps.getMeta(docPath)
-      if (previous && previous.sha256 === d.meta.sha256 && previous.contentType === d.meta.contentType) {
-        // "unchanged" confirms a guessed body matches the stored file — only
-        // say so to a caller who may read it (0.3.0 review M3).
-        const canRead = (await decideRead(collections, area, previous, req.userRoles)).status !== 'refused'
-        return {
-          kind: 'json',
-          status: 200,
-          body: { status: canRead ? 'unchanged' : 'replaced', path, bytes: d.meta.bytes, sha256 },
-        }
-      }
-      if (previous && config?.immutable) {
+
+      // THE RULE for everything below (0.3.0 re-review G1): a caller who may
+      // not READ the file gets a response that does not depend on what is
+      // stored — otherwise the answer to a PUT confirms a guessed body. So a
+      // non-reader never sees "unchanged", and in an immutable area gets the
+      // same 409 whether its bytes match or not. Existence is not hidden from
+      // a writer (it may write there), contents are.
+      const canRead = previous
+        ? (await decideRead(collections, area, previous, req.userRoles)).status !== 'refused'
+        : true
+      const identical =
+        previous !== null && previous.sha256 === d.meta.sha256 && previous.contentType === d.meta.contentType
+
+      if (previous && config?.immutable && !(canRead && identical)) {
         return { kind: 'error', status: 409, error: 'immutable', message: 'this area is immutable: a stored file cannot be replaced' }
       }
+      if (canRead && identical) {
+        return { kind: 'json', status: 200, body: { status: 'unchanged', path, bytes: d.meta.bytes, sha256 } }
+      }
 
+      // Keys are content-addressed: if these bytes are already stored here,
+      // the object exists and is LIVE — never overwrite or roll it back (M1).
+      // A changed type is carried by the metadata; delivery sends the
+      // metadata's type, not the object's.
+      const reuse = previous?.sha256 === d.meta.sha256
       const key = objectKey(area, path, d.meta.sha256)
-      await deps.objects.put(key, body, d.meta.contentType)
+      if (!reuse) await deps.objects.put(key, body, d.meta.contentType)
       let outcome: CommitOutcome
       try {
         outcome = await deps.commitMeta(docPath, d.meta, collections, req.userRoles)
       } catch (e) {
-        await releaseIfUnreferenced(deps, docPath, key, d.meta.sha256)
+        if (!reuse) await releaseIfUnreferenced(deps, docPath, key, d.meta.sha256)
         throw e
       }
       if (outcome.status === 'refused') {
-        await releaseIfUnreferenced(deps, docPath, key, d.meta.sha256)
+        if (!reuse) await releaseIfUnreferenced(deps, docPath, key, d.meta.sha256)
         return { kind: 'error', status: commitStatus(outcome.refusal.reason), error: outcome.refusal.reason, message: outcome.refusal.message }
       }
       // Only now is the old object unreferenced.
-      if (previous && previous.sha256 !== d.meta.sha256) {
+      if (previous && !reuse) {
         await deps.objects.delete(objectKey(area, path, previous.sha256)).catch(() => undefined)
       }
+      // To a non-reader, every successful write to an existing path is
+      // "replaced" — including a re-write of identical bytes, which really was
+      // committed again (above), so the answer is true, not a mask.
       return {
         kind: 'json',
         status: 200,

@@ -52,12 +52,19 @@ service firebase.storage {
     // if any matching rule allows it — so this default must exclude a
     // namespaced first segment itself, or anyone could list and download a
     // PRIVATE area directly (0.3.0 review B2).
+    //
+    // Why a test on the FIRST segment is enough: the Storage API refuses a
+    // list prefix that is non-empty and does not end in "/", so a listing
+    // cannot straddle a namespaced folder — except the ROOT listing (empty
+    // prefix), which is recursive and would name every object, private areas
+    // included. So top-level files may be fetched, and the root may not be
+    // listed (0.3.0 re-review G2).
     match /{first}/{rest=**} {
       allow read: if !first.matches('.*:.*');
       allow write: if false;
     }
     match /{file} {
-      allow read: if !file.matches('.*:.*');
+      allow get: if !file.matches('.*:.*');
       allow write: if false;
     }
   }

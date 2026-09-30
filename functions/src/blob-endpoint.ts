@@ -49,11 +49,11 @@ const deps: BlobDeps = {
     copy: async (from, to) => {
       await bucket().file(from).copy(bucket().file(to))
     },
-    url: async (key, ttlSeconds) => {
+    url: async (key, ttlSeconds, contentType) => {
       try {
         const [url] = await bucket()
           .file(key)
-          .getSignedUrl({ action: 'read', expires: Date.now() + ttlSeconds * 1000 })
+          .getSignedUrl({ action: 'read', expires: Date.now() + ttlSeconds * 1000, responseType: contentType })
         return url
       } catch (e) {
         // No signing here — the emulator, or a service account without

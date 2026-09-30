@@ -21,12 +21,18 @@ File storage: **storage areas** and the `/blob` endpoint (board #1136).
     sandboxed unless they are inert media.
   - A move needs read access to its source, and never overwrites its
     destination, even under concurrency.
+  - To a caller who may write but not read, a PUT's answer never depends on
+    the stored file (no `unchanged`; the same `409` in an immutable area).
+  - Cost to know: a public file fetched through a redirect costs one function
+    call per view (the redirect is uncached). Streamed files cache for 300s.
 - **Error codes** `too-large` (413) and `unsupported-type` (415). New codes
   break exhaustive `switch`es on `error`, which is why this is a minor release.
 - **Kernel (npm):** the storage-area decisions are exported: `decideRead`,
   `decidePut`, `decideDelete`, `decideMove`, `isBlobStore`, `isPublicArea`,
   `validateBlobPath`, `contentTypeAllowed`, `blobLimitsProblems`,
-  `BLOB_META_SCHEMA`, and friends. Provisional through 0.3.x.
+  `BLOB_META_SCHEMA`, and friends. Provisional through 0.3.x. **`decideRead`
+  and `decideMove` are async** (they may evaluate a visibility filter);
+  `await` them — `decideMove(...).status` on the bare promise is `undefined`.
 - The install response lists a `blob` **capability** under `superseded`: it
   grants nothing; declare a storage area instead. It is still accepted.
 
@@ -43,6 +49,10 @@ File storage: **storage areas** and the `/blob` endpoint (board #1136).
   The blog's prefetch handler read the resolved page from a module global that
   a concurrently running handler set; it only worked when a warm instance still
   held a previous request's page. The page is now resolved once per request.
+- **`/stored` served files from the site's origin with no protection.** Its
+  stream fallback now sends `nosniff` and sandboxes anything but inert media,
+  the same rule as `/blob`. (`blog/` is writable by any content role straight
+  through the Storage SDK, so an SVG there could run script as the site.)
 - **Social previews:** `og:url` and `og:image` are absolute; a post's fallback
   image finds Markdown images, not only `<img>`; `twitter:card` is set.
 
@@ -51,7 +61,8 @@ File storage: **storage areas** and the `/blob` endpoint (board #1136).
 **Deploy `storage.rules` too** (`firebase deploy --only storage`). Its default
 rule granted public read on everything, which would have exposed PRIVATE
 storage areas directly through Cloud Storage; it now excludes any namespaced
-first segment. Do this before installing a manifest that declares an area.
+first segment, and the bucket root can no longer be listed (top-level files can
+still be fetched). Do this before installing a manifest that declares an area.
 
 Deploy the functions (the new one is `blob`), and add
 `{"source": "/blob/**", "function": "blob"}` to `firebase.json`'s hosting

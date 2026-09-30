@@ -33,6 +33,7 @@ const roleDoc = (out.match(/SANDBOX_ROLE_DOC=(\S+)/) ?? [])[1]
 const AUTH = { Authorization: `Bearer ${tok}` }
 
 let fails = 0
+let deliveryPath
 let n = 0
 const ok = (label, cond, detail = '') => {
   n++
@@ -104,6 +105,7 @@ try {
   // A redirect names a hash-specific object a replace deletes, so it must not
   // be cached (review M2); streamed bytes are the file itself and may be.
   const cc1 = g1.headers.get('cache-control') ?? ''
+  deliveryPath = mode(g1)
   ok(
     'a public file is served to anyone — a redirect uncached, a stream cacheable',
     (g1.status === 302 && cc1 === 'no-cache') || (g1.status === 200 && /public/.test(cc1)),
@@ -153,13 +155,28 @@ try {
   const bypass = []
   for (const bucket of [`${projectId}.firebasestorage.app`, `${projectId}.appspot.com`]) {
     const base = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o`
-    const l = await fetch(`${base}?prefix=${encodeURIComponent('blobtest:private/')}`)
-    const g = await fetch(`${base}/${encodeURIComponent(secretKey)}?alt=media`)
-    bypass.push({ bucket, list: l.status, get: g.status, leaked: g.status === 200 || (l.status === 200 && JSON.stringify(await l.json().catch(() => ({}))).includes('secret')) })
+    // The area's own prefix, the object itself, and the ROOT — recursive, and
+    // with a delimiter (which would name the area folders) — re-review G2.
+    const probes = {
+      list: `${base}?prefix=${encodeURIComponent('blobtest:private/')}`,
+      get: `${base}/${encodeURIComponent(secretKey)}?alt=media`,
+      root: `${base}?prefix=`,
+      rootDelimited: `${base}?prefix=&delimiter=${encodeURIComponent('/')}`,
+    }
+    const row = { bucket }
+    let leaked = false
+    for (const [name, url] of Object.entries(probes)) {
+      const r = await fetch(url)
+      const text = await r.text()
+      row[name] = r.status
+      if (r.status === 200 && (name === 'get' || text.includes('blobtest:'))) leaked = true
+    }
+    row.leaked = leaked
+    bypass.push(row)
   }
   ok(
-    'a private area cannot be listed or downloaded directly from Cloud Storage',
-    bypass.every((d) => !d.leaked) && bypass.some((d) => d.list === 403 && d.get === 403),
+    'DIRECT Cloud Storage (bypassing /blob): a private area cannot be listed, found from the root, or downloaded',
+    bypass.every((d) => !d.leaked) && bypass.some((d) => d.list === 403 && d.get === 403 && d.root === 403),
     JSON.stringify(bypass)
   )
 
@@ -192,5 +209,6 @@ try {
   }
 }
 
+console.log(`delivery path exercised: ${deliveryPath ?? 'unknown'} (via ${BASE} — the function URL, NOT the Hosting CDN)`)
 console.log(fails ? `\n${fails} of ${n} FAILED\n` : `\nall ${n} checks passed\n`)
 process.exit(fails ? 1 : 0)

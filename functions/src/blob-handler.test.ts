@@ -27,6 +27,12 @@ const areas: CollectionMap = {
     blob: { maxBytes: 1000 },
     access: { [ROLES.author]: { write: ALL }, [ROLES.admin]: { read: ALL, write: ALL } },
   },
+  // Append-only drop box: authors deposit, only admins read.
+  'log:inbox': {
+    blob: { maxBytes: 1000 },
+    immutable: true,
+    access: { [ROLES.author]: { write: ALL }, [ROLES.admin]: { read: ALL, write: ALL } },
+  },
   'log:frozen': {
     blob: { maxBytes: 1000 },
     immutable: true,
@@ -60,7 +66,7 @@ function fakes(opts: { canSign?: boolean; commitRefuses?: boolean; commitThrows?
         if (!o) throw new Error(`no ${from}`)
         objects.set(to, o)
       },
-      url: async (k, ttl) => (opts.canSign === false ? null : `https://signed/${k}?ttl=${ttl}`),
+      url: async (k, ttl, type) => (opts.canSign === false ? null : `https://signed/${k}?ttl=${ttl}&type=${type}`),
     },
     sha256: (b) => createHash('sha256').update(b).digest('hex'),
     isPrivileged: (r) => r.roles.includes(ROLES.admin as never),
@@ -356,5 +362,47 @@ describe('0.3.0 review remediation', () => {
     const r = await handleBlob({ method: 'GET', pathname: '/blob/blog:public/%E0', userRoles: anonymousUser }, deps)
     expect(r).toMatchObject({ status: 400 })
   })
-})
 
+  test('G1 — THE RULE: to a caller who cannot read, a PUT answers the same whether its bytes match or not', async () => {
+    const admin = who([ROLES.admin, ROLES.author])
+    for (const area of ['log:inbox', 'lib:dropbox']) {
+      const { deps } = fakes()
+      await handleBlob(putReq(`/blob/${area}/d.txt`, 'secret', 'text/plain', admin), deps)
+      const match = await handleBlob(putReq(`/blob/${area}/d.txt`, 'secret'), deps)
+      // Same length: the reply echoes the caller's OWN size and hash, never the stored file's.
+      const miss = await handleBlob(putReq(`/blob/${area}/d.txt`, 'secreT'), deps)
+      const strip = (r: unknown) => {
+        const x = JSON.parse(JSON.stringify(r))
+        if (x.body) delete x.body.sha256
+        return x
+      }
+      expect(strip(match)).toEqual(strip(miss))
+    }
+  })
+
+  test('G1: a reader still gets "unchanged", in an immutable area too', async () => {
+    const admin = who([ROLES.admin, ROLES.author])
+    const { deps } = fakes()
+    await handleBlob(putReq('/blob/log:inbox/d.txt', 'x', 'text/plain', admin), deps)
+    expect(await handleBlob(putReq('/blob/log:inbox/d.txt', 'x', 'text/plain', admin), deps)).toMatchObject({ body: { status: 'unchanged' } })
+    expect(await handleBlob(putReq('/blob/log:inbox/d.txt', 'y', 'text/plain', admin), deps)).toMatchObject({ status: 409 })
+  })
+
+  test('M1: same bytes with a new type never rewrites the live object; delivery uses the metadata type', async () => {
+    const { deps, objects, metas } = fakes()
+    await handleBlob(putReq('/blob/blog:public/a.png', 'img', 'image/png'), deps)
+    let puts = 0
+    const realPut = deps.objects.put
+    deps.objects.put = async (...a) => {
+      puts++
+      return realPut(...a)
+    }
+    const r = await handleBlob(putReq('/blob/blog:public/a.png', 'img', 'image/webp'), deps)
+    expect(r).toMatchObject({ body: { status: 'replaced' } })
+    expect(puts).toBe(0)
+    expect(objects.size).toBe(1)
+    expect(must(metas.get('blog:public/a.png')).contentType).toBe('image/webp')
+    const g = await handleBlob({ method: 'GET', pathname: '/blob/blog:public/a.png', userRoles: anonymousUser }, deps)
+    expect((g as { url: string }).url).toContain('type=image/webp')
+  })
+})

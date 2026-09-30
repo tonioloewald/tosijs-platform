@@ -23,6 +23,7 @@
  * Files are served based on storage.rules - currently all files are publicly readable.
  */
 
+import { deliveryHeaders } from './blob-handler'
 import { onRequest } from 'firebase-functions/v2/https'
 import * as admin from 'firebase-admin'
 
@@ -103,11 +104,18 @@ export const stored = onRequest({}, async (req, res) => {
       res.set('Content-Type', contentType)
       res.set('Cache-Control', 'public, max-age=3600')
       res.set('Access-Control-Allow-Origin', '*')
+      // Served from the SITE's origin (the /stored/** rewrite): never sniffed,
+      // and anything but inert media is sandboxed — the same rule as /blob
+      // (0.3.0 re-review: this was B1's twin; blog/ is writable by any
+      // content role straight through the Storage SDK).
+      res.set(deliveryHeaders(contentType))
 
       const stream = file.createReadStream()
       stream.on('error', () => {
         if (!res.headersSent) {
           res.status(500).send('Error reading file')
+        } else {
+          res.destroy()
         }
       })
       stream.pipe(res)
