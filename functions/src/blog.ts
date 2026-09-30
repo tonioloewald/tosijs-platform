@@ -10,7 +10,7 @@ import { getRecord, setRecord, AuthenticatedRequest } from './utilities'
 import { Response } from 'express'
 
 import { onPrefetch, PageOptions, PrefetchData } from './prefetch'
-import { currentPage } from './page'
+import { resolvePage } from './page'
 import { PostSchema, isPublished } from '../shared/post'
 import { firstImage } from './social-meta'
 
@@ -56,7 +56,8 @@ onPrefetch(
     options: PageOptions
   ): Promise<PrefetchData> => {
     // Only prefetch blog data if on the blog page or configured to always prefetch
-    const isOnBlogPage = currentPage?.path === 'blog'
+    const { page } = await resolvePage(req, res, url)
+    const isOnBlogPage = page?.path === 'blog'
     if (!config.alwaysPrefetchBlog && !isOnBlogPage) {
       return {}
     }
