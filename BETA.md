@@ -386,12 +386,20 @@ What to know:
   bytes streamed by the function. Both are correct; which one you get depends
   on the host. Signing needs the functions service account to hold "Service
   Account Token Creator" on itself; without it the host streams, and logs once
-  that it is doing so. Public files are cacheable (`public, max-age=3000`);
-  private ones are `private, no-store`, and a signed link to one lives for
-  five minutes.
-- **Streamed files come from your site's origin**, so they are sent `nosniff`,
-  and SVG, HTML and XML render under a sandbox CSP: an uploaded SVG cannot run
-  script as your site.
+  that it is doing so. A redirect is never cached (`no-cache`): it names
+  one version of the file, which a replace deletes. Streamed public files cache
+  for five minutes (`public, max-age=300`); private ones are
+  `private, no-store`, and a signed link to one lives for five minutes.
+- **A content type is exactly one type**, `type/subtype` (parameters like
+  `; charset=` are dropped). A list such as `image/png, text/html` is `400`.
+- **Streamed files come from your site's origin**, so they are sent `nosniff`
+  and are **sandboxed by default**: only inert media (common image formats,
+  audio, video, PDF, plain text, JSON) render without a sandbox CSP. An
+  uploaded SVG cannot run script as your site.
+- **Files are reachable only through `/blob`.** Area objects are stored under
+  `<namespace>:<area>/…` in the default bucket; the host's `storage.rules` must
+  not grant direct reads there (this repo's rules exclude any namespaced first
+  segment). Deploy `storage.rules` with the functions.
 - **Denials are opaque**, as everywhere: a private file you cannot read is a
   `404`, the same as a missing one.
 - **Hosting:** a host serving `/blob` from its own domain needs the rewrite

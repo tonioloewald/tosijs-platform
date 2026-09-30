@@ -15,9 +15,12 @@ File storage: **storage areas** and the `/blob` endpoint (board #1136).
   - **Consistency:** bytes live under a content-hash key, and metadata is
     committed before an old object is removed, so a metadata document always
     means its file exists. A crash can orphan an object, never corrupt one.
-  - Delivery is a redirect to a signed URL when the host can sign, otherwise
-    the bytes are streamed. Streamed files are `nosniff`, and SVG, HTML and XML
-    render under a sandbox CSP.
+  - Delivery is a redirect to a signed URL when the host can sign (never
+    cached), otherwise the bytes are streamed (public ones cache for 300s).
+    A content type must be exactly one type. Streamed files are `nosniff` and
+    sandboxed unless they are inert media.
+  - A move needs read access to its source, and never overwrites its
+    destination, even under concurrency.
 - **Error codes** `too-large` (413) and `unsupported-type` (415). New codes
   break exhaustive `switch`es on `error`, which is why this is a minor release.
 - **Kernel (npm):** the storage-area decisions are exported: `decideRead`,
@@ -44,6 +47,11 @@ File storage: **storage areas** and the `/blob` endpoint (board #1136).
   image finds Markdown images, not only `<img>`; `twitter:card` is set.
 
 ### Upgrading a host
+
+**Deploy `storage.rules` too** (`firebase deploy --only storage`). Its default
+rule granted public read on everything, which would have exposed PRIVATE
+storage areas directly through Cloud Storage; it now excludes any namespaced
+first segment. Do this before installing a manifest that declares an area.
 
 Deploy the functions (the new one is `blob`), and add
 `{"source": "/blob/**", "function": "blob"}` to `firebase.json`'s hosting
