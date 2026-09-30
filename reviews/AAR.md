@@ -34,3 +34,10 @@ Newest first. Facts, not analysis (tosijs-coding-practices releasing.md step 10)
   fails reconciliation. Both are now filed on or fixed in tosijs-coding-practices.
 - Cycle: the publish-flow review blocked on version metadata, which reappeared as the consumer
   review's docs blocker in the same files. Remediated once; the re-review found 0 blockers.
+
+## 0.3.0 — 2026-09-30
+
+- **What shipped:** storage areas (`/blob`), Node 22, SSR/social-preview fixes. `latest` on npm; verify-only run green; deployed to loewald.com (functions, storage.rules, hosting).
+- **What went wrong:** the first review BLOCKed on two security holes in new code, and two remediations each BLOCKed again (loop flag). Each round re-proved "areas are unreachable" for the readers in view: `/stored` (Admin SDK) was missed until an inventory of every bucket reader was made. Separately, Hosting silently replaced function-set CSP headers. That was found only by testing through Hosting, not the function URL.
+- **What to keep:** inventory every reader/writer before claiming an invariant holds as a class; allowlists over denylists for legacy readers; live checks must name the path they exercise (function URL vs Hosting); a positive control makes a 404 meaningful.
+- **Process note:** the staged publish's approval landed after the 60-minute window; verify_only completed it.
