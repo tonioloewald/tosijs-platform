@@ -8,10 +8,10 @@ without a cloud.
 npm install service-compris
 ```
 
-> **0.2.1, 2026-09-26.** Two things live here. The **npm package** is the pure decision kernel:
-> RBAC, a write pipeline and role resolution, with no I/O and no vendor. The **repository** is a
+> **0.3.0, 2026-09-30.** Two things live here. The **npm package** is the pure decision kernel:
+> RBAC, a write pipeline, role resolution and file-storage decisions, with no I/O and no vendor. The **repository** is a
 > host you can deploy onto a blank Firebase project, claim without anyone handing you a secret,
-> install a library onto from a JSON manifest, and give an agent its own scoped identity. Two
+> install a library onto from a JSON manifest, store files in, and give an agent its own scoped identity. Two
 > production hosts run it: tosijs-virta's and loewald.com. Start at **[BETA.md](BETA.md)** (the
 > host walkthrough, including what is deliberately not ready yet). Upgrading from 0.1.0: see the
 > [CHANGELOG](CHANGELOG.md). Orientation for agents: [llms.txt](llms.txt).

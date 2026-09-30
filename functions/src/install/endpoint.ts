@@ -48,6 +48,7 @@ import {
 } from './apply'
 import {
   unenforcedCapabilities,
+  supersededCapabilities,
   type Manifest,
   type CapabilityDeclaration,
 } from './manifest'
@@ -121,6 +122,12 @@ async function commit(records: InstallRecords): Promise<void> {
   batch.set(db().collection(LOG).doc(records.log.id), records.log.data)
   bumpEpochIn(batch)
   await batch.commit()
+}
+
+/** Only present when there is something to say, so existing responses are unchanged. */
+const superseded = (m: Manifest) => {
+  const list = supersededCapabilities(m)
+  return list.length ? { superseded: list } : {}
 }
 
 export const install = onRequest({}, async (request, response: Response) => {
@@ -267,6 +274,7 @@ export const install = onRequest({}, async (request, response: Response) => {
             // approval prompt that overstates what it is asking about is how
             // people learn to stop reading them.
             unenforced: unenforcedCapabilities(manifest as Manifest),
+            ...superseded(manifest as Manifest),
             note:
               'nothing changed. re-POST with `approving` set to exactly these ' +
               'capabilities to apply the upgrade.',
@@ -282,6 +290,7 @@ export const install = onRequest({}, async (request, response: Response) => {
           name,
           version: (manifest as Manifest).version,
           unenforced: unenforcedCapabilities(manifest as Manifest),
+          ...superseded(manifest as Manifest),
         })
         return
       }

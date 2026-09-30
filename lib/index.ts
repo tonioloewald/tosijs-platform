@@ -23,6 +23,10 @@
  *   field-map straining, capability-token caveats that narrow every grant, and a
  *   fail-closed rule for write restrictions the write path cannot enforce.
  * - **roles** — the role vocabulary and the `UserRoles` shape.
+ * - **storage areas** (0.3.0) — the decisions behind `/blob`: whether a caller
+ *   may read (public, signed, or refused), upload, delete or move a file; path
+ *   and content-type rules; the file-metadata schema. The host measures the
+ *   bytes and moves them; these decide.
  *
  * Some `CollectionConfig` fields are for the HOST, not the kernel: `seq` is
  * assigned by the host inside its commit transaction; `afterWrite` runs after
@@ -32,12 +36,16 @@
  * Everything is dependency-injected, so it runs in a test with no emulator, no
  * network and no clock.
  *
- * ## Stability (0.2.x)
+ * ## Stability (0.2.x, 0.3.x)
  *
  * Settled, and changed within 0.2.x only to fix bugs: the exports below, the
  * `WriteOutcome` shape and its rejection reasons, the lattice-join semantics of
  * `getMethodAccess`, and the role vocabulary. A NEW rejection reason is a minor
  * release — it breaks exhaustive `switch`es, so it will be announced.
+ *
+ * New in 0.3.0 and provisional through 0.3.x: the storage-area decisions. Their
+ * wire behaviour (BETA.md "Store files") is settled; the function shapes may
+ * still move.
  *
  * Still provisional, and each will change this API when it lands:
  * `isWriteAllowed` (the monotonicity property depends on it) and schema-valued
@@ -86,3 +94,27 @@ export {
   type UserContact,
   type UserRoles,
 } from '../functions/src/collections/roles.js'
+
+export {
+  BLOB_META_SCHEMA,
+  MAX_BLOB_PATH,
+  SIGNED_TTL_SECONDS,
+  blobDocId,
+  blobLimitsProblems,
+  blobPathFromDocId,
+  contentTypeAllowed,
+  decideDelete,
+  decideMove,
+  decidePut,
+  decideRead,
+  isBlobStore,
+  isPublicArea,
+  validateBlobPath,
+  type BlobLimits,
+  type BlobMeta,
+  type BlobRefusal,
+  type DeleteDecision,
+  type PutDecision,
+  type PutRequest,
+  type ReadDecision,
+} from '../functions/src/collections/blob.js'

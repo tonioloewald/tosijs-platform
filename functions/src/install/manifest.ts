@@ -616,6 +616,28 @@ export function validateManifest(
  * declaring its real needs ahead of the host supporting them. But the human
  * approving must not be told they are approving a live power.
  */
+/**
+ * Capability kinds that a real feature has replaced, with what to use instead.
+ * A `blob` capability was the placeholder shape for file storage; storage is
+ * now a COLLECTION with `blob` limits (collections/blob.ts). The capability is
+ * still accepted — refusing it would break manifests that declared it ahead of
+ * time — but it grants nothing, so the install response says so and points at
+ * the real thing.
+ */
+export const SUPERSEDED_CAPABILITY_KINDS: Record<string, string> = {
+  blob:
+    'a blob capability grants nothing; declare a storage area instead — a ' +
+    'collection with `blob: {maxBytes, contentTypes?}` (BETA.md "Store files")',
+}
+
+export function supersededCapabilities(
+  manifest: Manifest
+): Array<{ capability: string; use: string }> {
+  return Object.entries(manifest.capabilities ?? {})
+    .filter(([, c]) => c.kind in SUPERSEDED_CAPABILITY_KINDS)
+    .map(([capability, c]) => ({ capability, use: SUPERSEDED_CAPABILITY_KINDS[c.kind] }))
+}
+
 export function unenforcedCapabilities(manifest: Manifest): string[] {
   return Object.entries(manifest.capabilities ?? {})
     .filter(([, c]) => !ENFORCED_CAPABILITY_KINDS.includes(c.kind))

@@ -332,6 +332,78 @@ names the document in `p`, and nothing in the batch is written.
 
 ---
 
+## 5b. Store files
+
+A **storage area** is a collection whose documents describe files. Declare one
+in your manifest like any collection, with `blob` limits instead of a schema
+(the schema defaults to the file-metadata schema):
+
+```json
+"virta:files": {
+  "blob": { "maxBytes": 10485760, "contentTypes": ["image/*", "application/pdf"] },
+  "access": [
+    { "role": "public", "read": "ALL", "list": "ALL" },
+    { "role": "author", "write": "ALL" }
+  ]
+}
+```
+
+The area's access rules are the file's access rules: `read` to fetch a file,
+`list` to list them, `write` to upload, replace, move or delete. **Public vs
+private is not a setting; it is derived.** An area where `public` has
+unconditional `read` is public; anything else is private.
+
+```bash
+# upload (or replace) — the body is the file; Content-Type is required
+curl -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: image/png' \
+  --data-binary @logo.png '.../blob/virta:files/brand/logo.png'
+# → { "status": "stored", "path": "brand/logo.png", "bytes": 5120, "sha256": "…" }
+
+curl '.../blob/virta:files/brand/logo.png'                     # fetch
+curl -X DELETE -H "Authorization: Bearer $TOKEN" '.../blob/virta:files/brand/logo.png'
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"op":"move","from":{"area":"virta:files","path":"a.png"},"to":{"area":"virta:files","path":"b.png"}}' \
+  .../blob
+
+curl '.../docs?p=virta:files&c=50'                              # list: the metadata documents
+```
+
+What to know:
+
+- **Size and hash are measured by the server**, never taken from the client.
+  Re-uploading identical bytes returns `unchanged`; changed bytes return
+  `replaced`. A move never overwrites: an occupied destination is `403 exists`.
+- **Metadata is written only through `/blob`.** A `/doc` or `/docs` write to a
+  storage area is `403 refused`, so a metadata document always means the file
+  exists. Each one carries `_by` provenance like any document.
+- **Paths** are `/`-separated segments of letters, digits, `.`, `_` and `-`,
+  each starting with a letter or digit, 512 characters at most. No spaces.
+- **Limits:** `413 too-large` over the area's `maxBytes`, or over the endpoint's
+  own 25 MB ceiling, which no area can raise. `415 unsupported-type` outside
+  `contentTypes`. The type may be exact (`application/pdf`) or a family
+  (`image/*`). Omit `contentTypes` to allow any.
+- **Delivery.** A fetch is either a `302` to a signed Cloud Storage URL or the
+  bytes streamed by the function. Both are correct; which one you get depends
+  on the host. Signing needs the functions service account to hold "Service
+  Account Token Creator" on itself; without it the host streams, and logs once
+  that it is doing so. Public files are cacheable (`public, max-age=3000`);
+  private ones are `private, no-store`, and a signed link to one lives for
+  five minutes.
+- **Streamed files come from your site's origin**, so they are sent `nosniff`,
+  and SVG, HTML and XML render under a sandbox CSP: an uploaded SVG cannot run
+  script as your site.
+- **Denials are opaque**, as everywhere: a private file you cannot read is a
+  `404`, the same as a missing one.
+- **Hosting:** a host serving `/blob` from its own domain needs the rewrite
+  `{"source": "/blob/**", "function": "blob"}` in `firebase.json`, **before**
+  any catch-all rewrite.
+
+An area can be `immutable` (files cannot be replaced, moved out or deleted:
+`409 immutable`). Whether an area stores files is fixed at install: an upgrade
+cannot turn a collection into a storage area or back.
+
+---
+
 ## 6. Give an agent its own identity
 
 ```bash
@@ -373,7 +445,8 @@ Said plainly, because a release that oversells itself wastes your time:
 
 | | |
 |---|---|
-| **Capability enforcement** | The manifest *shape* for capabilities is settled and validated (`blob`, `email`, `sms`, `outbound`, `turn`), but **nothing consults them yet**. The install response reports `unenforced: [...]` so you are never told you have a power you do not. See #11. |
+| **Capability enforcement** | The manifest *shape* for capabilities is settled and validated (`blob`, `email`, `sms`, `outbound`, `turn`), but **nothing consults them yet**. The install response reports `unenforced: [...]` so you are never told you have a power you do not. See #11. A `blob` capability is **superseded**: file storage is a storage area (see [Store files](#5b-store-files)), and the install response lists any `blob` capability under `superseded` with that pointer. |
+| **Large files** | Uploads pass through a Cloud Function, so 25 MB is the ceiling. Signed direct uploads to Cloud Storage for larger files do not exist yet. |
 | **Sub-collections in manifests** | A manifest declares one segment. `virta:task/comment` works at runtime but cannot be declared. |
 | **Composite (tuple) uniqueness** | Not supported. `unique: ["a", "b"]` makes each field unique **on its own**; there is no "the pair is unique" constraint. That would need a composite index, which is a deployment. |
 | **`docs.ts` query port** | `/docs` still queries Firestore directly; the substrate port (#7) covers writes only. |

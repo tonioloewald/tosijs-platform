@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.3.0 — 2026-09-30
+
+File storage: **storage areas** and the `/blob` endpoint (board #1136).
+
+### Added
+
+- **Storage areas.** A manifest collection with `blob: {maxBytes, contentTypes?}`
+  stores files; its access rules are the files' access rules, and public vs
+  private is derived from them. `/blob/<area>/<path>`: `PUT` to upload or
+  replace, `GET` to fetch, `DELETE`; `POST /blob {op: "move"}`. The server
+  measures size and hash; each file has a metadata document with `_by`
+  provenance, listable through `/docs`. See BETA.md "Store files".
+  - **Consistency:** bytes live under a content-hash key, and metadata is
+    committed before an old object is removed, so a metadata document always
+    means its file exists. A crash can orphan an object, never corrupt one.
+  - Delivery is a redirect to a signed URL when the host can sign, otherwise
+    the bytes are streamed. Streamed files are `nosniff`, and SVG, HTML and XML
+    render under a sandbox CSP.
+- **Error codes** `too-large` (413) and `unsupported-type` (415). New codes
+  break exhaustive `switch`es on `error`, which is why this is a minor release.
+- **Kernel (npm):** the storage-area decisions are exported: `decideRead`,
+  `decidePut`, `decideDelete`, `decideMove`, `isBlobStore`, `isPublicArea`,
+  `validateBlobPath`, `contentTypeAllowed`, `blobLimitsProblems`,
+  `BLOB_META_SCHEMA`, and friends. Provisional through 0.3.x.
+- The install response lists a `blob` **capability** under `superseded`: it
+  grants nothing; declare a storage area instead. It is still accepted.
+
+### Changed
+
+- Cloud Functions run on **Node 22** (`engines.node`). Node 20 is end of life.
+- `/doc` and `/docs` refuse writes to a storage area (`403 refused`); its
+  metadata is written only through `/blob`.
+- A manifest upgrade cannot turn a collection into a storage area, or back.
+
+### Fixed
+
+- **SSR rendered posts with the site's generic title on a fresh instance.**
+  The blog's prefetch handler read the resolved page from a module global that
+  a concurrently running handler set; it only worked when a warm instance still
+  held a previous request's page. The page is now resolved once per request.
+- **Social previews:** `og:url` and `og:image` are absolute; a post's fallback
+  image finds Markdown images, not only `<img>`; `twitter:card` is set.
+
+### Upgrading a host
+
+Deploy the functions (the new one is `blob`), and add
+`{"source": "/blob/**", "function": "blob"}` to `firebase.json`'s hosting
+rewrites **before** any catch-all. A first deploy normally makes a new function
+publicly invokable; check that `blob` is. Signed-URL delivery additionally needs
+the functions service account to hold "Service Account Token Creator" on itself;
+without it, files are streamed (correct, just proxied).
+
 ## 0.2.1 — 2026-09-26
 
 Two fixes reported by tosijs-virta, the proving consumer.

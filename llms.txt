@@ -57,6 +57,10 @@ six ceremonies (`scripts/verify-*.js`).
 - `/claim` — `GET` publishes a nonce; write it into the datastore by hand to prove
   ownership, then `POST` (authenticated) to mint the first `configurator`.
 - `/token` — `POST` mints a scoped token, `GET` lists your own, `DELETE ?id=` revokes.
+- `/blob` — files in a **storage area** (a manifest collection with `blob: {maxBytes,
+  contentTypes?}`). `PUT/GET/DELETE /blob/<area>/<path>`; `POST {op:"move", from, to}`.
+  The area's access rules govern its files; its metadata lists through `/docs`, and is
+  written only through `/blob`. 25 MB ceiling. See BETA.md "Store files".
 - `/authorize` — the browser loop that gives a CLI its first token.
   `?action=start|approve|exchange|config`; `GET ?request=<id>` is the consent page.
 - `/esm`, `/stored`, `/gen`, `/prefetch`, `/cachedQuery`, `/user`, `/sitemap` — the

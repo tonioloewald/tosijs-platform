@@ -25,6 +25,7 @@ import {
   assertSafeSchema,
   validateVisibility,
   unenforcedCapabilities,
+  supersededCapabilities,
   ENFORCED_CAPABILITY_KINDS,
   type Manifest,
 } from './manifest'
@@ -299,6 +300,19 @@ describe('the validator reports EVERY problem, not just the first', () => {
     )
     // version + platform-collection + unknown-role, at least.
     expect(errs.length).toBeGreaterThanOrEqual(3)
+  })
+})
+
+describe('a blob CAPABILITY is superseded by storage areas', () => {
+  test('still accepted (manifests declared it ahead of time), but reported with the replacement', () => {
+    const m = ok({ capabilities: { 'virta:files': { kind: 'blob', maxBytes: 10 }, 'virta:mail': { kind: 'email' } } } as never)
+    expect(validateManifest(m, opts)).toEqual([])
+    const s = supersededCapabilities(m)
+    expect(s.map((x) => x.capability)).toEqual(['virta:files'])
+    expect(s[0].use).toContain('blob: {maxBytes')
+  })
+  test('nothing to say → empty', () => {
+    expect(supersededCapabilities(ok())).toEqual([])
   })
 })
 

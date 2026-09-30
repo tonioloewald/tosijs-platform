@@ -11,25 +11,39 @@
 import { describe, test, expect } from 'bun:test'
 import * as pkg from '../lib/index'
 
-describe('service-compris public surface (0.2.x)', () => {
+describe('service-compris public surface (0.3.x)', () => {
   test('the runtime exports are exactly these', () => {
     expect(Object.keys(pkg).sort()).toEqual([
       'ALL',
+      'BLOB_META_SCHEMA',
       'ENVELOPE_FIELDS',
+      'MAX_BLOB_PATH',
       'PRIVILEGED_ROLES',
       'ROLES',
+      'SIGNED_TTL_SECONDS',
       'STAMPED_FIELDS',
       'accessMap',
       'anonymousUser',
+      'blobDocId',
+      'blobLimitsProblems',
+      'blobPathFromDocId',
       'collectionPath',
+      'contentTypeAllowed',
+      'decideDelete',
+      'decideMove',
+      'decidePut',
+      'decideRead',
       'getMethodAccess',
       'hasPrivilegedRole',
+      'isBlobStore',
+      'isPublicArea',
       'isUnchanged',
       'opaqueStatus',
       'principalIdentity',
       'runWritePipeline',
       'setAccessLogger',
       'stripEnvelope',
+      'validateBlobPath',
     ])
   })
 
