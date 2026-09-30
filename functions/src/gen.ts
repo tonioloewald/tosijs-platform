@@ -1,4 +1,5 @@
 import { onRequest } from 'firebase-functions/v2/https'
+import { PUBLIC_ENDPOINT } from './endpoint-options'
 import * as functions from 'firebase-functions'
 import { defineSecret } from 'firebase-functions/params'
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
@@ -154,7 +155,7 @@ interface GenParams {
 }
 
 export const gen = onRequest(
-  { secrets: [geminiApiKey, chatgptApiKey] },
+  { ...PUBLIC_ENDPOINT, secrets: [geminiApiKey, chatgptApiKey] },
   async (req, res) => {
     if (optionsResponse(req, res, ['GET', 'POST'])) {
       return

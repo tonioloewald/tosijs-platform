@@ -32,6 +32,7 @@ collecting takes effect, and the "no secret is ever stored" property survives.
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
+import { PUBLIC_ENDPOINT } from '../endpoint-options'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 
@@ -64,7 +65,7 @@ const selfUrl = (req: AuthenticatedRequest): string => {
   return `https://${host}/authorize`
 }
 
-export const authorize = onRequest({}, async (request, response: Response) => {
+export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is

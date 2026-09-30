@@ -1,4 +1,5 @@
 import { onRequest } from 'firebase-functions/v2/https'
+import { PUBLIC_ENDPOINT } from './endpoint-options'
 import * as functions from 'firebase-functions'
 import compression from 'compression'
 
@@ -11,7 +12,7 @@ const compressResponse = compression()
 
 const xmlUrl = (url: string) => `<url><loc>${url}</loc></url>`
 
-export const sitemap = onRequest({}, async (req, res) => {
+export const sitemap = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }

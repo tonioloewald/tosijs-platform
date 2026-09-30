@@ -11,6 +11,7 @@ This returns JSON from the url provided. Queries are cached for 24h. This both s
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
+import { PUBLIC_ENDPOINT } from './endpoint-options'
 import compression from 'compression'
 import crypto from 'crypto'
 import {
@@ -40,7 +41,7 @@ export function simpleUrlHash(url: string, algorithm = 'sha1') {
 
 const compressResponse = compression()
 
-export const cachedQuery = onRequest({}, async (req, res) => {
+export const cachedQuery = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }

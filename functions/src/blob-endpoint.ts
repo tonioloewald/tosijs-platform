@@ -8,6 +8,7 @@
  * bytes, the host's role resolution, and the shared error shape.
  */
 import { onRequest } from 'firebase-functions/v2/https'
+import { PUBLIC_ENDPOINT } from './endpoint-options'
 import * as functions from 'firebase-functions'
 import * as admin from 'firebase-admin'
 import { createHash } from 'crypto'
@@ -77,7 +78,7 @@ const deps: BlobDeps = {
   isPrivileged: hasPrivilegedRole,
 }
 
-export const blob = onRequest({}, async (request, response) => {
+export const blob = onRequest(PUBLIC_ENDPOINT, async (request, response) => {
   const req = request as AuthenticatedRequest
   noStore(response)
   if (optionsResponse(req, response, ['OPTIONS', 'GET', 'PUT', 'DELETE', 'POST'])) return

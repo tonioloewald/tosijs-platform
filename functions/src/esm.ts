@@ -22,6 +22,7 @@
  */
 
 import { onRequest } from 'firebase-functions/v2/https'
+import { PUBLIC_ENDPOINT } from './endpoint-options'
 import compression from 'compression'
 
 import { optionsResponse } from './utilities'
@@ -33,7 +34,7 @@ const compressResponse = compression()
 // Match module name, stripping optional .js/.jsx/.mjs extension
 const MODULE_PATH_REGEX = /\/esm\/([^/]+?)(?:\.m?jsx?)?\/?$/
 
-export const esm = onRequest({}, async (req, res) => {
+export const esm = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }

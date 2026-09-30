@@ -26,6 +26,7 @@ expose every principal's tokens to that role. The filter therefore lives here.
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
+import { PUBLIC_ENDPOINT } from '../endpoint-options'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 
@@ -52,7 +53,7 @@ const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 const db = () => admin.firestore()
 
-export const token = onRequest({}, async (request, response: Response) => {
+export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is

@@ -17,6 +17,7 @@
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
+import { PUBLIC_ENDPOINT } from './endpoint-options'
 import * as functions from 'firebase-functions'
 import compression from 'compression'
 
@@ -324,7 +325,7 @@ async function commitWriteSet(
   }
 }
 
-export const docs = onRequest({}, async (req, res) => {
+export const docs = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is
