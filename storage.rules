@@ -45,9 +45,19 @@ service firebase.storage {
       allow write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Default: public read, no write
-    match /{allPaths=**} {
-      allow read: if true;
+    // Default: public read, no write — EXCEPT storage areas. /blob keeps their
+    // objects under "<namespace>:<area>/…"; their access rules live in the
+    // area's manifest and are enforced only by /blob (which uses the Admin SDK
+    // and bypasses these rules). Rules only ever GRANT, and a read is allowed
+    // if any matching rule allows it — so this default must exclude a
+    // namespaced first segment itself, or anyone could list and download a
+    // PRIVATE area directly (0.3.0 review B2).
+    match /{first}/{rest=**} {
+      allow read: if !first.matches('.*:.*');
+      allow write: if false;
+    }
+    match /{file} {
+      allow read: if !file.matches('.*:.*');
       allow write: if false;
     }
   }

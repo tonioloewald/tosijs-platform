@@ -3,13 +3,15 @@
  * Install (or upgrade) a checked-in manifest through a host's /install.
  *
  *   bun scripts/install-manifest.js manifests/blog.json --alias sandbox
- *   bun scripts/install-manifest.js manifests/blog.json --production --token "$ID_TOKEN"
+ *   CONFIGURATOR_TOKEN=… bun scripts/install-manifest.js manifests/blog.json --production
  *
  * On a sandbox it mints a throwaway configurator (sandbox-token.js) and
  * removes its role document afterwards. On PRODUCTION it never mints anything:
- * it needs a real configurator's ID token, passed explicitly — e.g. from a
+ * it needs a real configurator's ID token in CONFIGURATOR_TOKEN — e.g. from a
  * signed-in browser, `await fb.auth.currentUser.getIdToken()` — and the
  * `--production` flag, so a production install is always a deliberate act.
+ * (An environment variable, not an argument: argv shows up in `ps` and shell
+ * history. `--token` still works.)
  */
 import fs from 'fs'
 import { execSync } from 'child_process'
@@ -26,14 +28,15 @@ const manifest = JSON.parse(fs.readFileSync(file, 'utf-8'))
 let projectId, token, roleDoc
 if (has('production')) {
   projectId = lib.productionProjectId()
-  token = val('token')
+  token = process.env.CONFIGURATOR_TOKEN || val('token')
   if (!projectId || !token) {
-    console.error('--production needs a configured default project and --token <a configurator\'s ID token>')
+    console.error('--production needs a configured default project and CONFIGURATOR_TOKEN (a configurator\'s ID token)')
     process.exit(2)
   }
 } else {
   const alias = val('alias') ?? 'sandbox'
   projectId = lib.resolveSandbox(alias).projectId
+  await lib.assertProbeAllowed(projectId)
   const out = execSync(
     `bun ${new URL('sandbox-token.js', import.meta.url).pathname} --alias ${alias} --role installer --grant configurator --export`,
     { encoding: 'utf-8', cwd: lib.projectRoot }

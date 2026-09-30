@@ -128,7 +128,19 @@ export const blobPathFromDocId = (id: string): string => id.replace(/~/g, '/')
 const bareType = (contentType: string): string =>
   contentType.split(';')[0].trim().toLowerCase()
 
+/**
+ * Exactly ONE media type, `type/subtype` in RFC 7231 token characters. Anything
+ * else — above all a comma-joined list like `image/png, text/html` — is
+ * refused, not interpreted: browsers take the LAST type of a list, so a
+ * prefix check on the first one let HTML through an `image/*` allowlist
+ * (0.3.0 review B1).
+ */
+const SINGLE_TYPE = /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/
+export const isSingleMediaType = (contentType: string): boolean =>
+  SINGLE_TYPE.test(bareType(contentType))
+
 export function contentTypeAllowed(contentType: string, allowed?: string[]): boolean {
+  if (!isSingleMediaType(contentType)) return false
   if (!allowed || allowed.length === 0) return true
   const type = bareType(contentType)
   return allowed.some((pattern) => {
@@ -233,8 +245,8 @@ export function decidePut(
   if (pathProblem) return { status: 'refused', reason: 'path', message: pathProblem }
   const path = request.path as string
 
-  if (typeof request.contentType !== 'string' || !bareType(request.contentType).includes('/')) {
-    return { status: 'refused', reason: 'bad-request', message: 'a content type like "image/png" is required' }
+  if (typeof request.contentType !== 'string' || !isSingleMediaType(request.contentType)) {
+    return { status: 'refused', reason: 'bad-request', message: 'exactly one content type like "image/png" is required' }
   }
   const contentType = bareType(request.contentType)
   if (!contentTypeAllowed(contentType, limits.contentTypes)) {
@@ -299,17 +311,21 @@ export function decideDelete(
 }
 
 /**
- * May `userRoles` move a file? A move is a delete at the source and a put at
- * the destination, so it needs BOTH — and it is committed on the server as one
- * operation (step 2), never as the browser's old copy-then-delete.
+ * May `userRoles` move a file? A move READS the source, deletes it, and puts
+ * it at the destination, so it needs all three — and it is committed on the
+ * server as one operation (step 2), never as the browser's old
+ * copy-then-delete. Without the read, a write-only role (a drop box) could
+ * move a file it may not read into an area it can (0.3.0 review M3).
  */
-export function decideMove(
+export async function decideMove(
   collections: CollectionMap,
   from: { area: string; path: unknown },
   to: { area: string; path: unknown },
-  meta: BlobMeta,
+  meta: BlobMeta & Record<string, unknown>,
   userRoles: UserRoles
-): PutDecision {
+): Promise<PutDecision> {
+  const read = await decideRead(collections, from.area, meta, userRoles)
+  if (read.status === 'refused') return read
   const del = decideDelete(collections, from.area, from.path, userRoles)
   if (del.status === 'refused') return del
   // The destination re-checks limits: moving a 5 MB file into a 1 MB area is

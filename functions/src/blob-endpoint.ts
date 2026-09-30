@@ -29,9 +29,13 @@ const deps: BlobDeps = {
     const snap = await admin.firestore().doc(physicalPath(docPath)).get()
     return snap.exists ? (snap.data() as BlobMeta & Record<string, unknown>) : null
   },
-  commitMeta: (docPath, meta, collections, userRoles) =>
+  commitMeta: (docPath, meta, collections, userRoles, method) =>
     // An unnamed method is an upsert: create a file, or replace its metadata.
-    commitTransactionally([{ p: docPath, data: meta as unknown as Record<string, unknown> }], collections, userRoles),
+    commitTransactionally(
+      [{ p: docPath, data: meta as unknown as Record<string, unknown>, ...(method ? { method } : {}) }],
+      collections,
+      userRoles
+    ),
   deleteMeta: async (docPath) => {
     await admin.firestore().doc(physicalPath(docPath)).delete()
   },
@@ -109,7 +113,10 @@ export const blob = onRequest({}, async (request, response) => {
         response.set('Content-Type', result.contentType)
         response.set(result.headers)
         bucket().file(result.key).createReadStream().on('error', () => {
+          // Before headers: a clean 404. After: end the response rather than
+          // leave it hanging until the function times out.
           if (!response.headersSent) fail(response, 404, 'not-found', 'not found')
+          else response.destroy()
         }).pipe(response)
         return
     }

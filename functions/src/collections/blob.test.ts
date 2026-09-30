@@ -36,6 +36,14 @@ const areas: CollectionMap = {
       [ROLES.author]: { read: ALL, list: ALL, write: ALL },
     },
   },
+  // A drop box: authors may deposit and remove, only admins may read.
+  'lib:dropbox': {
+    blob: { maxBytes: 5_000_000 },
+    access: {
+      [ROLES.author]: { write: ALL },
+      [ROLES.admin]: { read: ALL, list: ALL, write: ALL },
+    },
+  },
   // Readable only when the metadata is tagged — a visibility FILTER.
   'lib:tagged': {
     blob: { maxBytes: 1000 },
@@ -192,15 +200,44 @@ describe('delete and move', () => {
     expect(decideDelete(areas, 'blog:public', 'a.webp', anonymousUser)).toMatchObject({ reason: 'forbidden' })
     expect(decideDelete(areas, 'blog:public', '../x', who([ROLES.author]))).toMatchObject({ reason: 'path' })
   })
-  test('a move needs delete at the source AND put at the destination, with its limits', () => {
+  test('a move needs delete at the source AND put at the destination, with its limits', async () => {
     const author = who([ROLES.author])
     expect(
-      decideMove(areas, { area: 'blog:public', path: 'a.webp' }, { area: 'blog:public', path: 'b.webp' }, meta, author)
+      await decideMove(areas, { area: 'blog:public', path: 'a.webp' }, { area: 'blog:public', path: 'b.webp' }, meta, author)
     ).toMatchObject({ status: 'allowed', meta: { path: 'b.webp' } })
     // Into a smaller area: refused exactly as uploading there would be.
     const big = { ...meta, bytes: 2_000_000 }
     expect(
-      decideMove(areas, { area: 'blog:public', path: 'a.webp' }, { area: 'blog:private', path: 'a.webp' }, big, author)
+      await decideMove(areas, { area: 'blog:public', path: 'a.webp' }, { area: 'blog:private', path: 'a.webp' }, big, author)
     ).toMatchObject({ reason: 'too-large' })
+  })
+  test('a move needs READ at the source: a drop box cannot be emptied into an area its writer can read (review M3)', async () => {
+    const author = who([ROLES.author])
+    expect(
+      await decideMove(areas, { area: 'lib:dropbox', path: 'a.webp' }, { area: 'blog:public', path: 'a.webp' }, meta, author)
+    ).toMatchObject({ status: 'refused', reason: 'forbidden' })
+    expect(
+      await decideMove(areas, { area: 'lib:dropbox', path: 'a.webp' }, { area: 'blog:private', path: 'a.webp' }, meta, who([ROLES.admin, ROLES.author]))
+    ).toMatchObject({ status: 'allowed' })
+  })
+})
+
+describe('content types are exactly ONE media type (review B1)', () => {
+  const author = who([ROLES.author])
+  const put = (contentType: string) =>
+    decidePut(areas, 'blog:public', { path: 'x.png', contentType, bytes: 1, sha256: 'a'.repeat(64) }, author)
+  test('a comma-joined list is refused, not read by its first entry', () => {
+    for (const t of ['image/png, text/html', 'image/png,text/html', 'image/png, image/svg+xml']) {
+      expect(contentTypeAllowed(t, ['image/*'])).toBe(false)
+      expect(put(t)).toMatchObject({ status: 'refused', reason: 'bad-request' })
+    }
+  })
+  test('other malformed types are refused', () => {
+    for (const t of ['image/png/x', 'image /png', 'image/', '/png', 'text/html image/png', '']) {
+      expect(put(t)).toMatchObject({ status: 'refused' })
+    }
+  })
+  test('a single type with parameters is fine, and stored bare', () => {
+    expect(put('image/png; charset=binary')).toMatchObject({ status: 'allowed', meta: { contentType: 'image/png' } })
   })
 })

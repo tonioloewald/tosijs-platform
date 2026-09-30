@@ -101,7 +101,14 @@ try {
   // bytes streamed through the function. Both are correct; what must hold is
   // the access decision and the cache policy.
   const mode = (r) => (r.status === 302 ? 'redirect' : r.status === 200 ? 'stream' : `status ${r.status}`)
-  ok('a public file is served to anyone, CACHEABLE', (g1.status === 302 || g1.status === 200) && /public/.test(g1.headers.get('cache-control') ?? ''), `${mode(g1)}, ${g1.headers.get('cache-control')}`)
+  // A redirect names a hash-specific object a replace deletes, so it must not
+  // be cached (review M2); streamed bytes are the file itself and may be.
+  const cc1 = g1.headers.get('cache-control') ?? ''
+  ok(
+    'a public file is served to anyone — a redirect uncached, a stream cacheable',
+    (g1.status === 302 && cc1 === 'no-cache') || (g1.status === 200 && /public/.test(cc1)),
+    `${mode(g1)}, ${cc1}`
+  )
   ok('…which leads to the actual bytes', (await follow(g1)) === body)
 
   const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
@@ -113,6 +120,9 @@ try {
       (gs.status === 200 && (gs.headers.get('content-security-policy') ?? '').startsWith('sandbox') && gs.headers.get('x-content-type-options') === 'nosniff'),
     `${mode(gs)}, csp=${gs.headers.get('content-security-policy')}`
   )
+
+  const joined = await put('blobtest:public', 'j.png', '<script>alert(1)</script>', 'image/png, text/html')
+  ok('a comma-joined content type is refused, not read by its first entry (review B1)', joined.status === 400, String(joined.status))
 
   const list = await fetch(`${BASE}/docs?p=blobtest:public&c=10`).then((r) => r.json()).catch(() => null)
   const rows = Array.isArray(list) ? list : list?.rows ?? []
@@ -137,6 +147,22 @@ try {
   await put('blobtest:private', 'secret.txt', secret)
   const stranger = await get('blobtest:private', 'secret.txt')
   ok('a private file is invisible to a stranger (opaque 404)', stranger.status === 404, String(stranger.status))
+  // Direct Cloud Storage access must not bypass the area's rules (review B2):
+  // anonymous list and get through the Firebase Storage API are denied.
+  const secretKey = `blobtest:private/secret.txt@${sha(secret).slice(0, 16)}`
+  const bypass = []
+  for (const bucket of [`${projectId}.firebasestorage.app`, `${projectId}.appspot.com`]) {
+    const base = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o`
+    const l = await fetch(`${base}?prefix=${encodeURIComponent('blobtest:private/')}`)
+    const g = await fetch(`${base}/${encodeURIComponent(secretKey)}?alt=media`)
+    bypass.push({ bucket, list: l.status, get: g.status, leaked: g.status === 200 || (l.status === 200 && JSON.stringify(await l.json().catch(() => ({}))).includes('secret')) })
+  }
+  ok(
+    'a private area cannot be listed or downloaded directly from Cloud Storage',
+    bypass.every((d) => !d.leaked) && bypass.some((d) => d.list === 403 && d.get === 403),
+    JSON.stringify(bypass)
+  )
+
   const reader = await get('blobtest:private', 'secret.txt', AUTH)
   ok('its reader is served it, never cached', (reader.status === 302 || reader.status === 200) && (reader.headers.get('cache-control') ?? '').includes('no-store'), `${mode(reader)}, ${reader.headers.get('cache-control')}`)
   ok('…which leads to the bytes', (await follow(reader)) === secret)

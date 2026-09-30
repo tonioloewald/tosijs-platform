@@ -28,6 +28,7 @@ import {
   decidePut,
   decideRead,
   isBlobStore,
+  isSingleMediaType,
   validateBlobPath,
   type BlobMeta,
   type BlobRefusal,
@@ -58,7 +59,9 @@ export interface BlobDeps {
     docPath: string,
     meta: BlobMeta,
     collections: CollectionMap,
-    userRoles: UserRoles
+    userRoles: UserRoles,
+    /** 'POST' = must not exist yet (a move); omitted = upsert (an upload). */
+    method?: 'POST'
   ): Promise<CommitOutcome>
   deleteMeta(docPath: string): Promise<void>
   objects: ObjectStore
@@ -75,22 +78,33 @@ export type BlobResponse =
 /**
  * Headers for bytes served FROM THIS ORIGIN (the stream fallback, and /blob is
  * rewritten onto the site's own domain). A redirect lands on the storage host,
- * a different origin; a stream does not — so an uploaded SVG (image/*) or
- * anything a browser might sniff as HTML would run script as the site. Never
- * sniff; and a type that can carry script renders sandboxed: no script, no
- * same-origin, no network.
+ * a different origin; a stream does not — so an uploaded SVG or anything a
+ * browser might read as HTML would run script as the site.
+ *
+ * Never sniff, and SANDBOX BY DEFAULT: only an allowlist of inert media (one
+ * exact type each — see isSingleMediaType) is served without the sandbox CSP.
+ * A denylist of scriptable types was bypassed by a comma-joined type, and
+ * misses `+xml` and whatever comes next (0.3.0 review B1).
  */
-const SCRIPTABLE = /^(image\/svg\+xml|text\/html|application\/xhtml\+xml|text\/xml|application\/xml)\b/i
+const INERT = /^(image\/(png|jpeg|gif|webp|avif|bmp|x-icon|vnd\.microsoft\.icon)|video\/[a-z0-9.+-]+|audio\/[a-z0-9.+-]+|application\/pdf|text\/plain|application\/json)$/
 export function deliveryHeaders(contentType: string): Record<string, string> {
   const headers: Record<string, string> = { 'X-Content-Type-Options': 'nosniff' }
-  if (SCRIPTABLE.test(contentType.trim())) {
+  const type = contentType.split(';')[0].trim().toLowerCase()
+  if (!isSingleMediaType(contentType) || !INERT.test(type) || /\+xml$/.test(type)) {
     headers['Content-Security-Policy'] = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:"
   }
   return headers
 }
 
-/** Public files: stable URL; the redirect it answers with may be cached. */
-const PUBLIC_CACHE = 'public, max-age=3000'
+/**
+ * Public files. A REDIRECT names a hash-specific object that a replace or move
+ * deletes as soon as it commits, so it must not be cached: a cached 302 would
+ * point readers at a deleted object for its whole max-age (0.3.0 review M2).
+ * STREAMED bytes are the file itself, so they may be cached briefly — a reader
+ * sees the old file for at most this long after a replace, never a broken one.
+ */
+const PUBLIC_REDIRECT_CACHE = 'no-cache'
+const PUBLIC_STREAM_CACHE = 'public, max-age=300'
 const PUBLIC_SIGN_TTL = 3600
 /** Private files: never cached by anyone but the requester, and briefly. */
 const PRIVATE_CACHE = 'private, no-store'
@@ -113,6 +127,21 @@ function refused(r: BlobRefusal, deps: BlobDeps, userRoles: UserRoles): BlobResp
   }
 }
 
+/**
+ * Roll back an object this request wrote — unless the committed metadata
+ * references it. Keys are content-addressed, so the same bytes re-PUT with a
+ * new type, or two concurrent PUTs of the same bytes, write the key that is
+ * ALREADY live; deleting it blindly left metadata with no file (0.3.0 review M1).
+ */
+async function releaseIfUnreferenced(deps: BlobDeps, docPath: string, key: string, sha256: string) {
+  const current = await deps.getMeta(docPath).catch(() => undefined)
+  if (current === undefined || current?.sha256 === sha256) return // unknown or live: keep it
+  await deps.objects.delete(key).catch(() => undefined)
+}
+
+const commitStatus = (reason: string): number =>
+  reason === 'immutable' ? 409 : reason === 'schema' ? 400 : 403
+
 const notFound: BlobResponse = { kind: 'error', status: 404, error: 'not-found', message: 'not found' }
 
 /**
@@ -123,8 +152,14 @@ export function parseBlobRoute(pathname: string): { area: string; path: string }
   const trimmed = pathname.replace(/^\/+/, '').replace(/^blob\//, '')
   const slash = trimmed.indexOf('/')
   if (slash <= 0) return null
-  const area = decodeURIComponent(trimmed.slice(0, slash))
-  const path = decodeURIComponent(trimmed.slice(slash + 1))
+  let area: string
+  let path: string
+  try {
+    area = decodeURIComponent(trimmed.slice(0, slash))
+    path = decodeURIComponent(trimmed.slice(slash + 1))
+  } catch {
+    return null // a malformed %-escape is a bad route, not a 500
+  }
   if (!area.includes(':')) return null
   return { area, path }
 }
@@ -160,11 +195,17 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
       if (d.status === 'refused') return refused(d, deps, req.userRoles)
       const key = objectKey(area, path, meta.sha256)
       const ttl = d.status === 'public' ? PUBLIC_SIGN_TTL : d.ttlSeconds
-      const cacheControl = d.status === 'public' ? PUBLIC_CACHE : PRIVATE_CACHE
+      const isPublic = d.status === 'public'
       const url = await deps.objects.url(key, ttl)
       return url
-        ? { kind: 'redirect', url, cacheControl }
-        : { kind: 'stream', key, contentType: meta.contentType, cacheControl, headers: deliveryHeaders(meta.contentType) }
+        ? { kind: 'redirect', url, cacheControl: isPublic ? PUBLIC_REDIRECT_CACHE : PRIVATE_CACHE }
+        : {
+            kind: 'stream',
+            key,
+            contentType: meta.contentType,
+            cacheControl: isPublic ? PUBLIC_STREAM_CACHE : PRIVATE_CACHE,
+            headers: deliveryHeaders(meta.contentType),
+          }
     }
 
     case 'PUT': {
@@ -185,7 +226,14 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
       const docPath = metaPath(area, path)
       const previous = await deps.getMeta(docPath)
       if (previous && previous.sha256 === d.meta.sha256 && previous.contentType === d.meta.contentType) {
-        return { kind: 'json', status: 200, body: { status: 'unchanged', path, sha256 } }
+        // "unchanged" confirms a guessed body matches the stored file — only
+        // say so to a caller who may read it (0.3.0 review M3).
+        const canRead = (await decideRead(collections, area, previous, req.userRoles)).status !== 'refused'
+        return {
+          kind: 'json',
+          status: 200,
+          body: { status: canRead ? 'unchanged' : 'replaced', path, bytes: d.meta.bytes, sha256 },
+        }
       }
       if (previous && config?.immutable) {
         return { kind: 'error', status: 409, error: 'immutable', message: 'this area is immutable: a stored file cannot be replaced' }
@@ -197,13 +245,12 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
       try {
         outcome = await deps.commitMeta(docPath, d.meta, collections, req.userRoles)
       } catch (e) {
-        await deps.objects.delete(key).catch(() => undefined)
+        await releaseIfUnreferenced(deps, docPath, key, d.meta.sha256)
         throw e
       }
       if (outcome.status === 'refused') {
-        await deps.objects.delete(key).catch(() => undefined)
-        const status = outcome.refusal.reason === 'immutable' ? 409 : outcome.refusal.reason === 'schema' ? 400 : 403
-        return { kind: 'error', status, error: outcome.refusal.reason, message: outcome.refusal.message }
+        await releaseIfUnreferenced(deps, docPath, key, d.meta.sha256)
+        return { kind: 'error', status: commitStatus(outcome.refusal.reason), error: outcome.refusal.reason, message: outcome.refusal.message }
       }
       // Only now is the old object unreferenced.
       if (previous && previous.sha256 !== d.meta.sha256) {
@@ -255,7 +302,7 @@ async function move(req: BlobRequest, deps: BlobDeps): Promise<BlobResponse> {
   const src = await deps.getMeta(metaPath(from.area, from.path as string))
   if (!src) return notFound
 
-  const d = decideMove(
+  const d = await decideMove(
     collections,
     { area: from.area, path: from.path },
     { area: to.area, path: to.path },
@@ -273,11 +320,20 @@ async function move(req: BlobRequest, deps: BlobDeps): Promise<BlobResponse> {
 
   const srcKey = objectKey(from.area, from.path as string, src.sha256)
   const dstKey = objectKey(to.area, to.path as string, src.sha256)
+  const dstPath = metaPath(to.area, to.path as string)
   await deps.objects.copy(srcKey, dstKey)
-  const outcome = await deps.commitMeta(metaPath(to.area, to.path as string), d.meta, collections, req.userRoles)
+  let outcome: CommitOutcome
+  try {
+    // POST: the destination must not exist AT COMMIT — the check above is a
+    // courtesy; this is what stops two concurrent moves to one path clobbering.
+    outcome = await deps.commitMeta(dstPath, d.meta, collections, req.userRoles, 'POST')
+  } catch (e) {
+    await releaseIfUnreferenced(deps, dstPath, dstKey, src.sha256)
+    throw e
+  }
   if (outcome.status === 'refused') {
-    await deps.objects.delete(dstKey).catch(() => undefined)
-    return { kind: 'error', status: 403, error: outcome.refusal.reason, message: outcome.refusal.message }
+    await releaseIfUnreferenced(deps, dstPath, dstKey, src.sha256)
+    return { kind: 'error', status: commitStatus(outcome.refusal.reason), error: outcome.refusal.reason, message: outcome.refusal.message }
   }
   // The destination is committed; only now is the source removed.
   await deps.deleteMeta(metaPath(from.area, from.path as string))

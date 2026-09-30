@@ -23,6 +23,10 @@ const areas: CollectionMap = {
     blob: { maxBytes: 1000 },
     access: { [ROLES.author]: { read: ALL, list: ALL, write: ALL } },
   },
+  'lib:dropbox': {
+    blob: { maxBytes: 1000 },
+    access: { [ROLES.author]: { write: ALL }, [ROLES.admin]: { read: ALL, write: ALL } },
+  },
   'log:frozen': {
     blob: { maxBytes: 1000 },
     immutable: true,
@@ -36,8 +40,11 @@ function fakes(opts: { canSign?: boolean; commitRefuses?: boolean; commitThrows?
   const deps: BlobDeps = {
     collectionsFor: async () => areas,
     getMeta: async (p) => metas.get(p) ?? null,
-    commitMeta: async (p, meta): Promise<CommitOutcome> => {
+    commitMeta: async (p, meta, _c, _u, method): Promise<CommitOutcome> => {
       if (opts.commitThrows) throw new Error('store down')
+      if (method === 'POST' && metas.has(p)) {
+        return { status: 'refused', refusal: { p, reason: 'exists', message: 'exists' } }
+      }
       if (opts.commitRefuses) {
         return { status: 'refused', refusal: { p, reason: 'schema', message: 'nope' } }
       }
@@ -159,11 +166,18 @@ describe('PUT', () => {
 })
 
 describe('GET', () => {
-  test('a public file redirects with a CACHEABLE response', async () => {
+  test('a public REDIRECT is never cached — it names an object a replace deletes (review M2)', async () => {
     const { deps } = fakes()
     await handleBlob(putReq('/blob/blog:public/p.txt', 'pub'), deps)
     const r = await handleBlob({ method: 'GET', pathname: '/blob/blog:public/p.txt', userRoles: anonymousUser }, deps)
-    expect(r).toMatchObject({ kind: 'redirect', cacheControl: expect.stringContaining('public') })
+    expect(r).toMatchObject({ kind: 'redirect', cacheControl: 'no-cache' })
+  })
+
+  test('public STREAMED bytes are cacheable, briefly', async () => {
+    const { deps } = fakes({ canSign: false })
+    await handleBlob(putReq('/blob/blog:public/p.txt', 'pub'), deps)
+    const r = await handleBlob({ method: 'GET', pathname: '/blob/blog:public/p.txt', userRoles: anonymousUser }, deps)
+    expect(r).toMatchObject({ kind: 'stream', cacheControl: 'public, max-age=300' })
   })
 
   test('a private file: a short signed link for a reader, never cached; opaque 404 for anyone else', async () => {
@@ -186,6 +200,10 @@ describe('GET', () => {
   test('streamed bytes come from the SITE origin: never sniffed, and script-capable types are sandboxed', () => {
     expect(deliveryHeaders('image/png')).toEqual({ 'X-Content-Type-Options': 'nosniff' })
     expect(deliveryHeaders('application/pdf')['Content-Security-Policy']).toBeUndefined()
+    // SANDBOX BY DEFAULT (review B1): a list, an unknown type, or any +xml.
+    for (const t of ['image/png, text/html', 'image/png, image/svg+xml', 'application/octet-stream', 'application/rss+xml', 'text/css', 'garbage']) {
+      expect(deliveryHeaders(t)['Content-Security-Policy']).toStartWith('sandbox;')
+    }
     for (const t of ['image/svg+xml', 'IMAGE/SVG+XML', 'text/html; charset=utf-8', 'application/xhtml+xml', 'text/xml']) {
       expect(deliveryHeaders(t)['Content-Security-Policy']).toStartWith('sandbox;')
     }
@@ -257,3 +275,86 @@ describe('MOVE', () => {
     expect(r).toMatchObject({ status: 413, error: 'too-large' })
   })
 })
+
+describe('0.3.0 review remediation', () => {
+  test('M1: a refused re-PUT of the SAME bytes (new type) does not delete the live object', async () => {
+    const { deps, objects, metas } = fakes()
+    await handleBlob(putReq('/blob/blog:public/a.png', 'img', 'image/png'), deps)
+    const liveKeys = [...objects.keys()]
+    deps.commitMeta = async (p) => ({ status: 'refused', refusal: { p, reason: 'schema', message: 'x' } })
+    const r = await handleBlob(putReq('/blob/blog:public/a.png', 'img', 'image/webp'), deps)
+    expect(r).toMatchObject({ status: 400 })
+    expect([...objects.keys()]).toEqual(liveKeys)
+    expect(must(metas.get('blog:public/a.png')).contentType).toBe('image/png')
+  })
+
+  test('M1: …nor when the commit throws', async () => {
+    const { deps, objects } = fakes()
+    await handleBlob(putReq('/blob/blog:public/a.png', 'img', 'image/png'), deps)
+    deps.commitMeta = async () => {
+      throw new Error('store down')
+    }
+    await expect(handleBlob(putReq('/blob/blog:public/a.png', 'img', 'image/webp'), deps)).rejects.toThrow('store down')
+    expect(objects.size).toBe(1)
+  })
+
+  test('M1: a refused upload of NEW bytes is still rolled back', async () => {
+    const { deps, objects } = fakes({ commitRefuses: true })
+    await handleBlob(putReq('/blob/blog:public/n.png', 'new', 'image/png'), deps)
+    expect(objects.size).toBe(0)
+  })
+
+  test('M3: "unchanged" is only told to a caller who may read the file', async () => {
+    const { deps } = fakes()
+    const admin = who([ROLES.admin, ROLES.author])
+    await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'secret', 'text/plain', admin), deps)
+    const guess = await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'secret'), deps)
+    expect(guess).toMatchObject({ status: 200, body: { status: 'replaced' } })
+    const owner = await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'secret', 'text/plain', admin), deps)
+    expect(owner).toMatchObject({ body: { status: 'unchanged' } })
+  })
+
+  test('M3: a write-only role cannot move a file out of an area it cannot read', async () => {
+    const { deps, metas } = fakes()
+    await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'secret', 'text/plain', who([ROLES.admin, ROLES.author])), deps)
+    const r = await handleBlob(
+      { method: 'POST', pathname: '/blob', json: { op: 'move', from: { area: 'lib:dropbox', path: 'd.txt' }, to: { area: 'blog:public', path: 'd.txt' } }, userRoles: author },
+      deps
+    )
+    expect(r).toMatchObject({ status: 404 })
+    expect(metas.has('lib:dropbox/d.txt')).toBe(true)
+    expect(metas.has('blog:public/d.txt')).toBe(false)
+  })
+
+  test('a move commits the destination as a CREATE: a concurrent move there is refused, not clobbered', async () => {
+    const { deps, metas, objects } = fakes()
+    await handleBlob(putReq('/blob/blog:public/a.txt', 'A'), deps)
+    await handleBlob(putReq('/blob/blog:public/b.txt', 'B'), deps)
+    await handleBlob(putReq('/blob/blog:public/x.txt', 'X'), deps)
+    // Simulate the race: the move's pre-check sees no destination (someone
+    // landed there after it looked), so only the commit can refuse.
+    const realGet = deps.getMeta
+    let first = true
+    deps.getMeta = async (p) => {
+      if (p === 'blog:public/x.txt' && first) {
+        first = false
+        return null
+      }
+      return realGet(p)
+    }
+    const r = await handleBlob(
+      { method: 'POST', pathname: '/blob', json: { op: 'move', from: { area: 'blog:public', path: 'a.txt' }, to: { area: 'blog:public', path: 'x.txt' } }, userRoles: author },
+      deps
+    )
+    expect(r).toMatchObject({ status: 403, error: 'exists' })
+    expect(metas.has('blog:public/a.txt')).toBe(true)
+    expect(new TextDecoder().decode(must([...objects.entries()].find(([k]) => k.startsWith('blog:public/x.txt@')))[1].bytes)).toBe('X')
+  })
+
+  test('a malformed %-escape is a 400, not a 500', async () => {
+    const { deps } = fakes()
+    const r = await handleBlob({ method: 'GET', pathname: '/blob/blog:public/%E0', userRoles: anonymousUser }, deps)
+    expect(r).toMatchObject({ status: 400 })
+  })
+})
+
