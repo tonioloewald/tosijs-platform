@@ -24,6 +24,7 @@
  */
 
 import { deliveryHeaders } from './blob-handler'
+import { legacyObjectPath } from './legacy-storage'
 import { onRequest } from 'firebase-functions/v2/https'
 import * as admin from 'firebase-admin'
 
@@ -52,22 +53,22 @@ export const stored = onRequest({}, async (req, res) => {
     return
   }
 
-  const filePath = match[1]
-
-  // Sanitize path: prevent directory traversal
-  if (filePath.includes('..') || filePath.startsWith('/')) {
-    res.status(400).send('Invalid storage path')
+  // ONLY the legacy folders (legacy-storage.ts). This reader uses the Admin
+  // SDK, which storage.rules never applies to, and it shares the bucket with
+  // /blob — so without an allowlist it would serve any storage area's private
+  // objects to anyone with the key (0.3.0 re-review 2, B1). Refused exactly
+  // like a missing file, so it reveals nothing.
+  const filePath = legacyObjectPath(match[1])
+  if (!filePath) {
+    res.status(404).send('File not found')
     return
   }
 
   try {
-    // Get the default bucket name from Firebase config
-    const projectId =
-      process.env.GCLOUD_PROJECT ||
-      (process.env.FIREBASE_CONFIG &&
-        JSON.parse(process.env.FIREBASE_CONFIG).projectId)
-    const bucketName = `${projectId}.appspot.com`
-    const bucket = admin.storage().bucket(bucketName)
+    // The project's DEFAULT bucket — the one the client SDK uploads to and
+    // /blob writes to. It was hardcoded as `<project>.appspot.com`, which is
+    // wrong for newer projects (`.firebasestorage.app`).
+    const bucket = admin.storage().bucket()
     const file = bucket.file(filePath)
 
     // Check if file exists

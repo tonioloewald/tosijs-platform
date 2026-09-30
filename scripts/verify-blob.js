@@ -123,6 +123,16 @@ try {
     `${mode(gs)}, csp=${gs.headers.get('content-security-policy')}`
   )
 
+  // …and as a VISITOR sees it, through Hosting: Hosting's site-wide CSP
+  // header REPLACES the one the function sets, so the sandbox must come from
+  // firebase.json's /blob and /stored header rule (re-review 2 finding).
+  const svgSite = await fetch(`https://${projectId}.web.app/blob/blobtest:public/x.svg`, { redirect: 'manual' })
+  ok(
+    'through Hosting, an SVG is still sandboxed (firebase.json header rule, not just the function)',
+    svgSite.status === 302 || (svgSite.headers.get('content-security-policy') ?? '').startsWith('sandbox'),
+    `${svgSite.status}, csp=${svgSite.headers.get('content-security-policy')}`
+  )
+
   const joined = await put('blobtest:public', 'j.png', '<script>alert(1)</script>', 'image/png, text/html')
   ok('a comma-joined content type is refused, not read by its first entry (review B1)', joined.status === 400, String(joined.status))
 
@@ -179,6 +189,16 @@ try {
     bypass.every((d) => !d.leaked) && bypass.some((d) => d.list === 403 && d.get === 403 && d.root === 403),
     JSON.stringify(bypass)
   )
+
+  // Every OTHER reader of the bucket (re-review 2): /stored uses the Admin
+  // SDK, so storage.rules never applies to it. Through Hosting, as a visitor.
+  const site = `https://${projectId}.web.app`
+  const viaStored = []
+  for (const k of [secretKey, encodeURIComponent(secretKey)]) {
+    const r = await fetch(`${site}/stored/${k}`, { redirect: 'manual' })
+    viaStored.push(r.status)
+  }
+  ok('/stored (the legacy reader) will not serve a storage area object, raw or encoded', viaStored.every((st) => st === 404), JSON.stringify(viaStored))
 
   const reader = await get('blobtest:private', 'secret.txt', AUTH)
   ok('its reader is served it, never cached', (reader.status === 302 || reader.status === 200) && (reader.headers.get('cache-control') ?? '').includes('no-store'), `${mode(reader)}, ${reader.headers.get('cache-control')}`)

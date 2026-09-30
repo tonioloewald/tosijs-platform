@@ -49,20 +49,34 @@ File storage: **storage areas** and the `/blob` endpoint (board #1136).
   The blog's prefetch handler read the resolved page from a module global that
   a concurrently running handler set; it only worked when a warm instance still
   held a previous request's page. The page is now resolved once per request.
-- **`/stored` served files from the site's origin with no protection.** Its
-  stream fallback now sends `nosniff` and sandboxes anything but inert media,
-  the same rule as `/blob`. (`blog/` is writable by any content role straight
-  through the Storage SDK, so an SVG there could run script as the site.)
+- **`/stored` read the whole bucket with the Admin SDK** — which ignores
+  `storage.rules` — so it could have served storage-area objects, private ones
+  included, and answered "does this content exist?" to anyone. It now serves
+  only the legacy folders.
+- **Files served from the site's origin were not sandboxed in practice.**
+  Hosting's site-wide CSP replaced the sandbox CSP the functions set, so an
+  SVG uploaded to `blog/` (any content role can) could run script as the site
+  via `/stored`. Hosting now sandboxes `/blob/**` and `/stored/**`.
 - **Social previews:** `og:url` and `og:image` are absolute; a post's fallback
   image finds Markdown images, not only `<img>`; `twitter:card` is set.
 
 ### Upgrading a host
 
-**Deploy `storage.rules` too** (`firebase deploy --only storage`). Its default
-rule granted public read on everything, which would have exposed PRIVATE
-storage areas directly through Cloud Storage; it now excludes any namespaced
-first segment, and the bucket root can no longer be listed (top-level files can
-still be fetched). Do this before installing a manifest that declares an area.
+**Deploy `storage.rules` and hosting too** (`firebase deploy --only
+storage,hosting`), before installing a manifest that declares an area.
+
+- **Behaviour change — direct reads are now an ALLOWLIST.** The old default rule
+  granted public read on the whole bucket, which exposed PRIVATE storage areas.
+  Now only `blog/`, `public/` and `users/` are readable directly (client SDK and
+  `/stored`); everything else in the bucket is served only by `/blob`. **If
+  your host keeps files anywhere else, move them or add the folder** to both
+  `storage.rules` and `functions/src/legacy-storage.ts` (a test checks they
+  agree). The bucket root can no longer be listed.
+- **`firebase.json` gains a header rule** for `/blob/**` and `/stored/**`:
+  Hosting's site-wide CSP replaces a CSP set by a function, so the sandbox
+  for files served from your origin has to come from Hosting.
+- `/stored` now reads the project's default bucket (it hardcoded
+  `<project>.appspot.com`).
 
 Deploy the functions (the new one is `blob`), and add
 `{"source": "/blob/**", "function": "blob"}` to `firebase.json`'s hosting

@@ -80,6 +80,19 @@
             "value": "no-cache"
           }
         ]
+      },
+      {
+        "source": "/@(blob|stored)/**",
+        "headers": [
+          {
+            "key": "Content-Security-Policy",
+            "value": "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'"
+          },
+          {
+            "key": "X-Content-Type-Options",
+            "value": "nosniff"
+          }
+        ]
       }
     ],
     "predeploy": [

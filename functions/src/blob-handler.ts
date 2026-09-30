@@ -256,7 +256,11 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
       // the object exists and is LIVE — never overwrite or roll it back (M1).
       // A changed type is carried by the metadata; delivery sends the
       // metadata's type, not the object's.
-      const reuse = previous?.sha256 === d.meta.sha256
+      // Only for a READER: skipping the upload is faster, and to a non-reader
+      // that speed would say "your guess matched" (re-review 2). A non-reader
+      // re-writes identical bytes to the live key — harmless, they are the
+      // same bytes — and the rollback below keeps a key the metadata uses.
+      const reuse = canRead && previous?.sha256 === d.meta.sha256
       const key = objectKey(area, path, d.meta.sha256)
       if (!reuse) await deps.objects.put(key, body, d.meta.contentType)
       let outcome: CommitOutcome
@@ -270,8 +274,9 @@ export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<Blob
         if (!reuse) await releaseIfUnreferenced(deps, docPath, key, d.meta.sha256)
         return { kind: 'error', status: commitStatus(outcome.refusal.reason), error: outcome.refusal.reason, message: outcome.refusal.message }
       }
-      // Only now is the old object unreferenced.
-      if (previous && !reuse) {
+      // Only now is the old object unreferenced (never when the bytes match:
+      // then the old key IS the new key).
+      if (previous && previous.sha256 !== d.meta.sha256) {
         await deps.objects.delete(objectKey(area, path, previous.sha256)).catch(() => undefined)
       }
       // To a non-reader, every successful write to an existing path is

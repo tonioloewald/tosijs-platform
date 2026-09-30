@@ -405,4 +405,21 @@ describe('0.3.0 review remediation', () => {
     const g = await handleBlob({ method: 'GET', pathname: '/blob/blog:public/a.png', userRoles: anonymousUser }, deps)
     expect((g as { url: string }).url).toContain('type=image/webp')
   })
+
+  test('re-review 2: a non-reader\'s matching PUT does the same work as a miss (no timing tell)', async () => {
+    const admin = who([ROLES.admin, ROLES.author])
+    const { deps, objects, metas } = fakes()
+    await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'secret', 'text/plain', admin), deps)
+    let puts = 0
+    const realPut = deps.objects.put
+    deps.objects.put = async (...a) => {
+      puts++
+      return realPut(...a)
+    }
+    await handleBlob(putReq('/blob/lib:dropbox/d.txt', 'secret'), deps)
+    expect(puts).toBe(1)
+    // …and the live object survives it: same key, same bytes, still referenced.
+    expect(objects.size).toBe(1)
+    expect(must(metas.get('lib:dropbox/d.txt')).sha256).toBe(createHash('sha256').update('secret').digest('hex'))
+  })
 })

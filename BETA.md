@@ -396,10 +396,15 @@ What to know:
   and are **sandboxed by default**: only inert media (common image formats,
   audio, video, PDF, plain text, JSON) render without a sandbox CSP. An
   uploaded SVG cannot run script as your site.
-- **Files are reachable only through `/blob`.** Area objects are stored under
-  `<namespace>:<area>/…` in the default bucket; the host's `storage.rules` must
-  not grant direct reads there (this repo's rules exclude any namespaced first
-  segment). Deploy `storage.rules` with the functions.
+- **Files are reachable only through `/blob`.** Area objects share the default
+  bucket with the legacy folders. Everything else that reads the bucket —
+  `storage.rules` for direct client access, and `/stored` — reads only an
+  allowlist of legacy folders (`blog/`, `public/`, `users/`), so an area is out
+  of their reach by construction. Deploy `storage.rules` with the functions.
+- **The sandbox comes from Hosting.** Hosting's site-wide CSP replaces a CSP
+  set by a function, so `firebase.json` has a header rule sandboxing
+  `/blob/**` and `/stored/**`, placed after the site-wide one. Keep it if you
+  change your headers.
 - **Denials are opaque**, as everywhere: a private file you cannot read is a
   `404`, the same as a missing one.
 - **Hosting:** a host serving `/blob` from its own domain needs the rewrite
