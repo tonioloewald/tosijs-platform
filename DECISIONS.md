@@ -30,6 +30,9 @@ time, carry the entry with the code.
 | [D17](#d17) | Install v1 is declarative; `functions` is refused, not ignored | this repo |
 | [D18](#d18) | Consumer order: virta, then the tjs-lang platform, then loewald.com | all |
 | [D19](#d19) | loewald.com moves ahead of the tjs-lang backend (amends D18) | all |
+| [D20](#d20) | An admin suite: data, rules, roles, assets; prompts are documents; RSS | this repo + tosijs-ui + tosijs-blog |
+| [D21](#d21) | Files live in storage areas: collections with blob limits | this repo |
+| [D22](#d22) | Setup: as few human steps as security allows; IAM only from code | this repo |
 
 ---
 
@@ -482,3 +485,90 @@ D18's other half stands: the blog is migrated in discrete pieces, not converted 
 order: a catch-up deploy of current platform code (compiled configs, rehearsed on a clone); then
 the deferred swap of the bare-name collections to the registry's seeded configs (measured on the
 clone first); client extraction to `tosijs-blog` later, per ROADMAP.
+
+---
+
+## D20
+**An admin suite for what every host needs: data, rules, roles and assets.** *(2026-09-28, owner)*
+
+Every host needs to manage its data, its rules, its roles and its files, and most platforms do it
+half-heartedly. Firebase's console is a standing annoyance and knows nothing about our schemas or
+access rules. So the platform grows its own tools, as exported components:
+
+- a **data manager**: general-purpose, schema-aware CRUD (tosijs-ui `tosiCrud` + `tosiSchemaForm`);
+- a **rules manager**: create collections and manage their schemas and access rules;
+- the **role manager**, extracted as a component that works on the built-in roles and is designed
+  to be extended;
+- the **asset manager** (tosijs-assets), alongside them.
+
+**The schema editor goes upstream to tosijs-ui** (tosijs-ui #2454), writing `x-tosi` annotations
+that `tosiSchemaForm` honours. They are presentation only, never correctness: hidden, locked,
+widget, class, and sections (a named, optionally collapsed grouping; a nested object is an
+implicit section). tosijs-schema treats `x-` keywords as annotations, so manifests accept them;
+the `ui:*` style other libraries use is refused.
+
+Two content decisions made with it:
+- **AI prompts are documents** in a collection, owned or shared like any other. They are not
+  hard-coded in the client or in tosijs-blog config. `gen` runs a prompt by reference, under the
+  caller's access to that prompt.
+- **RSS, with enclosures.** Feed items carry media enclosures, which gives podcasts for free.
+
+Open: where the suite lives and what it is called. Board: #2448 (epic), #2449-#2453.
+
+---
+
+## D21
+**Files live in storage areas: collections with blob limits.** *(2026-09-29, owner; shipped in
+0.3.0)*
+
+A **storage area** is a namespaced collection with `blob: {maxBytes, contentTypes?}`. Each file has
+a metadata document, and the area's access rules are the files' access rules. There is no second
+permission system for files (owner: "the namespace/bucket works like a collection for permissions
+purposes").
+
+- **Public vs private is derived, not declared.** An area is public when `public` has
+  unconditional read. The blog needs two classes, `blog:public` and `blog:private`, and they are
+  two areas, not a flag.
+- **The server measures size and hash.** Object keys carry the content hash, and metadata is
+  committed before an old object is removed. So a metadata document always means its file exists;
+  a crash can orphan an object, never corrupt one.
+- **Metadata is written only through `/blob`.** `/doc` and `/docs` refuse writes to an area.
+- **A caller who cannot read a file gets answers independent of what is stored.** No
+  `unchanged`, the same `409` in an immutable area, and no faster path when a guess matches.
+- **Everything else that reads the bucket reads an ALLOWLIST** of legacy folders (`blog/`,
+  `public/`, `users/`): `storage.rules` and `/stored`. A denylist of area keys was patched twice
+  in the 0.3.0 reviews and still missed a reader (`/stored`, which uses the Admin SDK and ignores
+  `storage.rules`). Before claiming an area is unreachable, list every reader of the bucket.
+- **Files served from the site's origin are sandboxed by Hosting**, not only by the function.
+  Hosting's site-wide CSP replaces a CSP a function sets.
+- **One bucket for now.** Areas could map to buckets later (owner: namespaces "might even
+  correspond to buckets"); the allowlist is what keeps a shared bucket safe meanwhile.
+- **Migration renames** (owner, 2026-10-01): existing files whose names `/blob` refuses get clean
+  names on the way in. The originals stay, so old links keep working.
+
+The `blob` *capability* in manifests is superseded by this; the installer says so. Reviews:
+`reviews/0.3.0-storage-areas*.md`.
+
+---
+
+## D22
+**Setup: as few human steps as security allows; cloud IAM only from code.** *(2026-09-30, owner)*
+
+The goal is the simplest setup possible without sacrificing security, and without leaning on
+Google Cloud's (or anyone's) convoluted permission model. Our authority model (roles, grants,
+tokens, storage areas) is data the platform owns. The cloud's IAM is plumbing.
+
+- **The only human steps are the ones that are about a human:** creating the project and billing
+  (money); enabling the Google sign-in provider (Firebase only creates its OAuth client in the
+  console); and claiming the host (authority starts with a person signing in, D16).
+- **Every cloud permission the platform needs is declared in code or applied by the provisioner**,
+  never by hand afterwards. Endpoints declare `invoker: 'public'` and every deploy re-applies it;
+  a one-off binding was lost twice in practice. A future signed-URL grant goes in the provisioner.
+- **Deploying ships the whole host, then checks it from outside** (`bun run deploy`). A release
+  that changes code and rules together must ship both.
+- **Post-setup ceremonies become pages, not consoles:** a one-click `/claim` (#2489) and an
+  install consent page (#2490). `configurator` power never leaves the browser.
+
+Lands as: `functions/src/endpoint-options.ts`, `scripts/deploy.js`, `scripts/provision-sandbox.js`,
+and the two board tasks.
+

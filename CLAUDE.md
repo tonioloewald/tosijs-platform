@@ -56,9 +56,10 @@ bun seed               # Seed emulators with initial_state data
 bun seed-clear         # Clear emulators and reseed
 bun build              # Build client to dist/
 bun format             # Format code with Prettier
-bun deploy             # Deploy everything to Firebase
-bun deploy-functions   # Deploy Cloud Functions only
-bun deploy-hosting     # Deploy static hosting only
+bun run deploy         # THE deploy: whole host in order (indexes → functions+rules+hosting), then checks it
+bun run deploy:sandbox # Same, to the sandbox alias (refuses consumer/unmarked hosts, e.g. virta)
+bun deploy-functions   # Expert: functions only — ships no rules or headers changed alongside
+bun deploy-hosting     # Expert: hosting only
 bun latest             # Upgrade Bun + reinstall root and functions deps
 bun seed-production    # Seed production Firestore (scripts/seed-production.js)
 bun initial-deploy     # First-time deploy bootstrap (scripts/initial-deploy.js)
@@ -77,7 +78,7 @@ npm run lint                                # Lint (eslint, google config)
 
 Tests come in two flavors. Unit tests (`*.test.ts`, e.g. `access.test.ts`) run standalone. Integration tests (`*.integration.test.ts`, e.g. `access.integration.test.ts`) hit live endpoints and are **skip-guarded** — they pass vacuously (`expect(true).toBe(true)`) unless emulators are up, so a green CI run does not mean they exercised anything. To actually run them: `cd functions && bun run build`, then from the root `bun start-emulated` + `bun seed`, then `bun test src/collections/access.integration.test.ts`. The emulators run compiled code from `lib/`, so **rebuild and restart emulators** after changing functions.
 
-**Emulator gotcha:** the globally installed `firebase-tools` is **10.1.0**, which is incompatible with firebase-functions v7 — the functions emulator runtime calls the removed `functions.config()` and crashes on startup, so **`bun start-emulated` fails as written**. Until the global CLI is upgraded, start emulators with:
+**Emulator note:** the global `firebase-tools` was **10.1.0** until late September 2026, which crashed the functions emulator under firebase-functions v7 (it calls the removed `functions.config()`). It is now **15.x** (15.28.2 as of 2026-10-01), so that failure should be gone, but `bun start-emulated` has not been re-verified since the upgrade. The scripts here use `npx -y firebase-tools@latest`, which always works:
 
 ```bash
 npx -y firebase-tools@latest emulators:start --only auth,functions,firestore
@@ -92,7 +93,7 @@ Note: `functions/` is npm-managed — `package-lock.json` is authoritative and `
 ### Client-Server Split
 
 - **`src/`** - Client-side TypeScript, built with Bun to `dist/`
-- **`functions/src/`** - Firebase Cloud Functions (Node.js 20), compiled to `functions/lib/`
+- **`functions/src/`** - Firebase Cloud Functions (Node.js 22, `engines` in `functions/package.json`), compiled to `functions/lib/`
 - **`functions/shared/`** - TypeScript types shared between client and server
 
 `functions/shared/` is imported by *both* tiers by relative path — client files do
@@ -102,10 +103,10 @@ why output lands in `lib/shared/` + `lib/src/` and `functions/package.json` decl
 `main: "lib/src/index.js"`. **Editing a file in `shared/` changes both the client bundle and the
 deployed functions** — check both sides.
 
-Two build quirks worth knowing before touching them: `functions/tsconfig.json` excludes
-`src/gen.ts` (and all `*.test.ts`), and `firebase.json`'s functions `ignore` list excludes
-`**/gen.ts` and `**/gen.js` from upload — while `src/index.ts` still exports `gen`. Verify what
-actually ships before assuming a `gen.ts` change deploys.
+A build quirk worth knowing: `functions/tsconfig.json` lists `src/gen.ts` under `exclude`, but
+`exclude` only stops tsc from *picking a file up on its own*. `src/index.ts` imports `gen`, so it
+compiles and ships anyway (checked 2026-10-01: `lib/src/gen.js` is current and `gen` is deployed).
+`firebase.json` no longer ignores `gen`.
 
 ### Key REST Endpoints (Cloud Functions)
 
@@ -116,12 +117,14 @@ All Firestore access goes through Cloud Functions, not the client SDK:
 - **`/esm`** - Dynamic ES module serving from Firestore
 - **`/prefetch`** (+ `/prefetchData`) - Server-side rendering for SEO
 - **`/gen`** - LLM text generation (Gemini); uses `defineSecret` for API keys
-- **`/stored`** - Storage proxy endpoint
+- **`/blob`** - Files in **storage areas** (manifest collections with `blob` limits; D21). PUT/GET/DELETE `/blob/<area>/<path>`, POST move. Decisions in `collections/blob.ts`, request handling in `blob-handler.ts`, wiring in `blob-endpoint.ts`
+- **`/stored`** - LEGACY file reader: Admin SDK, so `storage.rules` never applies to it; serves only the allowlisted legacy folders (`legacy-storage.ts`, mirrored in `storage.rules`, agreement tested)
+- **`/install`**, **`/claim`**, **`/token`**, **`/authorize`** - Library install, host bootstrap (D16), scoped agent tokens, and the browser loop that issues them (see BETA.md)
 - **`/cachedQuery`** - Cached collection queries
 - **`/sitemap`** - Sitemap generation
 - **`/state`**, **`/user`** - App state and user/role management
 
-Endpoints are individual Firebase v2 `onRequest` functions, each exported from `functions/src/index.ts`. New endpoints follow the pattern in `functions/src/hello.ts`: handle CORS via `optionsResponse`, get roles via `getUserRoles` (both from `utilities.ts`), then export from `index.ts`.
+Endpoints are individual Firebase v2 `onRequest` functions, each exported from `functions/src/index.ts`. New endpoints follow the pattern in `functions/src/hello.ts`: declare `onRequest(PUBLIC_ENDPOINT, …)` (`endpoint-options.ts`; a test fails without it, and it is what keeps the function publicly invocable across deploys), handle CORS via `optionsResponse`, get roles via `getUserRoles` (both from `utilities.ts`), then export from `index.ts` and add the name to `PLATFORM_FUNCTIONS` or `SITE_FUNCTIONS` in `scripts/sandbox-lib.js` (the deploy check probes those).
 
 ### Access Control System
 
@@ -223,13 +226,16 @@ intent, but **the file paths in them predate the `collections/` reorg** — `acc
 - **`.firebaserc`** - Project ID binding
 - **`firebase.json`** - Hosting, functions, emulator config
 - **`firestore.rules`** - Deny-all (all access through functions)
-- **`storage.rules`** - Storage security rules
+- **`storage.rules`** - Reads are an ALLOWLIST of legacy folders (`blog/`, `public/`, `users/`), no default rule. Storage areas share the bucket and are served only by `/blob` (D21)
 - **`src/firebase-config.ts`** - Client-side Firebase config (API keys)
 
 **Hosting rewrites matter more than they look.** `firebase.json` routes `/sitemap.xml` → `sitemap`,
-`/esm/*` → `esm`, `/stored/**` → `stored`, and then **`**` → `prefetch`** — so every request not
+`/esm/*` → `esm`, `/stored/**` → `stored`, `/blob/**` → `blob`, and then **`**` → `prefetch`** — so every request not
 matching a static file in `dist/` is served by the `prefetch` function, not by static hosting. That
 catch-all is what makes SSR/SEO work, and it means a routing or 404 bug in production is usually a
 `prefetch.ts` bug. (Per ROADMAP Phase 2, `prefetch.ts` and `sitemap.ts` are slated for removal —
 so change these rewrites deliberately, not incidentally.) `hosting.headers` also sets a CSP that
 allows `unsafe-eval` and a specific CDN allowlist; dynamically loaded `/esm` modules depend on it.
+Hosting's headers **replace** headers a function sets, so the sandbox for files served from the
+site's own origin is a second header rule, `/@(blob|stored)/**`, placed after the site-wide one and
+equal to `SANDBOX_CSP` in `blob-handler.ts` (tests pin both).

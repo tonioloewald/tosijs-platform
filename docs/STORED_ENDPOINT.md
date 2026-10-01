@@ -1,6 +1,11 @@
 # Storage File Endpoint
 
-The `/stored` endpoint serves files from Firebase Cloud Storage via simple URL paths.
+The `/stored` endpoint serves files from the **legacy folders** of the default Cloud Storage
+bucket (`blog/`, `public/`, `users/`) via simple URL paths.
+
+> **New files belong in storage areas (`/blob`).** As of 0.3.0, files with their own access rules
+> live in storage areas (DECISIONS D21, BETA.md "Store files"). `/stored` remains for the existing
+> `blog/` and `public/` files and the links that point at them.
 
 ## Overview
 
@@ -26,9 +31,13 @@ const imageUrl = pathToStoredUrl('blog/photo.webp')
 ## How It Works
 
 1. Request comes to `/stored/{path}`
-2. Function looks up the file in Firebase Storage at `gs://bucket/{path}`
-3. In production: redirects to a signed URL (1 hour expiry)
-4. In emulator: streams the file directly (signed URLs not supported)
+2. The path is percent-decoded and must lie inside a legacy folder (`blog/`, `public/`, `users/`;
+   `LEGACY_FOLDERS` in `functions/src/legacy-storage.ts`). Anything else is a 404, exactly like a
+   missing file.
+3. Function looks up the file in the project's **default bucket**
+4. If the host can sign URLs: redirects to a signed URL (1 hour expiry)
+5. Otherwise (the emulator, or a functions service account without "Service Account Token
+   Creator"): streams the file directly
 
 ## Caching
 
@@ -49,8 +58,8 @@ Supported extensions include images (webp, png, jpg, gif, svg, avif), video (mp4
 
 | Status | Reason |
 |--------|--------|
-| 400 | Invalid storage path |
-| 404 | File not found |
+| 400 | Not a `/stored/...` URL |
+| 404 | File not found, or not in a legacy folder (indistinguishable on purpose) |
 | 500 | Error reading file |
 
 ## Configuration
@@ -86,11 +95,18 @@ The asset manager automatically:
 
 ## Emulator Support
 
-The Firebase Storage emulator doesn't support `getSignedUrl()`, so the function falls back to streaming the file directly. This is transparent to the client.
+The Firebase Storage emulator doesn't support `getSignedUrl()`, so the function falls back to streaming the file directly. This is transparent to the client. Production does the same when the functions service account cannot sign URLs.
 
 ## Security
 
-Files are served based on Firebase Storage security rules. Currently configured for public read access. Modify `storage.rules` to restrict access if needed.
+`/stored` uses the **Admin SDK, so `storage.rules` never applies to it.** It shares the bucket
+with `/blob`'s storage areas, which have their own access rules. So it reads only an ALLOWLIST of
+legacy folders. A denylist of area keys missed exactly this reader in the 0.3.0 review. To add a
+folder, change both `functions/src/legacy-storage.ts` and `storage.rules`; a test checks they agree.
+
+Streamed files come from the site's own origin, so they are sent `nosniff`, and Hosting applies a
+sandbox CSP to `/stored/**` (an uploaded SVG cannot run script as the site). The function's own
+CSP is replaced by Hosting's, which is why the rule lives in `firebase.json`.
 
 ## See Also
 
