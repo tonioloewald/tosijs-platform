@@ -604,6 +604,14 @@ the visible-pages list for the nav, the blog cache. Its handlers once raced each
   a template change, or as a backstop) is cheap at blog scale.
 - **Renderers are pure** (documents in, string out), tested without emulators, and are the natural
   first real use of stored ajs once it exists; `sitemap.ts` and the blog cache retire.
+- **Markdown (and syntax highlighting) is a host capability**, not ajs *(owner, same day)*. The
+  host offers a vetted, pure `markdown(source)` / `highlight(code, lang)` that renderers call;
+  ajs renderers will call them like any capability. The engine is the same `marked` version and
+  settings the client components use, so server HTML and client rendering cannot drift. Why: ajs
+  refuses classes, `new`, callbacks and `for` loops, so `marked` cannot be transpiled, and a
+  hand-written parser would have to match the client exactly (and tjs-lang#59 makes accumulating
+  code silently wrong today). Until stored ajs exists, the TypeScript renderers call `marked`
+  directly, the same function the capability will wrap.
 
 Board: #2698 (design + prototype).
 
