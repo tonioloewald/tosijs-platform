@@ -5,15 +5,11 @@ import * as functions from 'firebase-functions'
 import compression from 'compression'
 import { optionsResponse } from './utilities'
 import { asPublicRequest } from './public-request'
-import { DOCTYPE, elements } from './elements'
-import { absoluteUrl, siteOrigin } from './social-meta'
+import { renderDocument } from './render/document'
+import { siteOrigin } from './social-meta'
 
 const compressResponse = compression()
 
-const iconUrl = '/logo.png'
-const manifestUrl = '/manifest.json'
-const scriptUrl = '/index.js'
-const pageImage = '/logo.png'
 
 export interface PageOptions {
   title: string
@@ -78,49 +74,21 @@ const render = async (
   url: string,
   options: PageOptions
 ): Promise<string> => {
-  const { html, head, meta, title, link, script, body } = elements
-
   const merged = await getPrefetchData(req, res, url, options)
-  const data = JSON.stringify(merged).replace(/"(\w+)":/g, '$1:')
-
-  // Social previews need absolute URLs, and X shows a card only when asked to.
-  const origin = siteOrigin(req.headers ?? {})
-  const pageUrl = absoluteUrl(options.url || url, origin)
-  const ownImage = Boolean(options.imageUrl)
-  const imageUrl = absoluteUrl(options.imageUrl || pageImage, origin)
-
-  return (
-    DOCTYPE +
-    html(
-      { lang: 'en' },
-      head(
-        meta({ charset: 'utf-8' }),
-        title(options.title),
-        meta({ name: 'description', content: options.description }),
-        meta({ property: 'og:title', content: options.title }),
-        meta({ property: 'og:description', content: options.description }),
-        meta({ property: 'og:url', content: pageUrl }),
-        meta({ property: 'og:image', content: imageUrl }),
-        meta({ property: 'og:type', content: options.type || 'website' }),
-        meta({ name: 'twitter:card', content: ownImage ? 'summary_large_image' : 'summary' }),
-        link({ rel: 'icon', href: '/favicon.ico' }),
-        meta({
-          name: 'viewport',
-          content: 'width=device-width, initial-scale=1',
-        }),
-        meta({ name: 'theme-color', content: '#000000' }),
-        link({ rel: 'apple-touch-icon', href: options.imageUrl || iconUrl }),
-        link({ rel: 'manifest', href: manifestUrl }),
-        script(
-          {
-            /* nonce, */
-          },
-          `var prefetched = ${data}`
-        ),
-        script({ /* nonce, */ type: 'module', src: scriptUrl })
-      ),
-      body()
-    )
+  // The shared, pure renderer (D23): it escapes the embedded data so a post
+  // cannot end the <script> (a live XSS here until 2026-10-01), keeps keys
+  // quoted (the old unquoting regex rewrote `"word":` inside strings), and
+  // escapes the title as text.
+  return renderDocument(
+    {
+      title: options.title,
+      description: options.description,
+      imageUrl: options.imageUrl,
+      url: options.url || url,
+      type: options.type,
+    },
+    merged,
+    siteOrigin(req.headers ?? {})
   )
 }
 
