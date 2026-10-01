@@ -1,4 +1,4 @@
-# service-compris
+# <img src="https://raw.githubusercontent.com/tonioloewald/tosijs-platform/main/assets/service-compris.png" width="48" height="48" alt="" align="top"> service-compris
 
 *Service compris* — service included. Also, **understood**, which is the reading that matters: this
 is the part of a backend that **decides** things, small enough to read and pure enough to test
