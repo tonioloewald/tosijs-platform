@@ -22,7 +22,7 @@
  */
 
 import { deliveryHeaders } from './blob-handler'
-import { legacyObjectPath } from './legacy-storage'
+import { storedObjectPath } from './legacy-storage'
 import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
 import * as admin from 'firebase-admin'
@@ -45,9 +45,7 @@ export const stored = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   }
 
   const url = (req.headers['x-forwarded-url'] as string) || req.url
-  const match = url?.match(STORED_PATH_REGEX)
-
-  if (!match) {
+  if (!url?.split(/[?#]/)[0].match(STORED_PATH_REGEX)) {
     res.status(400).send('Invalid storage path')
     return
   }
@@ -57,7 +55,8 @@ export const stored = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   // /blob — so without an allowlist it would serve any storage area's private
   // objects to anyone with the key (0.3.0 re-review 2, B1). Refused exactly
   // like a missing file, so it reveals nothing.
-  const filePath = legacyObjectPath(match[1])
+  // (and never the query string — `?v=2` is not part of the object's name)
+  const filePath = storedObjectPath(url)
   if (!filePath) {
     res.status(404).send('File not found')
     return

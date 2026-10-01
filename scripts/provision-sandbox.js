@@ -61,6 +61,7 @@ import {
   resolveSandbox,
   productionProjectId,
   api,
+  grantSelfSigning,
   run,
   capture,
   parseArgs,
@@ -487,6 +488,15 @@ async function main() {
   // re-running changes nothing and nothing else in the policy is clobbered.
   step('5b', 'Public invoker bindings')
   await grantPublicInvokers(projectId, dry)
+
+  // --- 5c. Let the functions sign URLs (D22) -------------------------------
+  // Without this /blob and /stored stream every file through the function.
+  // The console flow for it is awful; this is one narrow binding, set here.
+  step('5c', 'URL signing for /blob and /stored')
+  {
+    const { account, changed } = await grantSelfSigning(projectId, { dryRun: dry, region: FUNCTIONS_REGION })
+    console.log(`   ${account}: ${changed ? (dry ? 'would grant Token Creator on itself' : 'granted Token Creator on itself') : 'already can sign'}`)
+  }
 
   // --- 6. Seed ------------------------------------------------------------
   step(6, 'Seed from initial_state/')

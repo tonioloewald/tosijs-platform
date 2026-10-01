@@ -33,3 +33,14 @@ export function legacyObjectPath(raw: string): string | null {
   if (!(LEGACY_FOLDERS as readonly string[]).includes(segments[0])) return null
   return path
 }
+
+/**
+ * The legacy object path a `/stored/...` request names, or null. The query
+ * string is NOT part of the name: a cache-buster (`?v=2`) made /stored look up
+ * `blog/x.png?v=2` and answer 404 (found 2026-10-01).
+ */
+export function storedObjectPath(url: string | undefined): string | null {
+  const match = (url ?? '').split(/[?#]/)[0].match(/\/stored\/(.+)$/)
+  return match ? legacyObjectPath(match[1]) : null
+}
+

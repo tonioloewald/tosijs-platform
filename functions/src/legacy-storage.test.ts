@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test'
-import { legacyObjectPath } from './legacy-storage'
+import { legacyObjectPath, storedObjectPath } from './legacy-storage'
 import { objectKey } from './blob-handler'
 
 describe('legacyObjectPath — what the legacy readers may touch', () => {
@@ -23,3 +23,17 @@ describe('legacyObjectPath — what the legacy readers may touch', () => {
     }
   })
 })
+
+describe('storedObjectPath — the object a /stored URL names', () => {
+  test('the query string and fragment are not part of the name', () => {
+    expect(storedObjectPath('/stored/blog/Harris-2024.jpeg?t=123')).toBe('blog/Harris-2024.jpeg')
+    expect(storedObjectPath('/stored/blog/a.png#top')).toBe('blog/a.png')
+    expect(storedObjectPath('/stored/blog/Character%20Sheet.pdf?v=2')).toBe('blog/Character Sheet.pdf')
+  })
+  test('still refuses what legacyObjectPath refuses, and non-/stored URLs', () => {
+    expect(storedObjectPath('/stored/blog:private/x@aaaa?t=1')).toBeNull()
+    expect(storedObjectPath('/elsewhere/blog/a.png')).toBeNull()
+    expect(storedObjectPath(undefined)).toBeNull()
+  })
+})
+

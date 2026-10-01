@@ -321,3 +321,44 @@ export function namePublishesContact(name, contacts = []) {
   if (values.includes(n.toLowerCase())) return 'equals one of its contacts'
   return null
 }
+
+/**
+ * Let the functions SIGN URLs: grant their runtime service account "Service
+ * Account Token Creator" ON ITSELF (D22). Signed URLs need `signBlob`; without
+ * it /blob and /stored stream every file through the function.
+ *
+ * Narrow on purpose: the binding is on the service account's OWN policy, so it
+ * can sign as itself and nothing else — not the project-wide grant the console
+ * steers you to, which lets it impersonate every service account in the
+ * project. Idempotent: reads, merges, writes back only if missing.
+ *
+ * Returns { account, changed }. Reads happen on a dry run; only the write is
+ * suppressed.
+ */
+export async function grantSelfSigning(projectId, { dryRun = false, region = 'us-central1', probe = 'blob' } = {}) {
+  // The account the functions actually RUN as — read from a deployed service,
+  // not assumed (a host may set its own).
+  const svc = await api('GET', `https://run.googleapis.com/v2/projects/${projectId}/locations/${region}/services/${probe}`)
+  let account = svc.ok ? svc.json?.template?.serviceAccount : null
+  if (!account) {
+    const proj = await api('GET', `https://cloudresourcemanager.googleapis.com/v1/projects/${projectId}`)
+    if (!proj.ok) throw new Error(`cannot read project ${projectId}: ${proj.status}`)
+    account = `${proj.json.projectNumber}-compute@developer.gserviceaccount.com`
+  }
+  const base = `https://iam.googleapis.com/v1/projects/${projectId}/serviceAccounts/${account}`
+  const current = await api('POST', `${base}:getIamPolicy`, {})
+  if (!current.ok) throw new Error(`cannot read the policy of ${account}: ${current.status} ${JSON.stringify(current.json).slice(0, 200)}`)
+  const policy = current.json ?? {}
+  const role = 'roles/iam.serviceAccountTokenCreator'
+  const member = `serviceAccount:${account}`
+  const bindings = policy.bindings ?? []
+  const existing = bindings.find((b) => b.role === role)
+  if (existing?.members?.includes(member)) return { account, changed: false }
+  if (dryRun) return { account, changed: true }
+  const next = existing
+    ? bindings.map((b) => (b.role === role ? { ...b, members: [...b.members, member] } : b))
+    : [...bindings, { role, members: [member] }]
+  const set = await api('POST', `${base}:setIamPolicy`, { policy: { ...policy, bindings: next } })
+  if (!set.ok) throw new Error(`cannot grant signing to ${account}: ${set.status} ${JSON.stringify(set.json).slice(0, 200)}`)
+  return { account, changed: true }
+}
