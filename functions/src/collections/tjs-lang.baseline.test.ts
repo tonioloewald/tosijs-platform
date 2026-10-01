@@ -296,6 +296,29 @@ describe('tripwire: bare context binding still returns its name', () => {
   })
 })
 
+// Silent wrong results found 2026-10-01 while assessing ajs for render-on-store
+// (tjs-lang#59; present in 0.13.12 and 0.14.0-rc.1). Compound assignment stores
+// only the RHS, and reassigning an outer `let` inside for…of is lost. Any ajs
+// that ACCUMULATES (renderers, counters) must use `x = x + y` in a `while`
+// loop, or mutate through a method (push), until these fail — which is the
+// good news: then delete this note and the workaround.
+describe('tripwire: compound assignment and for…of reassignment (tjs-lang#59)', () => {
+  const run = async (code: string) => (await Eval({ code, fuel: FUEL })).result
+  test('`+=` stores only the right-hand side', async () => {
+    expect(await run(`let s = 'a'; s += 'b'; return s`)).toBe('b') // BROKEN: should be 'ab'
+  })
+  test('`-=` too', async () => {
+    expect(await run(`let n = 5; n -= 2; return n`)).toBe(2) // BROKEN: should be 3
+  })
+  test('reassigning an outer let inside for…of is lost', async () => {
+    expect(await run(`let s = ''; for (const w of ['a','b']) { s = s + w } return s`)).toBe('') // BROKEN: 'ab'
+  })
+  test('the workarounds are correct, so use them', async () => {
+    expect(await run(`let s = ''; let i = 0; while (i < 2) { s = s + 'x'; i = i + 1 } return s`)).toBe('xx')
+    expect(await run(`const out = []; for (const w of ['a','b']) { out.push(w) } return out.join('')`)).toBe('ab')
+  })
+})
+
 // ── 7. The invariant our host must enforce regardless ───────────────────────
 // UNIVERSAL-ENDPOINT.md §4.2: "non-boolean return evaluates as false". Upstream
 // coerces with `!!`; we must not. This is belt-and-braces now that #52 is fixed,
