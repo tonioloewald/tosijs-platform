@@ -33,6 +33,7 @@ time, carry the entry with the code.
 | [D20](#d20) | An admin suite: data, rules, roles, assets; prompts are documents; RSS | this repo + tosijs-ui + tosijs-blog |
 | [D21](#d21) | Files live in storage areas: collections with blob limits | this repo |
 | [D22](#d22) | Setup: as few human steps as security allows; IAM only from code | this repo |
+| [D23](#d23) | Render on store: SSR pages, nav, blog index, sitemap and RSS are rendered when content is written, served as stored files | this repo (renderers → stored ajs later) |
 
 ---
 
@@ -571,4 +572,38 @@ tokens, storage areas) is data the platform owns. The cloud's IAM is plumbing.
 
 Lands as: `functions/src/endpoint-options.ts`, `scripts/deploy.js`, `scripts/provision-sandbox.js`,
 and the two board tasks.
+
+---
+
+## D23
+**Render on store: pages and shared fragments are rendered when content is written, not when it
+is read.** *(2026-10-01, owner)* Refines the SSR half of ROADMAP Phase 3 and D8.
+
+Today every uncached visit re-runs several Firestore queries in `prefetch`: the page, `config/app`,
+the visible-pages list for the nav, the blog cache. Its handlers once raced each other (fixed
+2026-09-30). The sitemap streams every post on every request, uncached. Instead:
+
+- **On write** (after the commit, from the hooks the registry already names), the affected
+  artifacts are re-rendered **as the public user** and stored in a public storage area:
+  - the **per-route page**: its `<head>` (title, description, social tags) and its own data;
+  - the **nav fragment** (`appConfig` + visible pages): shared by every page, so it is stored
+    once, not inlined. Otherwise renaming one nav page would re-render all ~850 pages;
+  - the **blog-index fragment** (latest + recent posts), replacing `config/blog-cache` and its
+    24-hour expiry;
+  - **`sitemap.xml`** and the **RSS feed** (D20), rendered from a small per-post index
+    (`{path, date, published}`) kept up to date on each write, not from a full scan.
+- **Each content type declares what it affects.** A post edit re-renders its page and, only when
+  published state/title/date/summary change, the blog index, sitemap and feed. A nav change
+  re-renders one fragment.
+- **Serving is reads only:** `prefetch` combines page + nav + blog-index (no queries) and returns
+  it with CDN caching. A miss (e.g. a draft opened by direct link, or a route nobody has visited)
+  renders once on demand and is stored. An unknown route has no page and is a real 404.
+- **SSR is public by construction** (D10): nothing renders with a visitor's rights.
+- **Failure is stale, never broken:** a failed render keeps the previous artifact and logs.
+  Artifacts record the document versions they came from; a re-render-everything command (e.g. after
+  a template change, or as a backstop) is cheap at blog scale.
+- **Renderers are pure** (documents in, string out), tested without emulators, and are the natural
+  first real use of stored ajs once it exists; `sitemap.ts` and the blog cache retire.
+
+Board: #2698 (design + prototype).
 
