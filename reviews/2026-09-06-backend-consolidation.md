@@ -112,3 +112,12 @@ Unauthenticated write/storage/invocation billing abuse on the production project
 5. Remaining gaps are covered above: no restore path (F19), duplicate collection registry (F21), `SHADOW_WRITE_PIPELINE` plumbing (F7), shadow post-response cost unmeasured (F8), `tjs-lang` undeclared in `functions/` (F13), `src/blog.ts` uncovered (F11), sibling `doc.ts` 403s left non-opaque (F5), personal plist in a clone template (F18).
 
 *No `reviews/` directory exists — no cycle flag.*
+
+---
+
+**STATUS: CLEARED** (checked 2026-10-01). All three blockers were fixed the same day in `5583196` ("fix: all three blockers from the 2026-09-06 pre-release review"), with regression tests in `functions/src/collections/blockers.test.ts`, which still pass.
+- **B1:** `#proofOpen` guards `src/blog.ts`. Save, Close, Proofread, Summarize and Convert refuse while a review is open.
+- **B2:** `afterWrite` runs on DELETE (`doc.ts:446`) and after every transactional commit (`commit.ts:187`).
+- **B3:** `COLLECTIONS.test` registers only under `FUNCTIONS_EMULATOR`. Production `GET /docs?p=test` now returns 404, and the production `test` collection holds no documents.
+
+The review was simply never marked cleared. Releases 0.2.0 through 0.3.0 shipped after it.
