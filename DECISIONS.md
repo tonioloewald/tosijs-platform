@@ -604,6 +604,9 @@ the visible-pages list for the nav, the blog cache. Its handlers once raced each
   a template change, or as a backstop) is cheap at blog scale.
 - **Renderers are pure** (documents in, string out), tested without emulators, and are the natural
   first real use of stored ajs once it exists; `sitemap.ts` and the blog cache retire.
+- **`prefetch` becomes a core platform function** *(owner, same day)*. Once it only reads stored
+  artifacts it has no site knowledge, so every host gets it (it joins `PLATFORM_FUNCTIONS`), and
+  `sitemap.xml` and the feed are artifacts it serves.
 - **Markdown (and syntax highlighting) is a host capability**, not ajs *(owner, same day)*. The
   host offers a vetted, pure `markdown(source)` / `highlight(code, lang)` that renderers call;
   ajs renderers will call them like any capability. The engine is the same `marked` version and
