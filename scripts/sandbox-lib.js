@@ -362,3 +362,40 @@ export async function grantSelfSigning(projectId, { dryRun = false, region = 'us
   if (!set.ok) throw new Error(`cannot grant signing to ${account}: ${set.status} ${JSON.stringify(set.json).slice(0, 200)}`)
   return { account, changed: true }
 }
+
+/**
+ * Let browsers READ signed-URL responses (D22): give the default bucket a CORS
+ * rule for GET/HEAD from any origin. Needed once signing is on: /blob and
+ * /stored answer with a 302 to storage.googleapis.com, and a page's fetch()
+ * that follows it is cross-origin (an <img> does not care; fetch does). Found
+ * by virta's upgrade (board #2488).
+ *
+ * `origin: *` is safe here: the SIGNED URL is the credential. CORS only lets a
+ * page read what that URL already grants; it grants nothing by itself.
+ * Merged: an existing rule for other methods or origins is kept. Idempotent.
+ */
+const SIGNED_URL_CORS = {
+  origin: ['*'],
+  method: ['GET', 'HEAD'],
+  responseHeader: ['Content-Type', 'Content-Length', 'Content-Range', 'Cache-Control'],
+  maxAgeSeconds: 3600,
+}
+export async function ensureSignedUrlCors(projectId, { dryRun = false } = {}) {
+  const def = await api('GET', `https://firebasestorage.googleapis.com/v1beta/projects/${projectId}/defaultBucket`)
+  const bucket = def.ok ? def.json?.bucket?.name?.split('/').pop() : null
+  if (!bucket) throw new Error(`cannot find the default bucket of ${projectId}: ${def.status}`)
+  const meta = await api('GET', `https://storage.googleapis.com/storage/v1/b/${bucket}?fields=cors`)
+  if (!meta.ok) throw new Error(`cannot read CORS of ${bucket}: ${meta.status}`)
+  const cors = meta.json?.cors ?? []
+  const covered = cors.some(
+    (r) => (r.origin ?? []).includes('*') && ['GET', 'HEAD'].every((m) => (r.method ?? []).includes(m))
+  )
+  if (covered) return { bucket, changed: false }
+  if (dryRun) return { bucket, changed: true }
+  const set = await api('PATCH', `https://storage.googleapis.com/storage/v1/b/${bucket}?fields=cors`, {
+    cors: [...cors, SIGNED_URL_CORS],
+  })
+  if (!set.ok) throw new Error(`cannot set CORS on ${bucket}: ${set.status} ${JSON.stringify(set.json).slice(0, 200)}`)
+  return { bucket, changed: true }
+}
+

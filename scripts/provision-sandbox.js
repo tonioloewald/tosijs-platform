@@ -62,6 +62,7 @@ import {
   productionProjectId,
   api,
   grantSelfSigning,
+  ensureSignedUrlCors,
   run,
   capture,
   parseArgs,
@@ -496,6 +497,8 @@ async function main() {
   {
     const { account, changed } = await grantSelfSigning(projectId, { dryRun: dry, region: FUNCTIONS_REGION })
     console.log(`   ${account}: ${changed ? (dry ? 'would grant Token Creator on itself' : 'granted Token Creator on itself') : 'already can sign'}`)
+    const cors = await ensureSignedUrlCors(projectId, { dryRun: dry })
+    console.log(`   ${cors.bucket}: ${cors.changed ? (dry ? 'would allow cross-origin GET' : 'allows cross-origin GET') : 'already allows cross-origin GET'}`)
   }
 
   // --- 6. Seed ------------------------------------------------------------
