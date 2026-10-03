@@ -186,3 +186,35 @@ describe('policies — transparent caching for values no write announces', () =>
   })
 })
 
+describe('re-review: the store, not each renderer, decides what may be kept', () => {
+  test('a value that read something no write invalidates is returned, reported, and NOT stored', async () => {
+    const errors: string[] = []
+    const store = new ComputedStore(new MemoryBackend(), 'v1', {
+      isInvalidatedDep: (d) => d.startsWith('doc:post/') || d.startsWith('computed:'),
+      onError: (what) => errors.push(what),
+    })
+    expect(await store.get('k', async (d) => (d.add('doc:secret/1'), { value: 'x', storable: true }))).toBe('x')
+    expect(await store.peek('k')).toBeUndefined()
+    expect(errors).toEqual(['not storing v1:k'])
+    await store.get('ok', async (d) => (d.add('doc:post/1'), { value: 'y', storable: true }))
+    expect(await store.peek('ok')).toBe('y')
+  })
+
+  test('cannotStore(reason) keeps a value out of the store', async () => {
+    const store = new ComputedStore(new MemoryBackend(), 'v1')
+    await store.get('k', async (d) => (d.cannotStore('lookup by a non-unique field'), { value: 'x', storable: true }))
+    expect(await store.peek('k')).toBeUndefined()
+  })
+
+  test('a failed LOG write still marks the dependents stale (re-review M1)', async () => {
+    const backend = new MemoryBackend()
+    const store = new ComputedStore(backend, 'v1')
+    await store.get('k', async (d) => (d.add('doc:post/1'), { value: 'v', storable: true }))
+    backend.logInvalidation = async () => {
+      throw new Error('contention')
+    }
+    expect(await store.invalidateDependents(['doc:post/1'])).toEqual(['k'])
+    expect(await store.peek('k')).toBeUndefined()
+  })
+})
+

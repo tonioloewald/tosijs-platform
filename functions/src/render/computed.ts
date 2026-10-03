@@ -85,8 +85,14 @@ export interface ComputedBackend {
  */
 export class Deps {
   readonly seen = new Set<string>()
+  /** Set when the compute read something no write would invalidate: the value is then not stored. */
+  unstorable?: string
   add(dep: string): void {
     this.seen.add(dep)
+  }
+  /** Mark the value as not keepable, with the reason (reported, never silent). */
+  cannotStore(reason: string): void {
+    this.unstorable ??= reason
   }
 }
 
@@ -126,6 +132,12 @@ export interface StoreOptions {
   onError?: (what: string, e: unknown) => void
   /** Clock skew allowed between the reader's clock and the log's timestamps. */
   skewMs?: number
+  /**
+   * Which recorded deps a STORED value may have: only what a write would
+   * invalidate. A value that read anything else is returned but not kept —
+   * enforced here for every compute, not left to each renderer (re-review).
+   */
+  isInvalidatedDep?: (dep: string) => boolean
 }
 
 export class ComputedStore {
@@ -209,7 +221,14 @@ export class ComputedStore {
     const done = new Set<string>()
     let frontier = [...new Set(deps)]
     while (frontier.length) {
-      await this.backend.logInvalidation(frontier)
+      try {
+        await this.backend.logInvalidation(frontier)
+      } catch (e) {
+        // The log only guards the first-fill race; marking dependents stale
+        // must happen regardless (re-review: a failed log write must not drop
+        // the invalidation itself).
+        this.onError(`invalidation log ${this.namespace}`, e)
+      }
       const hits = (await this.backend.dependents(frontier)).filter((k) => !done.has(k))
       hits.forEach((k) => done.add(k))
       await this.invalidate(hits)
@@ -223,6 +242,11 @@ export class ComputedStore {
     const deps = new Deps()
     const { value, storable, check } = await compute(deps)
     if (!storable) return value
+    const unwatched = this.opts.isInvalidatedDep ? [...deps.seen].filter((d) => !this.opts.isInvalidatedDep?.(d)) : []
+    if (deps.unstorable || unwatched.length) {
+      this.onError(`not storing ${this.namespace}:${key}`, new Error(deps.unstorable ?? `reads nothing invalidates: ${unwatched.join(', ')}`))
+      return value
+    }
     const entry: Entry = {
       value: JSON.stringify(value),
       deps: [...deps.seen],

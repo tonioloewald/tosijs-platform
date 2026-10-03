@@ -164,7 +164,9 @@ export const prefetchData = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   const url = (req.query.url as string) || '/'
 
   // The render-on-store path's data, for a live comparison with the old path.
-  if (req.query.engine === 'store') {
+  // Only while the switch is 'compare' or 'true': otherwise anonymous callers
+  // could fill the store before anyone meant to use it (re-review).
+  if (req.query.engine === 'store' && ['true', 'compare'].includes(process.env.RENDER_ON_STORE ?? '')) {
     const served = await serve(url)
     res.header('Content-Type', 'application/json')
     res.status(served.status).json(served.prefetched)

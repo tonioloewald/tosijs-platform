@@ -18,7 +18,7 @@ const { has, val, args } = lib.parseArgs(process.argv)
 const alias = val('alias') ?? 'default'
 const projectId = lib.readRc().projects?.[alias]
 if (!projectId) throw new Error(`no project for alias ${alias}`)
-const version = val('version') ?? 'r2'
+const version = val('version') ?? 'r3'
 // 'legacy': the unversioned collection the first prototype used (2026-10-03).
 const collection = version === 'legacy' ? 'system:render' : `system:render-${version}`
 const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
@@ -58,12 +58,26 @@ if (cmd === 'list') {
   for (const r of rows) console.log(r.key)
   console.log(`${rows.length} value(s) depend on ${arg}`)
 } else if (cmd === 'purge' && (arg || has('all'))) {
-  const rows = has('all') ? await listAll() : [{ name: `projects/${projectId}/databases/(default)/documents/${collection}/${encodeURIComponent(arg)}`, key: arg }]
+  // The stored doc id is encodeURIComponent(key), so its URL path is encoded
+  // TWICE (as `show` does). Encoding once targeted a different id, and
+  // Firestore answers 200 for deleting a missing document (re-review M1).
+  const docUrl = (k) => `${base}/${encodeURIComponent(collection)}/${encodeURIComponent(encodeURIComponent(k))}`
+  const rows = has('all') ? await listAll() : [{ key: arg }]
   if (!has('yes')) {
     console.log(`would delete ${rows.length} value(s) from ${collection} on ${projectId}; re-run with --yes`)
   } else {
-    for (const r of rows) await lib.api('DELETE', `https://firestore.googleapis.com/v1/${r.name}`)
-    console.log(`deleted ${rows.length} value(s) from ${collection} on ${projectId}`)
+    let deleted = 0
+    for (const r of rows) {
+      const url = r.name ? `https://firestore.googleapis.com/v1/${r.name}` : docUrl(r.key)
+      if (!r.name && !(await lib.api('GET', url)).ok) {
+        console.log(`not stored: ${r.key}`)
+        continue
+      }
+      const res = await lib.api('DELETE', url)
+      if (res.ok) deleted++
+      else console.error(`delete failed (${res.status}): ${r.key}`)
+    }
+    console.log(`deleted ${deleted} of ${rows.length} value(s) from ${collection} on ${projectId}`)
   }
 } else {
   console.error('usage: render-store.js --alias <a> list [prefix] | show <key> | dependents <dep> | purge <key>|--all [--version rN] [--yes]')

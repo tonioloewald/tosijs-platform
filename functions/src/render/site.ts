@@ -179,6 +179,8 @@ export function blogIndexFragment(postsNewestFirst: Doc[], renderedAt: string): 
 export interface RouteArtifact {
   key: string
   head: HeadOptions
+  /** The head shows a post: the site's post-title prefix is applied when SERVED (withTitlePrefix). */
+  postTitle?: boolean
   /** This route's OWN data: the page and any hydrated documents. */
   data: Record<string, unknown>
   /** Document path → its `_modified` when rendered, so staleness is visible. */
@@ -203,6 +205,7 @@ export function routeArtifact(input: {
   settings: SiteSettings
 }): RouteArtifact {
   const { pagePath, page, hydrated, latestPost, settings } = input
+  let postTitle = false
   // Derived from the KEY, never from the request: a stored value must not
   // depend on who happened to trigger its compute (cache poisoning).
   const head: HeadOptions = {
@@ -224,6 +227,7 @@ export function routeArtifact(input: {
   if (page?.path === 'blog' && (post || (settings.defaultToBlogMetadata && latestPost))) {
     const shown = (post ?? latestPost) as Doc
     head.title = settings.postTitlePrefix + (shown.title || '')
+    postTitle = true
     head.imageUrl = shown.imageUrl || firstImage(shown.content) || head.imageUrl
     head.description = shown.summary || head.description
     head.url = `/blog/${shown.path}`
@@ -238,7 +242,7 @@ export function routeArtifact(input: {
     if (doc) data[path] = doc
     sources[path] = sourceOf(doc)
   }
-  return { key: routeKey(pagePath, Object.keys(hydrated)), head, data, sources }
+  return { key: routeKey(pagePath, Object.keys(hydrated)), head, data, sources, ...(postTitle ? { postTitle } : {}) }
 }
 
 /**
@@ -271,6 +275,14 @@ export function composePrefetched(
     for (const post of blog.latestPosts) out[`post/path=${post.path}`] = post
   }
   return out
+}
+
+/**
+ * The head as served: the post-title prefix (config/blog) is applied here, not
+ * stored, so editing it invalidates one small value instead of every route.
+ */
+export function withTitlePrefix(route: RouteArtifact, prefix: string): HeadOptions {
+  return route.postTitle && prefix ? { ...route.head, title: prefix + route.head.title } : route.head
 }
 
 // ── sitemap ──────────────────────────────────────────────────────────────

@@ -26,6 +26,8 @@ import { config as siteConfig } from '../config'
 import { isPublished } from '../../shared/post'
 import { collectionsFor } from '../install/installed'
 import { ComputedStore, Deps, depsOfWrite, type ComputedBackend, type Entry } from './computed'
+import { INVALIDATING_COLLECTIONS, isInvalidatedDep } from './rules'
+export { INVALIDATING_COLLECTIONS }
 import {
   blogIndexFragment,
   composePrefetched,
@@ -42,6 +44,7 @@ import {
   type RouteArtifact,
   type RouteTable,
   type SiteSettings,
+  withTitlePrefix,
 } from './site'
 
 /**
@@ -49,14 +52,17 @@ import {
  * lazily. Each version has its OWN collection, so an old one is never scanned
  * by invalidation and can be dropped whole.
  */
-export const RENDER_VERSION = 'r2'
+export const RENDER_VERSION = 'r3'
 const RENDER_COLLECTION = `system:render-${RENDER_VERSION}`
 /** Shared by all versions: which deps were invalidated, and when (see computed.ts, Races). */
 const LOG_COLLECTION = 'system:render-log'
-/** Backstop for changes no hook observes (console edits, seeds, restores, access-rule changes). */
-const BACKSTOP_MAX_AGE_SECONDS = 3600
-/** Collections whose writes invalidate (render/hooks.ts). A value read from any other cannot be kept. */
-export const INVALIDATING_COLLECTIONS = ['post', 'page', 'config']
+/**
+ * Backstop for changes no hook observes (console edits, seeds, restores,
+ * access-rule changes). A day, not an hour: the CDN already serves hot pages,
+ * and an hour would make loewald's long tail miss on nearly every read
+ * (re-review). After an out-of-band edit, purge with scripts/render-store.js.
+ */
+const BACKSTOP_MAX_AGE_SECONDS = 24 * 3600
 
 // ── the Firestore backend ────────────────────────────────────────────────
 
@@ -68,7 +74,9 @@ const logRef = (dep: string) =>
 /** A lost race, as Firestore reports it: anything else is a real failure. */
 const isLostRace = (e: unknown) => {
   const code = (e as { code?: number | string })?.code
-  return code === 6 || code === 9 || code === 'already-exists' || code === 'failed-precondition'
+  // 6 ALREADY_EXISTS, 9 FAILED_PRECONDITION; 5 NOT_FOUND (purged mid-fill) and
+  // 10 ABORTED mean the same thing here: someone else changed the key.
+  return [5, 6, 9, 10, 'not-found', 'already-exists', 'failed-precondition', 'aborted'].includes(code as never)
 }
 const versionOf = (snap: FirebaseFirestore.DocumentSnapshot): string | null =>
   snap.exists && snap.updateTime ? `${snap.updateTime.seconds}.${snap.updateTime.nanoseconds}` : null
@@ -130,9 +138,12 @@ export const firestoreBackend: ComputedBackend = {
     return [...out]
   },
   async logInvalidation(deps) {
-    const batch = admin.firestore().batch()
-    for (const dep of deps.slice(0, 450)) batch.set(logRef(dep), { dep, at: admin.firestore.FieldValue.serverTimestamp() })
-    await batch.commit()
+    // Chunked, never truncated: an unlogged dep would reopen the first-fill race.
+    for (let i = 0; i < deps.length; i += 450) {
+      const batch = admin.firestore().batch()
+      for (const dep of deps.slice(i, i + 450)) batch.set(logRef(dep), { dep, at: admin.firestore.FieldValue.serverTimestamp() })
+      await batch.commit()
+    }
   },
   async invalidatedSince(deps, sinceMs) {
     if (!deps.length) return false
@@ -146,6 +157,7 @@ export const firestoreBackend: ComputedBackend = {
 
 export const renderStore = new ComputedStore(firestoreBackend, RENDER_VERSION, {
   defaultPolicy: { maxAgeSeconds: BACKSTOP_MAX_AGE_SECONDS },
+  isInvalidatedDep,
   onError: (what, e) => functions.logger.error(`render store: ${what} failed`, e),
 })
 
@@ -157,6 +169,15 @@ const NO_RESPONSE = {} as Response
 
 async function readPublic(path: string, deps: Deps): Promise<Record<string, any> | undefined> {
   deps.add(`doc:${path}`)
+  // A lookup by field (`post/path=x`) is invalidated by value only for UNIQUE
+  // fields (depsOfWrite); a lookup by any other field (a tag) never would be.
+  const lookup = path.match(/^([^/]+)\/([^=/]+)=/)
+  if (lookup) {
+    const live = (await collectionsFor(lookup[1]))[lookup[1]]
+    if (!((live?.unique as string[] | undefined) ?? []).includes(lookup[2])) {
+      deps.cannotStore(`${path}: lookup by a non-unique field`)
+    }
+  }
   // noCache: the per-instance doc cache is not invalidated by writes.
   const r = await getDoc(PUBLIC_REQUEST, NO_RESPONSE, path, { noCache: true })
   return r.ok ? (r.data as Record<string, any>) : undefined
@@ -169,15 +190,24 @@ async function listPublic(path: string, deps: Deps, limit: number, order = '') {
 
 // ── what is computed ─────────────────────────────────────────────────────
 
-async function loadSettings(deps: Deps): Promise<SiteSettings> {
-  const blog = await readPublic('config/blog', deps)
-  return {
-    defaultHead: siteConfig.defaultHead,
-    postTitlePrefix: (blog?.prefix as string | undefined) ?? '',
-    alwaysPrefetchBlog: siteConfig.alwaysPrefetchBlog,
-    defaultToBlogMetadata: siteConfig.defaultToBlogMetadata,
-  }
+/**
+ * The settings a route COMPUTE uses: static only (config.ts). The post-title
+ * prefix from config/blog is applied when serving (withTitlePrefix), so routes
+ * do not depend on config/blog and editing it does not invalidate them all.
+ */
+const ROUTE_SETTINGS: SiteSettings = {
+  defaultHead: siteConfig.defaultHead,
+  postTitlePrefix: '',
+  alwaysPrefetchBlog: siteConfig.alwaysPrefetchBlog,
+  defaultToBlogMetadata: siteConfig.defaultToBlogMetadata,
 }
+
+/** config/blog's prefix, as its own small computed value (one read on a hit). */
+const titlePrefix = () =>
+  renderStore.get<string>('title-prefix', async (deps) => {
+    const blog = await readPublic('config/blog', deps)
+    return { value: (blog?.prefix as string | undefined) ?? '', storable: true }
+  })
 
 const nav = (parent?: Deps) =>
   renderStore.get<NavFragment>(
@@ -237,29 +267,31 @@ export function parseRouteKey(key: string): { pagePath: string; hydrated: string
  */
 const route = (key: string) =>
   renderStore.get<RouteArtifact | null>(key, async (deps) => {
-    const settings = await loadSettings(deps)
+    const settings = ROUTE_SETTINGS
     const { pagePath, hydrated: paths } = parseRouteKey(key)
     const page = await readPublic(`page/path=${pagePath}`, deps)
     const hydrated: Record<string, Record<string, any> | undefined> = {}
     for (const p of paths) hydrated[p] = await readPublic(p, deps)
     if (!page || paths.some((p) => hydrated[p] === undefined)) return { value: null, storable: false }
     const isDraft = Object.entries(hydrated).some(([p, d]) => p.startsWith('post/') && d && !isPublished(d))
-    // Only what a write would invalidate may be kept.
-    const watched = paths.every((p) => INVALIDATING_COLLECTIONS.includes(p.split('/')[0]))
+    // (Whether the rest may be kept — only reads that writes invalidate — is
+    // enforced by the store itself: isInvalidatedDep.)
     // Only the blog page's head reads the blog index (the latest post's
     // details), so only it depends on it: a post edit must not invalidate
     // every route on the site (adversarial review).
     const needsLatest = page.path === 'blog' && paths.length === 0 && settings.defaultToBlogMetadata
     const latestPost = needsLatest ? (await blogIndex(deps)).latestPosts[0] : undefined
     const artifact = routeArtifact({ pagePath, page, hydrated, latestPost, settings })
-    return { value: artifact, storable: !isDraft && watched }
+    return { value: artifact, storable: !isDraft }
   })
 
 /** sitemap.xml from the PUBLIC list of posts; the host is read inside the compute (it is a dep). */
 const sitemap = () =>
   renderStore.get<string>('sitemap', async (deps) => {
     const appConfig = (await readPublic('config/app', deps)) as AppConfig | undefined
-    const posts = await listPublic('post', deps, 5000, 'date')
+    // Newest first: if a scan cap ever truncates, it drops the OLDEST posts
+    // (sitemapXml sorts by date itself).
+    const posts = await listPublic('post', deps, 5000, 'date(desc)')
     return {
       value: sitemapXml(siteHost(appConfig), posts.map((p) => postIndexEntry(p)), new Date().toISOString()),
       storable: true,
@@ -276,14 +308,18 @@ export interface Served {
 
 /** What a URL is served as. A hit is a handful of document reads and no queries. */
 export async function serve(url: string): Promise<Served> {
-  const [n, table, blog] = await Promise.all([nav(), routeTable(), blogIndex()])
-  const settings = await loadSettings(new Deps())
+  const [n, table, blog, prefix] = await Promise.all([nav(), routeTable(), blogIndex(), titlePrefix()])
+  const settings = ROUTE_SETTINGS
   // Most specific first: a post, then its page (the blog index) when the post
   // does not exist, as the old handler did. An unknown page has no keys at all.
   for (const key of routeKeysFor(url, n.appConfig, table)) {
     const artifact = await route(key)
     if (artifact) {
-      return { status: 200, head: artifact.head, prefetched: composePrefetched(artifact, n, blog, settings) }
+      return {
+        status: 200,
+        head: withTitlePrefix(artifact, prefix),
+        prefetched: composePrefetched(artifact, n, blog, settings),
+      }
     }
   }
   // Not a page: the site's 404 page if it has one, with status 404.
@@ -291,7 +327,7 @@ export async function serve(url: string): Promise<Served> {
   const shown =
     notFound ??
     routeArtifact({ pagePath: pagePathFor(url, n.appConfig), page: undefined, hydrated: {}, latestPost: undefined, settings })
-  return { status: 404, head: shown.head, prefetched: composePrefetched(shown, n, blog, settings) }
+  return { status: 404, head: withTitlePrefix(shown, prefix), prefetched: composePrefetched(shown, n, blog, settings) }
 }
 
 /** The site's host for absolute URLs at render time: config/app `host`, else SITE_HOST. */
