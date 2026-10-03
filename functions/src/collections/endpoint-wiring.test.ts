@@ -410,7 +410,8 @@ describe('rejectionStatus — the one refusal-to-status map (0.2.0 review)', () 
     // A post committed through a batch otherwise left the blog cache stale.
     const commitTs = src('commit.ts')
     const afterTx = commitTs.slice(commitTs.indexOf('await db.runTransaction'))
-    expect(afterTx).toMatch(/results\.committed[\s\S]*config\.afterWrite\(data, userRoles\)/)
+    // Since D23 the change (before/after) is passed too, for render on store.
+    expect(afterTx).toMatch(/results\.committed[\s\S]*config\.afterWrite\(data, userRoles, \{ path: w\.p, before, after: data \}\)/)
     expect(docsTs).toContain('commitTransactionally(writes, collections, userRoles)')
   })
 

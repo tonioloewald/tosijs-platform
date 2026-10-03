@@ -44,6 +44,9 @@ import './collections/install-records'
 import './collections/token-records'
 import './blog'
 import './page'
+// Render on store (D23): re-render after writes to post/page/config. LAST, so it
+// wraps the hooks the modules above registered.
+import './render/hooks'
 import * as functions from 'firebase-functions'
 import { setAccessLogger } from './collections/access'
 

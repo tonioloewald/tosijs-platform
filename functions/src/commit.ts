@@ -62,7 +62,7 @@ export async function commitTransactionally(
   const now = new Date().toJSON()
   let results: {
     out: Array<{ p: string; seq?: number }>
-    committed: Array<{ w: TransactionalWrite; data: Record<string, unknown> }>
+    committed: Array<{ w: TransactionalWrite; data: Record<string, unknown>; before?: Record<string, unknown> }>
   }
   try {
     results = await db.runTransaction(async (tx) => {
@@ -70,6 +70,7 @@ export async function commitTransactionally(
         w: (typeof writes)[number]
         ref: FirebaseFirestore.DocumentReference
         data: Record<string, unknown>
+        before?: Record<string, unknown>
       }> = []
 
       // ── PHASE 1: every read. ────────────────────────────────────────────
@@ -137,7 +138,7 @@ export async function commitTransactionally(
             },
           })
         }
-        prepared.push({ w, ref, data: outcome.data })
+        prepared.push({ w, ref, data: outcome.data, before: snapshot.exists ? snapshot.data() : undefined })
       }
 
       // Sequenced collections take a CONTIGUOUS range from ONE counter read,
@@ -182,11 +183,11 @@ export async function commitTransactionally(
     // up to a day — the very bug `afterWrite` exists to fix. After the commit,
     // never inside the transaction (which may retry); failures are logged,
     // never surfaced, because the writes have already landed.
-    for (const { w, data } of results.committed) {
+    for (const { w, data, before } of results.committed) {
       const config = collections[collectionPath(w.p)]
       if (!config?.afterWrite) continue
       try {
-        await config.afterWrite(data, userRoles)
+        await config.afterWrite(data, userRoles, { path: w.p, before, after: data })
       } catch (e) {
         functions.logger.warn(`afterWrite failed for ${w.p}:`, e)
       }

@@ -7,6 +7,7 @@ import { getDoc, getRef } from './doc'
 import { isPublished } from '../shared/post'
 import { optionsResponse } from './utilities'
 import { collectionsFor } from './install/installed'
+import { serveSitemap } from './render/store'
 
 const compressResponse = compression()
 
@@ -14,6 +15,18 @@ const xmlUrl = (url: string) => `<url><loc>${url}</loc></url>`
 
 export const sitemap = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   if (optionsResponse(req, res)) {
+    return
+  }
+
+  // Render on store (D23): the stored sitemap, re-rendered only when a post's
+  // published state, path or date changes.
+  if (process.env.RENDER_ON_STORE === 'true') {
+    const xml = await serveSitemap()
+    compressResponse(req, res, () => {
+      res.header('Content-Type', 'application/xml')
+      res.header('Cache-Control', 'public, max-age=300, s-maxage=3600')
+      res.status(200).send(xml)
+    })
     return
   }
 

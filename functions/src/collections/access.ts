@@ -187,6 +187,18 @@ export interface AccessConfig {
   list?: typeof ALL | FieldAccessMap | AccessFilterFunc
 }
 
+/**
+ * What a committed write changed, for post-commit side effects that must know
+ * the BEFORE state as well as the after (render on store, D23: unpublishing a
+ * post must delete its stored page; renaming one must move it). `before` is
+ * undefined for a create, `after` undefined for a delete.
+ */
+export interface WriteChange {
+  path: string
+  before?: Record<string, unknown>
+  after?: Record<string, unknown>
+}
+
 export interface CollectionConfig {
   /**
    * Assign a monotonic per-collection `_seq` on commit (#14). HOST-enforced:
@@ -258,7 +270,7 @@ export interface CollectionConfig {
    * Failures are logged and swallowed: the write has already succeeded, so an
    * afterWrite error must not turn a successful save into a client-visible error.
    */
-  afterWrite?: (data: any, userRoles: UserRoles) => Promise<void>
+  afterWrite?: (data: any, userRoles: UserRoles, change?: WriteChange) => Promise<void>
   access?: { [key: string]: AccessConfig | undefined }
   cacheLatencySeconds?: number // TTL cache for reads; cached data may be stale up to this many seconds
   /**

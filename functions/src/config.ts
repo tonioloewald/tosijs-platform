@@ -5,6 +5,14 @@
 
 export const config = {
   /**
+   * The head when nothing more specific applies (was hardcoded in prefetch.ts).
+   */
+  defaultHead: {
+    title: 'inconsequence',
+    description: 'musings on subjects of passing interest',
+  },
+
+  /**
    * When true, blog data (latest posts, recent posts) is prefetched on every
    * page request. Recommended for blog-centric sites where most visitors
    * will navigate to blog content.

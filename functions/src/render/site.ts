@@ -127,7 +127,7 @@ export interface BlogIndexFragment {
 
 export const LATEST_POSTS = 6
 export const RECENT_POSTS = 30
-const RECENT_FIELDS = ['title', 'date', 'summary', 'keywords', 'path']
+const RECENT_FIELDS = ['title', 'date', 'summary', 'keywords', 'path', '_path']
 
 /**
  * Built from the published posts, newest first. The caller passes only what
@@ -223,9 +223,14 @@ export function composePrefetched(
   blog: BlogIndexFragment | undefined,
   settings: SiteSettings
 ): Record<string, unknown> {
+  // Order matches the old handlers' merge: page data first, blog data after
+  // (page.ts registers its handler before blog.ts), so for a post among the
+  // latest the blog index's copy wins. Both are equally fresh: any change to a
+  // published post invalidates the index too.
   const out: Record<string, unknown> = {
     appConfig: nav.appConfig,
     visiblePages: nav.visiblePages,
+    ...route.data,
   }
   const onBlogPage = (route.data.page as Doc | undefined)?.path === 'blog'
   if (blog && (settings.alwaysPrefetchBlog || onBlogPage)) {
@@ -235,8 +240,6 @@ export function composePrefetched(
     out.blogVersion = 4
     for (const post of blog.latestPosts) out[`post/path=${post.path}`] = post
   }
-  // The route's own data last: its post is the freshest copy.
-  Object.assign(out, route.data)
   return out
 }
 
@@ -285,73 +288,4 @@ export function sitemapXml(host: string, entries: PostIndexEntry[], renderedAt: 
     posts.join('') +
     '</urlset>'
   )
-}
-
-// ── what a write affects ─────────────────────────────────────────────────
-
-export type ArtifactRef =
-  | { kind: 'route'; key: string }
-  | { kind: 'route-delete'; key: string }
-  | { kind: 'nav' }
-  | { kind: 'route-table' }
-  | { kind: 'blog-index' }
-  | { kind: 'sitemap' }
-  | { kind: 'feed' }
-
-const changed = (a: Doc | undefined, b: Doc | undefined, fields: string[]) =>
-  fields.some((f) => JSON.stringify(a?.[f]) !== JSON.stringify(b?.[f]))
-
-/**
- * The artifacts one document write affects. `before`/`after` are the document
- * as it was and is (undefined for a create/delete). `postPages` are the pages
- * whose prefetch patterns hydrate `post/path=[n]` (in practice: `blog`).
- *
- * Conservative where knowing exactly would need a query: any change to a
- * published post re-renders the blog index (it embeds the latest posts in
- * full, and which posts are latest is the index's to decide).
- */
-export function affected(
-  collection: string,
-  docId: string,
-  before: Doc | undefined,
-  after: Doc | undefined,
-  postPages: string[]
-): ArtifactRef[] {
-  const out: ArtifactRef[] = []
-  if (collection === 'post') {
-    const oldPath = before?.path
-    const newPath = after?.path
-    const wasPublished = before ? isPublished(before) : false
-    const isPub = after ? isPublished(after) : false
-    // Only PUBLISHED posts are stored. A draft opened by link renders on
-    // demand and is not stored, so unpublishing must remove the stored page.
-    for (const page of postPages) {
-      if (isPub && newPath) out.push({ kind: 'route', key: routeKey(page, [`post/path=${newPath}`]) })
-      if (wasPublished && oldPath && (!isPub || oldPath !== newPath)) {
-        out.push({ kind: 'route-delete', key: routeKey(page, [`post/path=${oldPath}`]) })
-      }
-    }
-    if (wasPublished || isPub) {
-      out.push({ kind: 'blog-index' })
-      // The blog page's own head shows the latest post.
-      for (const page of postPages) out.push({ kind: 'route', key: routeKey(page, []) })
-      out.push({ kind: 'feed' })
-    }
-    if (wasPublished !== isPub || (isPub && changed(before, after, ['path', 'date']))) out.push({ kind: 'sitemap' })
-    return out
-  }
-  if (collection === 'page') {
-    if (after?.path) out.push({ kind: 'route', key: routeKey(after.path, []) })
-    if (before?.path && before.path !== after?.path) out.push({ kind: 'route-delete', key: routeKey(before.path, []) })
-    if (changed(before, after, ['prefetch', 'path'])) out.push({ kind: 'route-table' })
-    const inNav = (d: Doc | undefined) => Array.isArray(d?.tags) && d.tags.includes('visible')
-    if (inNav(before) || inNav(after)) {
-      if (inNav(before) !== inNav(after) || changed(before, after, ['title', 'navSort', 'path'])) out.push({ kind: 'nav' })
-    }
-    return out
-  }
-  if (collection === 'config' && docId === 'app') {
-    out.push({ kind: 'nav' })
-  }
-  return out
 }

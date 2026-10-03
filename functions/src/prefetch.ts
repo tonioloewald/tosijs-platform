@@ -6,6 +6,7 @@ import compression from 'compression'
 import { optionsResponse } from './utilities'
 import { asPublicRequest } from './public-request'
 import { renderDocument } from './render/document'
+import { serve } from './render/store'
 import { siteOrigin } from './social-meta'
 
 const compressResponse = compression()
@@ -115,6 +116,24 @@ export const prefetch = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
     return
   }
 
+  // Render on store (D23): serve stored artifacts, no queries. Behind a flag
+  // until a live comparison against the old path matches for every route.
+  if (process.env.RENDER_ON_STORE === 'true') {
+    try {
+      const served = await serve(url)
+      const html = renderDocument(served.head, served.prefetched, siteOrigin(req.headers ?? {}))
+      compressResponse(req, res, () => {
+        res.header('Content-Type', 'text/html')
+        res.header('Cache-Control', 'public, max-age=60, s-maxage=300')
+        res.status(served.status).send(html)
+      })
+      return
+    } catch (e) {
+      // Never a broken page: fall back to the old path, and say so.
+      functions.logger.error('render-on-store serve failed; falling back to the per-request path', e)
+    }
+  }
+
   const nonce = crypto.randomBytes(16).toString('base64')
   const html = await render(req, res, nonce, url, {
     title: 'inconsequence',
@@ -143,6 +162,14 @@ export const prefetchData = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   }
 
   const url = (req.query.url as string) || '/'
+
+  // The render-on-store path's data, for a live comparison with the old path.
+  if (req.query.engine === 'store') {
+    const served = await serve(url)
+    res.header('Content-Type', 'application/json')
+    res.status(served.status).json(served.prefetched)
+    return
+  }
 
   const options: PageOptions = {
     title: '',

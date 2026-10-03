@@ -445,7 +445,7 @@ export const doc = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
           // edits were fixed while deleting a post still served it for up to 24h.
           if (config.afterWrite) {
             try {
-              await config.afterWrite(deleted, userRoles)
+              await config.afterWrite(deleted, userRoles, { path: canonicalPath, before: deleted })
             } catch (e) {
               functions.logger.warn(`afterWrite failed for ${path}:`, e)
             }
@@ -598,7 +598,11 @@ export const doc = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
         // stale cache.
         if (config.afterWrite) {
           try {
-            await config.afterWrite(data, userRoles)
+            await config.afterWrite(data, userRoles, {
+              path: canonicalPath,
+              before: doc.exists ? (existing as Record<string, unknown>) : undefined,
+              after: data,
+            })
           } catch (e) {
             functions.logger.warn(`afterWrite failed for ${path}:`, e)
           }

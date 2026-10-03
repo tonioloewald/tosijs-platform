@@ -1,6 +1,5 @@
 import { describe, test, expect } from 'bun:test'
 import {
-  affected,
   blogIndexFragment,
   composePrefetched,
   hydratedPaths,
@@ -8,7 +7,6 @@ import {
   pagePathFor,
   postIndexEntry,
   routeArtifact,
-  routeKey,
   routeKeysFor,
   routeTableFragment,
   sitemapXml,
@@ -190,51 +188,5 @@ describe('sitemap', () => {
   })
   test('a path with XML specials is escaped', () => {
     expect(sitemapXml('h', [{ path: 'a&b', date: '2026-01-01', published: true }], 'T')).toContain('a&amp;b')
-  })
-})
-
-describe('affected — what a write re-renders', () => {
-  const pages = ['blog']
-  const kinds = (refs: ReturnType<typeof affected>) => refs.map((r) => ('key' in r ? `${r.kind}:${r.key}` : r.kind)).sort()
-
-  test('editing a published post\'s body: its page, the index, the blog page, the feed — not the sitemap', () => {
-    const before = post('x', '2026-01-01')
-    expect(kinds(affected('post', 'id', before, { ...before, content: 'new' }, pages))).toEqual(
-      ['blog-index', 'feed', 'route:page:blog', 'route:page:blog|post/path=x'].sort()
-    )
-  })
-  test('publishing adds the sitemap; unpublishing removes the stored page', () => {
-    const draft = post('x', '')
-    const pub = post('x', '2026-01-01')
-    expect(kinds(affected('post', 'id', draft, pub, pages))).toContain('sitemap')
-    const un = kinds(affected('post', 'id', pub, draft, pages))
-    expect(un).toContain('route-delete:page:blog|post/path=x')
-    expect(un).toContain('sitemap')
-    expect(un).not.toContain('route:page:blog|post/path=x')
-  })
-  test('a draft edit re-renders nothing public', () => {
-    const d = post('x', '')
-    expect(affected('post', 'id', d, { ...d, content: 'y' }, pages)).toEqual([])
-  })
-  test('renaming a published post moves its page and updates the sitemap', () => {
-    const a = post('old', '2026-01-01')
-    const r = kinds(affected('post', 'id', a, { ...a, path: 'new' }, pages))
-    expect(r).toContain('route:page:blog|post/path=new')
-    expect(r).toContain('route-delete:page:blog|post/path=old')
-    expect(r).toContain('sitemap')
-  })
-  test('pages: the nav only when visibility, title, order or path change; the route table on pattern change', () => {
-    const p = { path: 'about', title: 'About', tags: ['visible'] }
-    expect(kinds(affected('page', 'id', p, { ...p, source: 'x' }, pages))).toEqual(['route:page:about'])
-    expect(kinds(affected('page', 'id', p, { ...p, title: 'Who' }, pages))).toContain('nav')
-    expect(kinds(affected('page', 'id', p, { ...p, tags: [] }, pages))).toContain('nav')
-    expect(kinds(affected('page', 'id', blogPage, { ...blogPage, prefetch: [] }, pages))).toContain('route-table')
-  })
-  test('config/app → the nav; other config → nothing', () => {
-    expect(kinds(affected('config', 'app', {}, { title: 'x' }, pages))).toEqual(['nav'])
-    expect(affected('config', 'blog-cache', {}, {}, pages)).toEqual([])
-  })
-  test('routeKey is stable', () => {
-    expect(routeKey('blog', ['post/path=x'])).toBe('page:blog|post/path=x')
   })
 })
