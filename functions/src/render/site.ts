@@ -57,14 +57,27 @@ export function pagePathFor(url: string, appConfig: AppConfig | undefined): stri
  * page's `post/path=[3]` → `post/path=it-begins`. A pattern that does not match
  * names nothing (the old code skipped it the same way).
  */
+/** A captured URL part that may become part of a key: a plain slug, bounded. */
+const SLUG = /^[\w-]{1,200}$/
+/** Patterns run on every request: matching only bounded input caps a bad (ReDoS) pattern. */
+const MAX_URL = 1000
+
 export function hydratedPaths(url: string, patterns: PrefetchPattern[] | undefined): string[] {
   const out: string[] = []
+  const pathname = url.split(/[?#]/, 1)[0].slice(0, MAX_URL)
   for (const { regexp, path } of patterns ?? []) {
-    const parts = regexp ? url.split(/[?#]/, 1)[0].match(new RegExp(regexp)) ?? [] : []
+    let parts: RegExpMatchArray | [] = []
+    try {
+      parts = regexp ? pathname.match(new RegExp(regexp)) ?? [] : []
+    } catch {
+      continue // an invalid pattern names nothing
+    }
     let ok = true
     const hydrated = path.replace(/\[(\d+)\]/g, (_, i) => {
       const part = parts[Number(i)]
-      if (part === undefined) ok = false
+      // Captures become part of a stored KEY: only plain slugs. A `|` would
+      // otherwise inject extra hydrated paths (adversarial review).
+      if (part === undefined || !SLUG.test(part)) ok = false
       return part ?? ''
     })
     if (ok) out.push(hydrated)
@@ -77,15 +90,31 @@ export const routeKey = (pagePath: string, hydrated: string[]): string =>
   [`page:${pagePath}`, ...hydrated].join('|')
 
 /**
- * The route table: each page's `prefetch` patterns, by page path. Serving needs
- * it to find a URL's artifact without a query; it changes only when a page's
- * patterns do.
+ * The route table: EVERY page the public can read, with its `prefetch`
+ * patterns. Serving uses it to find a URL's artifact without a query, and to
+ * answer an unknown page with a 404 that computes and stores nothing — so a
+ * caller cannot mint stored keys by requesting random URLs (adversarial review).
  */
 export type RouteTable = Record<string, PrefetchPattern[]>
 
+const validPattern = (p: PrefetchPattern): boolean => {
+  if (typeof p?.path !== 'string') return false
+  if (p.regexp === undefined) return true
+  if (typeof p.regexp !== 'string' || p.regexp.length > 200) return false
+  try {
+    new RegExp(p.regexp)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function routeTableFragment(pages: Doc[]): RouteTable {
   const table: RouteTable = {}
-  for (const p of pages) if (p.path && Array.isArray(p.prefetch) && p.prefetch.length) table[p.path] = p.prefetch
+  for (const p of pages) {
+    if (typeof p.path !== 'string' || !SLUG.test(p.path)) continue
+    table[p.path] = Array.isArray(p.prefetch) ? p.prefetch.filter(validPattern) : []
+  }
   return table
 }
 
@@ -96,9 +125,9 @@ export function routeTableFragment(pages: Doc[]): RouteTable {
  */
 export function routeKeysFor(url: string, appConfig: AppConfig | undefined, table: RouteTable): string[] {
   const pagePath = pagePathFor(url, appConfig)
+  if (!(pagePath in table)) return [] // unknown page: a 404, nothing computed
   const hydrated = hydratedPaths(url, table[pagePath])
-  const keys = hydrated.length ? [routeKey(pagePath, hydrated), routeKey(pagePath, [])] : [routeKey(pagePath, [])]
-  return keys
+  return hydrated.length ? [routeKey(pagePath, hydrated), routeKey(pagePath, [])] : [routeKey(pagePath, [])]
 }
 
 // ── fragments ────────────────────────────────────────────────────────────
@@ -167,19 +196,20 @@ const sourceOf = (doc: Doc | undefined) => (doc ? (doc._modified as string | und
  * "show the latest post" head.
  */
 export function routeArtifact(input: {
-  url: string
   pagePath: string
   page: Doc | undefined
   hydrated: Record<string, Doc | undefined>
   latestPost: Doc | undefined
   settings: SiteSettings
 }): RouteArtifact {
-  const { url, pagePath, page, hydrated, latestPost, settings } = input
+  const { pagePath, page, hydrated, latestPost, settings } = input
+  // Derived from the KEY, never from the request: a stored value must not
+  // depend on who happened to trigger its compute (cache poisoning).
   const head: HeadOptions = {
     title: settings.defaultHead.title,
     description: settings.defaultHead.description,
     imageUrl: '',
-    url: url.split(/[?#]/, 1)[0],
+    url: pagePath ? `/${pagePath}` : '/',
     type: '',
   }
   if (page) {

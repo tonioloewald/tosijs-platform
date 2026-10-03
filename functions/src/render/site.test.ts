@@ -49,13 +49,29 @@ describe('routes', () => {
   })
   test('serving tries the post, then the page — an unknown slug falls back to the blog index', () => {
     const table = routeTableFragment([blogPage, { path: 'about', tags: ['visible'] }])
-    expect(table).toEqual({ blog: BLOG_PATTERN })
+    // EVERY page is in the table (an unknown page computes nothing).
+    expect(table).toEqual({ blog: BLOG_PATTERN, about: [] })
     expect(routeKeysFor('/blog/2002/8/26/it-begins', appConfig, table)).toEqual([
       'page:blog|post/path=it-begins',
       'page:blog',
     ])
     expect(routeKeysFor('/', appConfig, table)).toEqual(['page:blog'])
     expect(routeKeysFor('/about', appConfig, table)).toEqual(['page:about'])
+  })
+  test('an unknown page has NO keys: nothing is computed or stored for random URLs', () => {
+    const table = routeTableFragment([blogPage])
+    expect(routeKeysFor('/xyz123', appConfig, table)).toEqual([])
+  })
+  test('captures must be plain slugs: a `|` cannot inject hydrated paths into a key', () => {
+    expect(hydratedPaths('/blog/x|module', BLOG_PATTERN)).toEqual([])
+    expect(hydratedPaths('/blog/' + 'a'.repeat(300), BLOG_PATTERN)).toEqual([])
+  })
+  test('invalid or oversized page patterns are dropped from the table', () => {
+    const table = routeTableFragment([
+      { path: 'bad', prefetch: [{ regexp: '(', path: 'post/path=[1]' }, { regexp: 'a'.repeat(201), path: 'x' }] },
+      { path: 'bad path', prefetch: [] },
+    ])
+    expect(table).toEqual({ bad: [] })
   })
 })
 
@@ -85,7 +101,6 @@ describe('route artifacts — the head and data the old handlers produced', () =
   test('a post URL: the post\'s head (prefix, summary, Markdown image, article) and the post as data', () => {
     const p = post('it-begins', '2002-08-26')
     const a = routeArtifact({
-      url: '/blog/2002/8/26/it-begins',
       pagePath: 'blog',
       page: blogPage,
       hydrated: { 'post/path=it-begins': p },
@@ -113,19 +128,22 @@ describe('route artifacts — the head and data the old handlers produced', () =
 
   test('…and without that setting, the page\'s own head', () => {
     const a = routeArtifact({
-      url: '/blog/',
       pagePath: 'blog',
       page: blogPage,
       hydrated: {},
       latestPost: latest,
       settings: { ...settings, defaultToBlogMetadata: false },
     })
-    expect(a.head).toMatchObject({ title: 'inconsequence', description: 'the blog', url: '/blog/', type: '' })
+    expect(a.head).toMatchObject({ title: 'inconsequence', description: 'the blog', url: '/blog', type: '' })
+  })
+
+  test('the head URL comes from the KEY, never the request (cache poisoning)', () => {
+    const a = routeArtifact({ pagePath: 'about', page: { path: 'about' }, hydrated: {}, latestPost: latest, settings })
+    expect(a.head.url).toBe('/about')
   })
 
   test('an ordinary page: its own fields over the defaults', () => {
     const a = routeArtifact({
-      url: '/about',
       pagePath: 'about',
       page: { path: 'about', title: 'About', description: 'who', imageUrl: '/me.png', type: 'profile' },
       hydrated: {},
@@ -141,7 +159,6 @@ describe('route artifacts — the head and data the old handlers produced', () =
     const nav = navFragment(appConfig, [])
     const p = post('it-begins', '2002-08-26')
     const route = routeArtifact({
-      url: '/blog/it-begins',
       pagePath: 'blog',
       page: blogPage,
       hydrated: { 'post/path=it-begins': p },

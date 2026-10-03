@@ -53,10 +53,9 @@ describe('ComputedStore', () => {
     expect(await store.get('k', counting('post-write').fn)).toBe('post-write')
   })
 
-  test('a version bump is a new namespace: everything misses (no render-all)', async () => {
-    const backend = new MemoryBackend()
-    await new ComputedStore(backend, 'v1').get('k', counting('old').fn)
-    const v2 = new ComputedStore(backend, 'v2')
+  test('a version bump is a new namespace (its own storage): everything misses (no render-all)', async () => {
+    await new ComputedStore(new MemoryBackend(), 'v1').get('k', counting('old').fn)
+    const v2 = new ComputedStore(new MemoryBackend(), 'v2')
     const c = counting('new')
     expect(await v2.get('k', c.fn)).toBe('new')
     expect(c.calls()).toBe(1)
@@ -96,7 +95,7 @@ describe('recorded dependencies — no hand-written invalidation rules', () => {
       const idx = await store.get('index', index, { parent: d })
       return { value: `latest ${idx[0]}`, storable: true }
     })
-    expect(await store.depsOf('route')).toContain('computed:index')
+    expect(await store.depsOf('route')).toContain('computed:v1:index')
     const hit = await store.invalidateDependents(['list:post'])
     expect(hit.sort()).toEqual(['index', 'route'])
   })
@@ -109,10 +108,64 @@ describe('recorded dependencies — no hand-written invalidation rules', () => {
   })
 })
 
+describe('THE FIRST-FILL RACE (adversarial review 2026-10-03, correctness B1)', () => {
+  test('a key that did not exist yet, computed across a write, is not left fresh', async () => {
+    let t = 1_000
+    const backend = new MemoryBackend(() => t)
+    const store = new ComputedStore(backend, 'v1', { now: () => t, skewMs: 0 })
+    let release: () => void = () => undefined
+    // R misses K (it does not exist) and reads the post's OLD content…
+    const reading = store.get('K', async (d) => {
+      d.add('doc:post/p')
+      await new Promise<void>((r) => (release = r))
+      return { value: 'old post', storable: true }
+    })
+    await new Promise((r) => setTimeout(r, 0))
+    // …the writer commits P: dependents() cannot see K (it does not exist yet)…
+    t += 5
+    expect(await store.invalidateDependents(['doc:post/p'])).toEqual([])
+    // …and R's create succeeds afterwards.
+    t += 5
+    release()
+    expect(await reading).toBe('old post') // its caller still gets an answer
+    expect(await store.peek('K')).toBeUndefined() // but the log made it stale
+    expect(await store.get('K', counting('new post').fn)).toBe('new post')
+  })
+
+  test('…and a compute that saw no write since it started stays fresh', async () => {
+    let t = 1_000
+    const backend = new MemoryBackend(() => t)
+    const store = new ComputedStore(backend, 'v1', { now: () => t, skewMs: 0 })
+    await store.invalidateDependents(['doc:post/p']) // an OLD write
+    t += 100
+    await store.get('K', async (d) => (d.add('doc:post/p'), { value: 'v', storable: true }))
+    expect(await store.peek('K')).toBe('v')
+  })
+
+  test('a store failure that is not a race is REPORTED, not treated as a lost race', async () => {
+    const backend = new MemoryBackend()
+    backend.writeIfUnchanged = async () => {
+      throw new Error('document too large')
+    }
+    const errors: string[] = []
+    const store = new ComputedStore(backend, 'v1', { onError: (what, e) => errors.push(`${what}: ${(e as Error).message}`) })
+    expect(await store.get('K', counting('v').fn)).toBe('v')
+    expect(errors).toEqual(['store v1:K: document too large'])
+  })
+
+  test('the default policy (backstop max age) applies to every get', async () => {
+    let t = 1_000_000
+    const store = new ComputedStore(new MemoryBackend(), 'v1', { now: () => t, defaultPolicy: { maxAgeSeconds: 60 } })
+    await store.get('K', counting('first').fn)
+    t += 61_000
+    expect(await store.get('K', counting('second').fn)).toBe('second')
+  })
+})
+
 describe('policies — transparent caching for values no write announces', () => {
   test('maxAgeSeconds: fresh until it is old, then recomputed', async () => {
     let t = 1_000_000
-    const store = new ComputedStore(new MemoryBackend(), 'v1', () => t)
+    const store = new ComputedStore(new MemoryBackend(), 'v1', { now: () => t })
     const policy = { maxAgeSeconds: 60 }
     expect(await store.get('q', counting('first').fn, { policy })).toBe('first')
     t += 30_000

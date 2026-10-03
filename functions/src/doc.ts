@@ -238,7 +238,13 @@ const storeFor = (collections: CollectionMap) =>
 export const getDoc = async (
   req: AuthenticatedRequest,
   res: Response,
-  path: string
+  path: string,
+  /**
+   * `noCache`: read through to Firestore, and do not populate the per-instance
+   * cache. Render on store needs it: that cache is never invalidated by writes,
+   * so a recompute right after a write could read (and store) pre-write data.
+   */
+  opts: { noCache?: boolean } = {}
 ): Promise<DocResult> => {
   const userRoles = await getUserRoles(req)
 
@@ -258,7 +264,7 @@ export const getDoc = async (
     }
 
     // Check cache if cacheLatencySeconds is configured
-    const cacheSeconds = config?.cacheLatencySeconds
+    const cacheSeconds = opts.noCache ? undefined : config?.cacheLatencySeconds
     if (cacheSeconds) {
       const cached = docCache.get(path)
       if (cached && cached.expiry > Date.now()) {

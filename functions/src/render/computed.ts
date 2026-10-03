@@ -4,18 +4,31 @@
  *
  * - `get(key, compute)`: a fresh stored value is returned as is (no work). A
  *   missing or stale one is computed, stored, and returned.
- * - `invalidate(keys)`: marks keys stale. Cheap, and it never computes, so the
- *   write path that calls it cannot half-fail on a render.
+ * - `invalidateDependents(deps)`: marks stale every value computed from those
+ *   sources (cascading). Cheap; it never computes, so the write path that
+ *   calls it cannot half-fail on a render.
  *
- * Nothing renders "everything": a template or renderer change bumps the key
- * namespace's version, and every key misses and recomputes on its next read.
+ * INVARIANT (adversarial review, 2026-10-03): a compute depends ONLY on its key
+ * and on what it reads through its `Deps` recorder. A request-derived argument
+ * that is not in the key would let whoever triggers a recompute choose what
+ * everyone else is served (cache poisoning).
  *
- * The race this closes: a reader that started computing BEFORE a write could
- * finish AFTER the write's invalidation and store pre-write data, which would
- * then stay. So invalidation writes a stale MARKER (never a delete), and a
- * reader stores only if the key is unchanged since it looked (a version
- * precondition). If someone invalidated in between, the reader still returns
- * what it computed for its own caller, but does not store it.
+ * Nothing renders "everything": a template or renderer change bumps the
+ * namespace, and every key misses and recomputes on its next read.
+ *
+ * ## Races
+ *
+ * A reader computing across a write must not store pre-write data. Two cases:
+ * 1. The key EXISTS and the write's invalidation marks it stale while the
+ *    reader computes: the reader stores only if the key is unchanged since it
+ *    looked (a version precondition), so it loses and does not store.
+ * 2. The key does NOT exist yet (or its deps just changed): the write's
+ *    `dependents()` cannot see it, and the reader's create succeeds. So the
+ *    writer first LOGS what it invalidated (with a time), and the reader,
+ *    after storing, checks the log for its deps since it started; if any were
+ *    invalidated, it marks its own key stale. Writer logs before searching;
+ *    reader stores before checking: one of the two always sees the other.
+ * Plus a backstop max age on every value, for changes no hook sees.
  */
 
 export interface Entry {
@@ -33,26 +46,33 @@ export interface Entry {
  * How a value goes stale, besides being invalidated by a write to something it
  * read (always on):
  * - `maxAgeSeconds`: for values derived from things that never write to us
- *   (an external URL, as `cachedQuery` fetches);
+ *   (an external URL), and as a backstop for changes no hook observes;
  * - `validate`: asked on every read — e.g. compare a checksum of the sources
- *   with `check`. Costs that check on each read; worth it when the sources'
- *   writes cannot be observed, or checking is cheaper than recomputing.
+ *   with `check`.
  */
 export interface Policy {
   maxAgeSeconds?: number
   validate?: (entry: Entry) => Promise<boolean>
 }
 
-/** Storage with compare-and-set on an opaque version. */
+/** Storage with compare-and-set on an opaque version, plus the invalidation log. */
 export interface ComputedBackend {
   read(key: string): Promise<{ entry?: Entry; version: string | null }>
   readMany(keys: string[]): Promise<Array<{ entry?: Entry; version: string | null }>>
-  /** Write only if the key's version is still `expected` (null: does not exist). */
+  /**
+   * Write only if the key's version is still `expected` (null: does not exist).
+   * Resolves false when the precondition fails (a lost race); REJECTS on any
+   * other error, which the store logs — a failure is not a race.
+   */
   writeIfUnchanged(key: string, entry: Entry, expected: string | null): Promise<boolean>
-  /** Unconditional writes (stale markers). */
+  /** Unconditional merges (stale markers keep their deps). */
   writeAll(entries: Array<[string, Entry]>): Promise<void>
-  /** Keys (fully qualified) whose recorded deps include any of these. */
+  /** Keys whose recorded deps include any of these. */
   dependents(deps: string[]): Promise<string[]>
+  /** Record that these deps were invalidated now. */
+  logInvalidation(deps: string[]): Promise<void>
+  /** Were any of these deps invalidated at or after `sinceMs`? */
+  invalidatedSince(deps: string[], sinceMs: number): Promise<boolean>
 }
 
 /**
@@ -61,7 +81,7 @@ export interface ComputedBackend {
  * - `doc:<collection>/<id>`            one document
  * - `doc:<collection>/<field>=<value>` a lookup by a unique field
  * - `list:<collection>`                a query over the collection
- * - `computed:<key>`                   another computed value (invalidation cascades)
+ * - `computed:<namespace>:<key>`       another computed value (invalidation cascades)
  */
 export class Deps {
   readonly seen = new Set<string>()
@@ -98,18 +118,33 @@ export interface Computed<T> {
   check?: string
 }
 
-export class ComputedStore {
-  constructor(
-    private backend: ComputedBackend,
-    private namespace: string,
-    private now: () => number = () => Date.now()
-  ) {}
+export interface StoreOptions {
+  /** Applied to every get unless the call overrides it: the backstop max age. */
+  defaultPolicy?: Policy
+  now?: () => number
+  /** Where non-race failures are reported (never silently swallowed). */
+  onError?: (what: string, e: unknown) => void
+  /** Clock skew allowed between the reader's clock and the log's timestamps. */
+  skewMs?: number
+}
 
-  private k(key: string): string {
-    return `${this.namespace}:${key}`
+export class ComputedStore {
+  private now: () => number
+  private onError: (what: string, e: unknown) => void
+  private skewMs: number
+
+  constructor(private backend: ComputedBackend, readonly namespace: string, private opts: StoreOptions = {}) {
+    this.now = opts.now ?? (() => Date.now())
+    this.onError = opts.onError ?? (() => undefined)
+    this.skewMs = opts.skewMs ?? 2000
   }
 
-  private async fresh<T>(r: { entry?: Entry }, policy: Policy = {}): Promise<T | undefined> {
+  /** The dep another compute records when it reads this key. */
+  dep(key: string): string {
+    return `computed:${this.namespace}:${key}`
+  }
+
+  private async fresh<T>(r: { entry?: Entry }, policy: Policy): Promise<T | undefined> {
     const e = r.entry
     if (!e || e.stale || e.value === undefined) return undefined
     if (policy.maxAgeSeconds !== undefined) {
@@ -120,18 +155,15 @@ export class ComputedStore {
     return JSON.parse(e.value) as T
   }
 
-  /**
-   * `parent`: when called from INSIDE another compute, its recorder — so the
-   * outer value depends on this one, and invalidating this cascades.
-   */
   async get<T>(
     key: string,
     compute: (deps: Deps) => Promise<Computed<T>>,
     opts: { parent?: Deps; policy?: Policy } = {}
   ): Promise<T> {
-    opts.parent?.add(`computed:${key}`)
-    const r = await this.backend.read(this.k(key))
-    const hit = await this.fresh<T>(r, opts.policy)
+    opts.parent?.add(this.dep(key))
+    const policy = { ...this.opts.defaultPolicy, ...opts.policy }
+    const r = await this.backend.read(key)
+    const hit = await this.fresh<T>(r, policy)
     if (hit !== undefined) return hit
     return this.fill(key, r.version, compute)
   }
@@ -142,11 +174,12 @@ export class ComputedStore {
     compute: (key: string, deps: Deps) => Promise<Computed<T>>,
     opts: { parent?: Deps; policy?: Policy } = {}
   ): Promise<T[]> {
-    for (const k of keys) opts.parent?.add(`computed:${k}`)
-    const rs = await this.backend.readMany(keys.map((k) => this.k(k)))
+    for (const k of keys) opts.parent?.add(this.dep(k))
+    const policy = { ...this.opts.defaultPolicy, ...opts.policy }
+    const rs = await this.backend.readMany(keys)
     return Promise.all(
       rs.map(async (r, i) => {
-        const hit = await this.fresh<T>(r, opts.policy)
+        const hit = await this.fresh<T>(r, policy)
         return hit !== undefined ? hit : this.fill(keys[i], r.version, (d) => compute(keys[i], d))
       })
     )
@@ -154,62 +187,76 @@ export class ComputedStore {
 
   /** What is stored for a key, without computing (undefined when missing or stale). */
   async peek<T>(key: string): Promise<T | undefined> {
-    return this.fresh<T>(await this.backend.read(this.k(key)))
+    return this.fresh<T>(await this.backend.read(key), {})
   }
 
   /** The stored deps of a key (for tests and diagnostics). */
   async depsOf(key: string): Promise<string[]> {
-    return (await this.backend.read(this.k(key))).entry?.deps ?? []
+    return (await this.backend.read(key)).entry?.deps ?? []
   }
 
   async invalidate(keys: string[]): Promise<void> {
     if (!keys.length) return
-    await this.backend.writeAll([...new Set(keys)].map((k) => [this.k(k), { stale: true }]))
+    await this.backend.writeAll([...new Set(keys)].map((k) => [k, { stale: true }]))
   }
 
   /**
    * Invalidate everything computed from these sources, and everything computed
-   * from THOSE (cascade), in this namespace. Returns the keys invalidated.
+   * from THOSE (cascade). LOGS first (see Races), and marks each round as it is
+   * found, so a failure part-way still leaves the first rounds stale.
    */
   async invalidateDependents(deps: string[]): Promise<string[]> {
     const done = new Set<string>()
-    let frontier = deps
+    let frontier = [...new Set(deps)]
     while (frontier.length) {
-      const hits = (await this.backend.dependents(frontier))
-        .filter((full) => full.startsWith(`${this.namespace}:`))
-        .map((full) => full.slice(this.namespace.length + 1))
-        .filter((k) => !done.has(k))
+      await this.backend.logInvalidation(frontier)
+      const hits = (await this.backend.dependents(frontier)).filter((k) => !done.has(k))
       hits.forEach((k) => done.add(k))
-      frontier = hits.map((k) => `computed:${k}`)
+      await this.invalidate(hits)
+      frontier = hits.map((k) => this.dep(k))
     }
-    await this.invalidate([...done])
     return [...done]
   }
 
   private async fill<T>(key: string, version: string | null, compute: (deps: Deps) => Promise<Computed<T>>): Promise<T> {
+    const started = this.now()
     const deps = new Deps()
     const { value, storable, check } = await compute(deps)
-    if (storable) {
-      // Lost the race (someone invalidated or filled meanwhile)? Then do not
-      // store: the caller still gets what it computed.
-      const entry: Entry = {
-        value: JSON.stringify(value),
-        deps: [...deps.seen],
-        computedAt: new Date(this.now()).toISOString(),
+    if (!storable) return value
+    const entry: Entry = {
+      value: JSON.stringify(value),
+      deps: [...deps.seen],
+      computedAt: new Date(started).toISOString(),
+    }
+    if (check !== undefined) entry.check = check
+    let stored = false
+    try {
+      // Case 1: lost to an invalidation (or another filler) of an existing key.
+      stored = await this.backend.writeIfUnchanged(key, entry, version)
+    } catch (e) {
+      this.onError(`store ${this.namespace}:${key}`, e)
+    }
+    if (stored && entry.deps?.length) {
+      // Case 2: a write invalidated one of our sources while we computed, but
+      // could not see this key (it did not exist, or had other deps then).
+      try {
+        if (await this.backend.invalidatedSince(entry.deps, started - this.skewMs)) await this.invalidate([key])
+      } catch (e) {
+        // Cannot tell: do not trust what we just stored.
+        this.onError(`race check ${this.namespace}:${key}`, e)
+        await this.invalidate([key]).catch(() => undefined)
       }
-      if (check !== undefined) entry.check = check
-      await this.backend
-        .writeIfUnchanged(this.k(key), entry, version)
-        .catch(() => false)
     }
     return value
   }
 }
 
-/** For tests: versions are counters. */
+/** For tests: versions are counters, and the clock is injectable. */
 export class MemoryBackend implements ComputedBackend {
   data = new Map<string, { entry: Entry; version: string }>()
+  log = new Map<string, number>()
   private n = 0
+  constructor(private now: () => number = () => Date.now()) {}
   async read(key: string) {
     const d = this.data.get(key)
     return { entry: d?.entry, version: d?.version ?? null }
@@ -227,5 +274,11 @@ export class MemoryBackend implements ComputedBackend {
   }
   async dependents(deps: string[]) {
     return [...this.data].filter(([, d]) => (d.entry.deps ?? []).some((x) => deps.includes(x))).map(([k]) => k)
+  }
+  async logInvalidation(deps: string[]) {
+    for (const d of deps) this.log.set(d, this.now())
+  }
+  async invalidatedSince(deps: string[], sinceMs: number) {
+    return deps.some((d) => (this.log.get(d) ?? -Infinity) >= sinceMs)
   }
 }

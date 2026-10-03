@@ -11,18 +11,21 @@
 import { COLLECTIONS } from '../collections'
 import { PLATFORM_HOOKS } from '../collections/hooks'
 import type { CollectionConfig } from '../collections/access'
-import { invalidateAfterWrite } from './store'
+import { invalidateAfterWrite, INVALIDATING_COLLECTIONS } from './store'
 
 type AfterWrite = NonNullable<CollectionConfig['afterWrite']>
 
-for (const name of ['post', 'page', 'config']) {
+// The SAME list decides what may be stored (store.ts): only what is invalidated.
+for (const name of INVALIDATING_COLLECTIONS) {
   const previous: AfterWrite | undefined = COLLECTIONS[name]?.afterWrite ?? PLATFORM_HOOKS[name]?.afterWrite
-  // Lookups by unique field (`post/path=…`) are recorded as deps, so a write
-  // must invalidate them by value, before and after.
-  const render = invalidateAfterWrite(name, (COLLECTIONS[name]?.unique as string[] | undefined) ?? [])
+  const invalidate = invalidateAfterWrite(name)
   const hook: AfterWrite = async (data, userRoles, change) => {
-    if (previous) await previous(data, userRoles, change)
-    await render(data, userRoles, change)
+    try {
+      if (previous) await previous(data, userRoles, change)
+    } finally {
+      // Always: a failing earlier hook must not skip invalidation.
+      await invalidate(data, userRoles, change)
+    }
   }
   if (COLLECTIONS[name]) COLLECTIONS[name] = { ...COLLECTIONS[name], afterWrite: hook } as CollectionConfig
   PLATFORM_HOOKS[name] = { afterWrite: hook }
