@@ -148,7 +148,17 @@ export function applyPlan(data, plan) {
   return next
 }
 
-export function validateAgainst(collection, body) {
+/**
+ * Endpoint-stamped fields: the write pipeline validates the caller's CONTENT
+ * without them (write-pipeline.ts `withoutStamps`, #16/#18), so this must too.
+ * The first post written after provenance shipped carries `_by`, and a
+ * validator that still included the stamps called it "Unexpected _by".
+ */
+const STAMPED = ['_created', '_modified', '_seq', '_by']
+
+export function validateAgainst(collection, stored) {
+  const body = { ...stored }
+  for (const f of STAMPED) delete body[f]
   const errors = []
   validate(body, SCHEMAS[collection], {
     onError: (p, m) => errors.push(`${p}: ${m}`),

@@ -41,7 +41,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { validate as schemaValidate } from 'tosijs-schema'
 
-import { ENVELOPE_FIELDS } from './write-pipeline'
+import { ENVELOPE_FIELDS, STAMPED_FIELDS } from './write-pipeline'
 import { PostSchema } from '../../shared/post'
 import { PageSchema } from '../../shared/page'
 import { ModuleSchema } from '../../shared/module'
@@ -172,17 +172,19 @@ const decode = (value: unknown): unknown => {
 /**
  * Validate a stored document exactly as the write path now would.
  *
- * The envelope strip mirrors `runWritePipeline`: `_id`/`_collection`/`_path` are
- * endpoint-owned and removed before validation, so a strict schema must not see
- * them. `_created`/`_modified` ARE part of the validated body today (the schemas
- * declare them), so they stay.
+ * Mirrors `runWritePipeline`: `_id`/`_collection`/`_path` are endpoint-owned
+ * and removed, and the endpoint-STAMPED fields (`_created`, `_modified`,
+ * `_seq`, `_by`) are hidden from the schema too (`withoutStamps`, #16/#18) —
+ * the caller's content is what is validated. This used to keep the stamps,
+ * which went unnoticed until the first post written after provenance shipped
+ * (it carries `_by`) was reported as "Unexpected _by".
  */
 const validateStored = (
   raw: Record<string, unknown>,
   schema: unknown
 ): string[] => {
   const body = decode(raw.data) as Record<string, unknown>
-  for (const f of ENVELOPE_FIELDS) delete body[f]
+  for (const f of [...ENVELOPE_FIELDS, ...STAMPED_FIELDS]) delete body[f]
   const errors: string[] = []
   schemaValidate(body, schema as never, {
     onError: (path: string, message: string) => {
