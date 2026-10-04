@@ -113,6 +113,13 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
   // by itself — the POST below still requires the proof to have been written
   // into the datastore, and (when armed that way) the right verified email.
   if (req.method === 'GET' && 'page' in req.query) {
+    // The same strict CSP as the other function-served pages.
+    response.set(
+      'Content-Security-Policy',
+      "default-src 'none'; script-src 'unsafe-inline' https://www.gstatic.com; " +
+        "connect-src https://*.googleapis.com https://*.google.com 'self'; " +
+        "style-src 'unsafe-inline'; frame-src https://*.firebaseapp.com"
+    )
     response.status(200).type('html').send(claimPage())
     return
   }

@@ -166,6 +166,36 @@ Rules worth knowing before you write one:
 ## 4. Install it
 
 ```bash
+bun scripts/install-manifest.js virta.json --production
+# → proposed virta@1.0.0.   Confirmation code:  MKQD-XMN5
+#   …your browser opens the approval page…
+# → virta@1.0.0 → installed
+```
+
+Installing needs `configurator`, which is never carried by a token, so the
+command line does not hold it. It **proposes** the manifest (no credentials),
+and you approve it in the browser:
+
+1. Check the page's **confirmation code** matches your terminal. That is what
+   stops a link someone sent you being approved by reflex.
+2. Read what the manifest declares: every collection, grant, limit and
+   capability is listed.
+3. **Sign in to review.** The host answers with a dry run: new install or
+   upgrade, from which version, or exactly why it would be refused. Nothing has
+   changed yet.
+4. **Install.** The host installs the manifest *it stored when you proposed
+   it*, as you. The command line prints the outcome.
+
+A proposal lasts ten minutes and is single-use. Anyone can propose; only a
+configurator can approve, and denying needs no sign-in.
+
+The API underneath, if you are building your own client:
+`POST /install?action=propose {manifest}` → `{requestId, code, url, expiresAt}`;
+`GET /install?action=status&request=<id>` → `{status, result?}`;
+`POST /install?action=preview|approve {requestId}` with a configurator's ID token.
+The direct form still works with an ID token:
+
+```bash
 curl -X POST -H "Authorization: Bearer $ID_TOKEN" -H 'Content-Type: application/json' \
   -d "{\"manifest\": $(cat virta.json)}" .../install
 # → { "status": "installed", "name": "virta", "version": "1.0.0", "unenforced": [] }

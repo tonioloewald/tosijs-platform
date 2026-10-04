@@ -31,7 +31,10 @@ import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
+import { randomBytes } from 'crypto'
 import { unenforcedKeywords } from 'tosijs-schema'
+import { decided, denied, propose, proposalState, taken, type Proposal } from './proposal'
+import { proposalPage } from './proposal-page'
 
 import {
   optionsResponse,
@@ -131,6 +134,274 @@ const superseded = (m: Manifest) => {
   return list.length ? { superseded: list } : {}
 }
 
+export interface InstallResult {
+  httpStatus: number
+  /** Set when refused; `body` is set otherwise. */
+  error?: string
+  message?: string
+  extra?: Record<string, unknown>
+  body?: Record<string, unknown>
+}
+
+/**
+ * Install (or upgrade) a manifest as `principal`: the ONE code path, used by
+ * `POST /install` and by an approved proposal (board #2490). `dryRun` decides
+ * everything and commits nothing, so the approval page can show exactly what
+ * would happen before anyone clicks.
+ *
+ * Throws ManifestConflict (a published version re-posted with other content).
+ */
+export async function runInstall(input: {
+  manifest: unknown
+  approving?: Record<string, CapabilityDeclaration>
+  principal: { uid: string; roles: readonly string[] }
+  dryRun?: boolean
+}): Promise<InstallResult> {
+  const { manifest, approving, principal, dryRun } = input
+  // Read the grant BEFORE trusting the manifest's own name for anything
+  // else — `decideInstall` refuses a grant/manifest namespace mismatch.
+  const name = (manifest as Manifest | null)?.name
+  if (typeof name !== 'string') {
+    return {
+      httpStatus: 400,
+      error: 'refused',
+      message: 'manifest has no name',
+      extra: { problems: ['manifest has no name'] },
+    }
+  }
+  const existing = await readGrant(name)
+  const previousManifest = await readManifest(name, existing?.activeVersion ?? null)
+
+  const decision = decideInstall({
+    manifest,
+    existing,
+    previousManifest,
+    principal,
+    nowIso: new Date().toJSON(),
+    logId: db().collection(LOG).doc().id,
+    validate: validateOptions,
+    approving,
+  })
+
+  if (decision.status === 'refused') {
+    return {
+      httpStatus: 400,
+      error: 'refused',
+      message: 'the manifest was refused',
+      extra: { problems: decision.problems },
+    }
+  }
+
+  const from = existing && existing.status !== 'revoked' ? existing.activeVersion : null
+
+  if (decision.status === 'needs-approval') {
+    if (!dryRun) {
+      await commit(decision.records)
+      functions.logger.info(
+        `install: ${name} parked pending approval of ${decision.added.length} capability request(s)`
+      )
+    }
+    // 202: recorded, deliberately not applied. The grant still names the
+    // OLD version with the OLD capabilities.
+    return {
+      httpStatus: 202,
+      body: {
+        status: 'needs-approval',
+        name,
+        added: decision.added,
+        // Says plainly which of these this host cannot yet enforce. An
+        // approval prompt that overstates what it is asking about is how
+        // people learn to stop reading them.
+        unenforced: unenforcedCapabilities(manifest as Manifest),
+        ...superseded(manifest as Manifest),
+        ...(dryRun ? { from } : {}),
+        note:
+          'nothing changed. re-POST with `approving` set to exactly these ' +
+          'capabilities to apply the upgrade.',
+      },
+    }
+  }
+
+  if (!dryRun) {
+    await commit(decision.records)
+    functions.logger.info(
+      `install: ${decision.status} ${name}@${(manifest as Manifest).version} by ${principal.uid}`
+    )
+  }
+  return {
+    httpStatus: 200,
+    body: {
+      status: decision.status,
+      name,
+      version: (manifest as Manifest).version,
+      unenforced: unenforcedCapabilities(manifest as Manifest),
+      ...superseded(manifest as Manifest),
+      ...(dryRun ? { from } : {}),
+    },
+  }
+}
+
+const PROPOSALS = 'system:install-proposal'
+const proposals = () => db().collection(PROPOSALS)
+
+const readProposal = async (id: string): Promise<Proposal | null> => {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(id)) return null
+  const snap = await proposals().doc(id).get()
+  return snap.exists ? (snap.data() as Proposal) : null
+}
+
+/**
+ * Propose / view / poll / preview / approve an install (see proposal.ts).
+ * Returns true when it answered the request.
+ */
+async function handleProposal(
+  req: AuthenticatedRequest,
+  response: Response,
+  userRoles: Awaited<ReturnType<typeof getUserRoles>>
+): Promise<boolean> {
+  const action = String(req.query.action ?? '')
+  const requestId = String(req.query.request ?? req.body?.requestId ?? '')
+
+  // The page: every GET that names a request and no action.
+  if (req.method === 'GET' && req.query.request && !action) {
+    const proposal = await readProposal(requestId)
+    response.set(
+      'Content-Security-Policy',
+      "default-src 'none'; script-src 'unsafe-inline' https://www.gstatic.com; " +
+        "connect-src https://*.googleapis.com https://*.google.com 'self'; " +
+        "style-src 'unsafe-inline'; frame-src https://*.firebaseapp.com"
+    )
+    response
+      .status(proposal ? 200 : 404)
+      .type('html')
+      .send(proposalPage(proposal, proposalState(proposal, Date.now()), requestId))
+    return true
+  }
+
+  // What the CLI polls. Says only what the proposer already knows, plus the outcome.
+  if (req.method === 'GET' && action === 'status') {
+    const proposal = await readProposal(requestId)
+    const state = proposalState(proposal, Date.now())
+    response.status(proposal ? 200 : 404).json({ status: state, ...(proposal?.result ? { result: proposal.result } : {}) })
+    return true
+  }
+
+  if (req.method !== 'POST' || !['propose', 'preview', 'approve'].includes(action)) return false
+
+  if (action === 'propose') {
+    // No credentials: a proposal is inert until a configurator approves it.
+    const outcome = propose(req.body?.manifest, Date.now(), randomBytes(8))
+    if (outcome.status === 'refused') {
+      fail(
+        response,
+        outcome.reason === 'too-large' ? 413 : 400,
+        outcome.reason === 'too-large' ? 'too-large' : 'bad-request',
+        outcome.reason === 'too-large' ? 'the manifest is too large to propose' : 'expected { manifest } in the body'
+      )
+      return true
+    }
+    // create, never set: a proposal id can never be overwritten.
+    const ref = proposals().doc()
+    await ref.create(outcome.proposal)
+    const host = req.headers['x-forwarded-host'] ?? req.headers.host
+    response.json({
+      requestId: ref.id,
+      code: outcome.proposal.code,
+      url: `https://${host}/install?request=${ref.id}`,
+      expiresAt: outcome.proposal.expiresAt,
+    })
+    return true
+  }
+
+  const proposal = await readProposal(requestId)
+  const state = proposalState(proposal, Date.now())
+
+  // Denying needs no sign-in: it can only ever stop an install.
+  if (action === 'approve' && req.body?.approve === false) {
+    if (proposal && state === 'pending') {
+      await proposals().doc(requestId).update(denied(new Date().toJSON()))
+    }
+    response.json({ status: 'denied' })
+    return true
+  }
+
+  if (!userRoles.roles.includes(ROLES.configurator)) {
+    fail(response, 403, 'forbidden', 'installing requires the `configurator` role')
+    return true
+  }
+  const user = await getUser(req)
+  if (!user) {
+    fail(response, 401, 'unauthenticated', 'authentication required')
+    return true
+  }
+  if (!proposal || state !== 'pending') {
+    fail(response, 404, 'not-found', 'no pending install request with that id')
+    return true
+  }
+  const principal = { uid: user.uid, roles: userRoles.roles as readonly string[] }
+
+  const answer = (r: InstallResult) => {
+    if (r.error) fail(response, r.httpStatus, r.error as never, r.message ?? '', r.extra ?? {})
+    else response.status(200).json(r.body)
+  }
+
+  try {
+    if (action === 'preview') {
+      // Decide everything, commit nothing.
+      answer(await runInstall({ manifest: proposal.manifest, principal, dryRun: true }))
+      return true
+    }
+
+    // approve: single-use. Take the proposal first, in a transaction, so two
+    // clicks (or two tabs) cannot both install.
+    const took = await db().runTransaction(async (tx) => {
+      const snap = await tx.get(proposals().doc(requestId))
+      const current = snap.exists ? (snap.data() as Proposal) : null
+      if (proposalState(current, Date.now()) !== 'pending') return false
+      tx.update(snap.ref, taken(user.uid, new Date().toJSON()))
+      return true
+    })
+    if (!took) {
+      fail(response, 404, 'not-found', 'no pending install request with that id')
+      return true
+    }
+
+    // The STORED manifest, never one from the browser.
+    let result = await runInstall({ manifest: proposal.manifest, principal })
+    // An upgrade that adds capabilities: the page listed every capability the
+    // manifest asks for, so approving the proposal approves exactly those added.
+    if (!result.error && result.body?.status === 'needs-approval') {
+      result = await runInstall({
+        manifest: proposal.manifest,
+        principal,
+        approving: result.body.added as Record<string, CapabilityDeclaration>,
+      })
+    }
+    await proposals()
+      .doc(requestId)
+      .update(
+        decided(
+          result.error
+            ? { failure: { error: result.error, message: result.message ?? '', ...(result.extra ?? {}) } }
+            : { body: result.body }
+        )
+      )
+    answer(result)
+  } catch (e) {
+    const conflict = e instanceof ManifestConflict
+    await proposals()
+      .doc(requestId)
+      .update(decided({ failure: { error: conflict ? 'conflict' : 'internal', message: conflict ? e.message : 'install failed' } }))
+      .catch(() => undefined)
+    if (conflict) fail(response, 409, 'conflict', e.message)
+    else {
+      functions.logger.error('install: approving a proposal failed', e)
+      fail(response, 500, 'internal', 'install failed')
+    }
+  }
+  return true
+}
+
 export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
@@ -143,6 +414,10 @@ export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Resp
   }
 
   const userRoles = await getUserRoles(req)
+
+  // Install proposals (board #2490): propose without credentials, approve in
+  // the browser. Handled before the configurator-only paths below.
+  if (await handleProposal(req, response, userRoles)) return
 
   // `GET ?name=<namespace>` — "is this library installed, and at which
   // version?" (#19).
@@ -224,75 +499,12 @@ export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Resp
           fail(response, 400, 'bad-request', 'expected { manifest } in the body')
           return
         }
-
-        // Read the grant BEFORE trusting the manifest's own name for anything
-        // else — `decideInstall` refuses a grant/manifest namespace mismatch.
-        const name = (manifest as Manifest).name
-        if (typeof name !== 'string') {
-          fail(response, 400, 'refused', 'manifest has no name', {
-            problems: ['manifest has no name'],
-          })
+        const result = await runInstall({ manifest, approving, principal })
+        if (result.error) {
+          fail(response, result.httpStatus, result.error as never, result.message ?? '', result.extra ?? {})
           return
         }
-        const existing = await readGrant(name)
-        const previousManifest = await readManifest(
-          name,
-          existing?.activeVersion ?? null
-        )
-
-        const decision = decideInstall({
-          manifest,
-          existing,
-          previousManifest,
-          principal,
-          nowIso: new Date().toJSON(),
-          logId: db().collection(LOG).doc().id,
-          validate: validateOptions,
-          approving,
-        })
-
-        if (decision.status === 'refused') {
-          fail(response, 400, 'refused', 'the manifest was refused', {
-            problems: decision.problems,
-          })
-          return
-        }
-
-        await commit(decision.records)
-
-        if (decision.status === 'needs-approval') {
-          functions.logger.info(
-            `install: ${name} parked pending approval of ` +
-              `${decision.added.length} capability request(s)`
-          )
-          // 202: recorded, deliberately not applied. The grant still names the
-          // OLD version with the OLD capabilities.
-          response.status(202).json({
-            status: 'needs-approval',
-            name,
-            added: decision.added,
-            // Says plainly which of these this host cannot yet enforce. An
-            // approval prompt that overstates what it is asking about is how
-            // people learn to stop reading them.
-            unenforced: unenforcedCapabilities(manifest as Manifest),
-            ...superseded(manifest as Manifest),
-            note:
-              'nothing changed. re-POST with `approving` set to exactly these ' +
-              'capabilities to apply the upgrade.',
-          })
-          return
-        }
-
-        functions.logger.info(
-          `install: ${decision.status} ${name}@${(manifest as Manifest).version} by ${uid}`
-        )
-        response.json({
-          status: decision.status,
-          name,
-          version: (manifest as Manifest).version,
-          unenforced: unenforcedCapabilities(manifest as Manifest),
-          ...superseded(manifest as Manifest),
-        })
+        response.status(result.httpStatus).json(result.body)
         return
       }
 
