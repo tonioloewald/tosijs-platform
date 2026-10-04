@@ -403,6 +403,12 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
   .../blob
 
 curl '.../docs?p=virta:files&c=50'                              # list: the metadata documents
+
+# copy a file from a legacy folder (blog/, public/, users/) into an area, on the server
+curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"op":"import","from":"blog/Character Sheet.pdf","to":{"area":"virta:files","path":"Character-Sheet.pdf"}}' \
+  .../blob
+# → { "status": "imported", "path": "Character-Sheet.pdf", "bytes": 5120, "sha256": "…" }
 ```
 
 What to know:
@@ -413,6 +419,9 @@ What to know:
 - **Metadata is written only through `/blob`.** A `/doc` or `/docs` write to a
   storage area is `403 refused`, so a metadata document always means the file
   exists. Each one carries `_by` provenance like any document.
+- **`import` copies, on the server.** The original stays where it is. Nothing
+  is downloaded or re-uploaded, so only the area's own limits apply. It never
+  overwrites, and repeating it with the same file answers `unchanged`.
 - **Paths** are `/`-separated segments of letters, digits, `.`, `_` and `-`,
   each starting with a letter or digit, 512 characters at most. No spaces.
 - **Limits:** `413 too-large` over the area's `maxBytes`, or over the endpoint's

@@ -169,6 +169,15 @@ export function isPublicArea(collections: CollectionMap, area: string): boolean 
   )
 }
 
+/**
+ * May `userRoles` write files in `area` at all (unconditional write, as
+ * decidePut requires)? Asked as a PUT, which is what a write is: a scoped
+ * token's caveats list methods, and usually omit DELETE.
+ */
+export function canWriteArea(collections: CollectionMap, area: string, userRoles: UserRoles): boolean {
+  return isBlobStore(collections[area]) && decision(collections, area, 'PUT', userRoles) === ALL
+}
+
 export type ReadDecision =
   | { status: 'public' } // serve the stable, cacheable URL
   | { status: 'signed'; ttlSeconds: number } // issue a short-lived signed link

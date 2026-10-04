@@ -11,6 +11,7 @@
  *   PUT    /blob/<area>/<path>   → store the request body (Content-Type header)
  *   DELETE /blob/<area>/<path>   → delete the file and its metadata
  *   POST   /blob  {op: "move", from: {area, path}, to: {area, path}}
+ *   POST   /blob  {op: "import", from: "<legacy object path>", to: {area, path}}
  *
  * ## Consistency: object keys carry the content hash
  *
@@ -23,6 +24,7 @@
  */
 import {
   blobDocId,
+  canWriteArea,
   decideDelete,
   decideMove,
   decidePut,
@@ -36,6 +38,7 @@ import {
 import type { CollectionMap } from './collections/access'
 import type { UserRoles } from './collections/roles'
 import type { CommitOutcome } from './commit'
+import { isLegacyObjectPath } from './legacy-storage'
 
 /** Largest body the endpoint accepts at all, whatever an area allows. */
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -47,6 +50,10 @@ export interface ObjectStore {
   put(key: string, bytes: Uint8Array, contentType: string): Promise<void>
   delete(key: string): Promise<void>
   copy(from: string, to: string): Promise<void>
+  /** Size and stored type of an object, without reading it; null when it does not exist. */
+  head(key: string): Promise<{ bytes: number; contentType: string } | null>
+  /** sha256 of an object's bytes, computed by streaming it (never buffered whole). */
+  hash(key: string): Promise<string>
   /**
    * A URL for the object that serves it as `contentType`, or null when this
    * substrate cannot sign (emulator, or no signBlob permission).
@@ -189,7 +196,7 @@ export interface BlobRequest {
 }
 
 export async function handleBlob(req: BlobRequest, deps: BlobDeps): Promise<BlobResponse> {
-  if (req.method === 'POST') return move(req, deps)
+  if (req.method === 'POST') return req.json?.op === 'import' ? importLegacy(req, deps) : move(req, deps)
 
   const route = parseBlobRoute(req.pathname)
   if (!route) {
@@ -380,3 +387,75 @@ async function move(req: BlobRequest, deps: BlobDeps): Promise<BlobResponse> {
   await deps.objects.delete(srcKey).catch(() => undefined)
   return { kind: 'json', status: 200, body: { status: 'moved', from: from.path, to: to.path } }
 }
+
+/**
+ * Import a LEGACY file (blog/…, public/…, users/…) into a storage area, on the
+ * server: the object is hashed by streaming and copied inside the store, so
+ * nothing is downloaded or re-uploaded and the endpoint's upload ceiling does
+ * not apply — only the area's own limits do (board #2486).
+ *
+ * - The source is only ever a legacy folder, which is public already, so there
+ *   is no read decision to make; the caller needs WRITE on the destination.
+ * - It COPIES. The original stays, so links to it keep working.
+ * - It never clobbers, and it is idempotent: importing the same bytes to the
+ *   same path again answers `unchanged`, so a migration can be re-run.
+ * - Access, limits and type are decided from the object's metadata BEFORE it
+ *   is hashed: a file the area would refuse is refused cheaply.
+ */
+async function importLegacy(req: BlobRequest, deps: BlobDeps): Promise<BlobResponse> {
+  const body = req.json ?? {}
+  const to = body.to as { area?: unknown; path?: unknown } | undefined
+  if (!isLegacyObjectPath(body.from) || typeof to?.area !== 'string') {
+    return { kind: 'error', status: 400, error: 'bad-request', message: 'expected {op: "import", from: "<legacy folder>/<name>", to: {area, path}}' }
+  }
+  const from = body.from
+  const collections = await deps.collectionsFor(to.area)
+  if (!isBlobStore(collections[to.area])) return notFound
+
+  // May the caller write there at all? First, and opaque when not: only someone
+  // who may write learns whether the source exists.
+  if (!canWriteArea(collections, to.area, req.userRoles)) {
+    return refused({ status: 'refused', reason: 'forbidden', message: 'not found' }, deps, req.userRoles)
+  }
+  const pathProblem = validateBlobPath(to.path)
+  if (pathProblem) return { kind: 'error', status: 400, error: 'bad-request', message: pathProblem }
+  const source = await deps.objects.head(from)
+  if (!source) return { kind: 'error', status: 404, error: 'not-found', message: 'no such legacy file' }
+  // Then size and type, from the object's metadata (a placeholder hash).
+  const pre = decidePut(
+    collections,
+    to.area,
+    { path: to.path, contentType: source.contentType, bytes: source.bytes, sha256: '0'.repeat(64) },
+    req.userRoles
+  )
+  if (pre.status === 'refused') return refused(pre, deps, req.userRoles)
+
+  const sha256 = await deps.objects.hash(from)
+  const d = decidePut(collections, to.area, { path: to.path, contentType: source.contentType, bytes: source.bytes, sha256 }, req.userRoles)
+  if (d.status === 'refused') return refused(d, deps, req.userRoles)
+
+  const path = to.path as string
+  const dstPath = metaPath(to.area, path)
+  const existing = await deps.getMeta(dstPath)
+  if (existing) {
+    return existing.sha256 === sha256
+      ? { kind: 'json', status: 200, body: { status: 'unchanged', from, path, bytes: source.bytes, sha256 } }
+      : { kind: 'error', status: 403, error: 'exists', message: 'the destination already exists with different content' }
+  }
+
+  const dstKey = objectKey(to.area, path, sha256)
+  await deps.objects.copy(from, dstKey)
+  let outcome: CommitOutcome
+  try {
+    outcome = await deps.commitMeta(dstPath, d.meta, collections, req.userRoles, 'POST')
+  } catch (e) {
+    await releaseIfUnreferenced(deps, dstPath, dstKey, sha256)
+    throw e
+  }
+  if (outcome.status === 'refused') {
+    await releaseIfUnreferenced(deps, dstPath, dstKey, sha256)
+    return { kind: 'error', status: commitStatus(outcome.refusal.reason), error: outcome.refusal.reason, message: outcome.refusal.message }
+  }
+  return { kind: 'json', status: 200, body: { status: 'imported', from, path, bytes: source.bytes, sha256 } }
+}
+

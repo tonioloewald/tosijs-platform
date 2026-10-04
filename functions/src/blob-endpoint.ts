@@ -50,6 +50,23 @@ const deps: BlobDeps = {
     copy: async (from, to) => {
       await bucket().file(from).copy(bucket().file(to))
     },
+    head: async (key) => {
+      const file = bucket().file(key)
+      const [exists] = await file.exists()
+      if (!exists) return null
+      const [meta] = await file.getMetadata()
+      return { bytes: Number(meta.size ?? 0), contentType: String(meta.contentType ?? 'application/octet-stream') }
+    },
+    hash: (key) =>
+      new Promise<string>((resolve, reject) => {
+        const h = createHash('sha256')
+        bucket()
+          .file(key)
+          .createReadStream()
+          .on('error', reject)
+          .on('data', (chunk) => h.update(chunk))
+          .on('end', () => resolve(h.digest('hex')))
+      }),
     url: async (key, ttlSeconds, contentType) => {
       try {
         const [url] = await bucket()

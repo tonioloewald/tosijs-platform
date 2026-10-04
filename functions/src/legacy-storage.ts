@@ -27,11 +27,16 @@ export function legacyObjectPath(raw: string): string | null {
   } catch {
     return null
   }
+  return isLegacyObjectPath(path) ? path : null
+}
+
+/** Is this (already decoded) object path inside a legacy folder? */
+export function isLegacyObjectPath(path: unknown): path is string {
+  if (typeof path !== 'string' || path.length > 1024) return false
   const segments = path.split('/')
-  if (segments.length < 2) return null
-  if (segments.some((s) => s === '' || s === '.' || s === '..')) return null
-  if (!(LEGACY_FOLDERS as readonly string[]).includes(segments[0])) return null
-  return path
+  if (segments.length < 2) return false
+  if (segments.some((s) => s === '' || s === '.' || s === '..')) return false
+  return (LEGACY_FOLDERS as readonly string[]).includes(segments[0])
 }
 
 /**

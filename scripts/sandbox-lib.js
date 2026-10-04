@@ -399,3 +399,64 @@ export async function ensureSignedUrlCors(projectId, { dryRun = false } = {}) {
   return { bucket, changed: true }
 }
 
+
+/**
+ * Get a scoped AGENT token through the /authorize browser loop: no secret is
+ * pasted anywhere. Starts a request (poll mode), prints and opens the consent
+ * page, and waits for a person to approve it. The token carries exactly the
+ * caveats asked for, and never more than the approver holds.
+ */
+export async function agentToken(base, { label, caveats, open = true, timeoutMs = 5 * 60 * 1000 }) {
+  const { randomBytes, createHash } = await import('crypto')
+  const verifier = randomBytes(32).toString('base64url')
+  const post = (action, body) =>
+    fetch(`${base}/authorize?action=${action}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }))
+  const started = await post('start', {
+    label,
+    caveats,
+    codeChallenge: createHash('sha256').update(verifier).digest('base64url'),
+    mode: 'poll',
+  })
+  if (!started.json?.requestId) throw new Error(`could not start authorization: ${started.status} ${JSON.stringify(started.json)}`)
+  const url = started.json.consentUrl ?? `${base}/authorize?request=${started.json.requestId}`
+  console.log(`\nApprove this agent ("${label}") in your browser:\n  ${url}\n`)
+  if (open) {
+    try {
+      execSync(`open "${url}"`)
+    } catch {
+      // no browser to open: the link above is enough
+    }
+  }
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2500))
+    const got = await post('exchange', { requestId: started.json.requestId, verifier })
+    if (got.json?.status === 'ready' && got.json.secret) return got.json.secret
+    if (got.json?.status && got.json.status !== 'pending') throw new Error(`authorization ${got.json.status}`)
+  }
+  throw new Error('authorization timed out')
+}
+
+/** The project's default Storage bucket name. */
+export async function defaultBucket(projectId) {
+  const def = await api('GET', `https://firebasestorage.googleapis.com/v1beta/projects/${projectId}/defaultBucket`)
+  const bucket = def.ok ? def.json?.bucket?.name?.split('/').pop() : null
+  if (!bucket) throw new Error(`cannot find the default bucket of ${projectId}: ${def.status}`)
+  return bucket
+}
+
+/**
+ * A file name /blob accepts: letters, digits, `.`, `_`, `-`, starting with a
+ * letter or digit. Runs of anything else become one `-`.
+ */
+export const cleanName = (name) =>
+  name
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .replace(/[-.]+$/, '') || 'file'
+

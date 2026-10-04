@@ -67,6 +67,11 @@ function fakes(opts: { canSign?: boolean; commitRefuses?: boolean; commitThrows?
         objects.set(to, o)
       },
       url: async (k, ttl, type) => (opts.canSign === false ? null : `https://signed/${k}?ttl=${ttl}&type=${type}`),
+      head: async (k) => {
+        const o = objects.get(k)
+        return o ? { bytes: o.bytes.byteLength, contentType: o.contentType } : null
+      },
+      hash: async (k) => createHash('sha256').update(must(objects.get(k)).bytes).digest('hex'),
     },
     sha256: (b) => createHash('sha256').update(b).digest('hex'),
     isPrivileged: (r) => r.roles.includes(ROLES.admin as never),
@@ -447,3 +452,89 @@ describe('0.3.0 review remediation', () => {
     expect(r).toBe('waited on the delete')
   })
 })
+
+describe('import: a legacy file into a storage area, on the server (board #2486)', () => {
+  const importReq = (from: unknown, to: unknown, userRoles = author) => ({
+    method: 'POST',
+    pathname: '/blob',
+    json: { op: 'import', from, to },
+    userRoles,
+  })
+  const withLegacy = (name: string, text: string, contentType = 'image/png') => {
+    const f = fakes()
+    f.objects.set(name, { bytes: bytes(text), contentType })
+    return f
+  }
+
+  test('copies under the clean name, with measured size and hash; the original stays', async () => {
+    const { deps, objects, metas } = withLegacy('blog/Character Sheet.png', 'pixels')
+    const r = await handleBlob(importReq('blog/Character Sheet.png', { area: 'blog:public', path: 'Character-Sheet.png' }), deps)
+    const sha = createHash('sha256').update('pixels').digest('hex')
+    expect(r).toMatchObject({ status: 200, body: { status: 'imported', path: 'Character-Sheet.png', bytes: 6, sha256: sha } })
+    expect(objects.has('blog/Character Sheet.png')).toBe(true)
+    expect(objects.has(objectKey('blog:public', 'Character-Sheet.png', sha))).toBe(true)
+    expect(must(metas.get('blog:public/Character-Sheet.png'))).toMatchObject({ contentType: 'image/png', bytes: 6, sha256: sha, _by: { uid: 'u1' } })
+  })
+
+  test('re-running is safe: the same bytes are `unchanged`; different bytes never clobber', async () => {
+    const { deps, objects } = withLegacy('blog/a.png', 'one')
+    const to = { area: 'blog:public', path: 'a.png' }
+    await handleBlob(importReq('blog/a.png', to), deps)
+    expect(await handleBlob(importReq('blog/a.png', to), deps)).toMatchObject({ body: { status: 'unchanged' } })
+    objects.set('blog/b.png', { bytes: bytes('two'), contentType: 'image/png' })
+    expect(await handleBlob(importReq('blog/b.png', to), deps)).toMatchObject({ status: 403, error: 'exists' })
+  })
+
+  test('only from a legacy folder: an area object, a traversal or junk is a bad request', async () => {
+    const { deps } = withLegacy('blog/a.png', 'x')
+    for (const from of ['blog:private/secret@abc', 'secret.txt', 'blog/../x', 'other/x.png', 42, '']) {
+      expect(await handleBlob(importReq(from, { area: 'blog:public', path: 'a.png' }), deps)).toMatchObject({ status: 400 })
+    }
+  })
+
+  test('needs write on the destination; a stranger learns nothing, not even whether the source exists', async () => {
+    const { deps } = withLegacy('blog/a.png', 'x')
+    const to = { area: 'blog:public', path: 'a.png' }
+    expect(await handleBlob(importReq('blog/a.png', to, anonymousUser), deps)).toMatchObject({ status: 404, error: 'not-found' })
+    expect(await handleBlob(importReq('blog/missing.png', to, anonymousUser), deps)).toMatchObject({ status: 404, error: 'not-found' })
+    expect(await handleBlob(importReq('blog/missing.png', to), deps)).toMatchObject({ status: 404, message: 'no such legacy file' })
+  })
+
+  test('the area\'s limits apply, and are checked BEFORE the file is hashed', async () => {
+    const { deps } = withLegacy('blog/big.png', 'x'.repeat(1001))
+    let hashed = 0
+    const realHash = deps.objects.hash
+    deps.objects.hash = async (k) => {
+      hashed++
+      return realHash(k)
+    }
+    expect(await handleBlob(importReq('blog/big.png', { area: 'blog:public', path: 'big.png' }), deps)).toMatchObject({ status: 413, error: 'too-large' })
+    const pdf = withLegacy('blog/doc.pdf', 'x', 'application/pdf')
+    expect(await handleBlob(importReq('blog/doc.pdf', { area: 'blog:public', path: 'doc.pdf' }), pdf.deps)).toMatchObject({ status: 415 })
+    expect(hashed).toBe(0)
+  })
+
+  test('a destination name /blob refuses is a bad request (the caller picks a clean one)', async () => {
+    const { deps } = withLegacy('blog/Character Sheet.png', 'x')
+    expect(await handleBlob(importReq('blog/Character Sheet.png', { area: 'blog:public', path: 'Character Sheet.png' }), deps)).toMatchObject({ status: 400 })
+  })
+
+  test('a scoped token without DELETE in its methods can still import (a write is a PUT)', async () => {
+    const { deps } = withLegacy('blog/a.png', 'x')
+    const agent = {
+      ...(author as object),
+      token: { id: 't', label: 'agent', roles: ['author'], methods: ['GET', 'LIST', 'POST', 'PUT', 'PATCH'], collections: ['blog:public'] },
+    } as never
+    expect(await handleBlob(importReq('blog/a.png', { area: 'blog:public', path: 'a.png' }, agent), deps)).toMatchObject({ body: { status: 'imported' } })
+    // …and its collections caveat still binds it.
+    expect(await handleBlob(importReq('blog/a.png', { area: 'blog:private', path: 'a.png' }, agent), deps)).toMatchObject({ status: 404 })
+  })
+
+  test('a refused commit leaves no object behind', async () => {
+    const { deps, objects } = withLegacy('blog/a.png', 'x')
+    deps.commitMeta = async (p) => ({ status: 'refused', refusal: { p, reason: 'schema', message: 'no' } })
+    await handleBlob(importReq('blog/a.png', { area: 'blog:public', path: 'a.png' }), deps)
+    expect([...objects.keys()]).toEqual(['blog/a.png'])
+  })
+})
+
