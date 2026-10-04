@@ -51,6 +51,14 @@ export interface ClaimState {
   issuedAt?: string
   /** What the claimant wrote in, directly, to prove datastore access. */
   proof?: string
+  /**
+   * Optional, written WITH the proof: the email this claim is armed for. When
+   * set, only a principal with that VERIFIED email may claim. Without it,
+   * whoever authenticates first after the proof is written gets the grant —
+   * tolerable when a person does each step by hand, not when the provisioner
+   * arms the claim and opens a one-click page (board #2489).
+   */
+  for?: string
   /** Set once a claim succeeds, for the ledger. */
   claimedBy?: string
   claimedAt?: string
@@ -62,6 +70,7 @@ export type ClaimRefusal =
   | 'no-proof'
   | 'mismatch'
   | 'no-principal'
+  | 'wrong-claimant'
 
 export type ClaimDecision =
   | { status: 'granted'; principal: string; rotate: true }
@@ -71,6 +80,8 @@ export interface ClaimInput {
   state: ClaimState | null
   /** The authenticated caller. A claim must be attributable. */
   principal: string | null
+  /** The caller's VERIFIED email, if any (never an unverified one). */
+  principalEmail?: string | null
   /** Injected clock (ms). */
   now: number
   ttlMs?: number
@@ -88,6 +99,7 @@ export interface ClaimInput {
 export function decideClaim({
   state,
   principal,
+  principalEmail,
   now,
   ttlMs = NONCE_TTL_MS,
 }: ClaimInput): ClaimDecision {
@@ -107,6 +119,17 @@ export function decideClaim({
   if (!state.proof) return { status: 'refused', reason: 'no-proof' }
   if (state.proof !== state.nonce) {
     return { status: 'refused', reason: 'mismatch' }
+  }
+
+  // Armed for one person: the proof is valid, but not for this caller. Fails
+  // closed — a `for` that is not a non-empty string, or a caller with no
+  // verified email, is refused rather than treated as "anyone".
+  if (state.for !== undefined) {
+    const wanted = typeof state.for === 'string' ? state.for.trim().toLowerCase() : ''
+    const have = (principalEmail ?? '').trim().toLowerCase()
+    if (!wanted || !have || wanted !== have) {
+      return { status: 'refused', reason: 'wrong-claimant' }
+    }
   }
 
   // `rotate` is not advice — the caller MUST replace the nonce and clear the
@@ -133,7 +156,8 @@ export function rotatedState(
     nonce: nextNonce,
     issuedAt: nowIso,
     // proof deliberately absent — cleared, not blanked, so a re-claim needs a
-    // fresh write rather than an empty-string match.
+    // fresh write rather than an empty-string match. `for` goes with it: a
+    // binding belongs to one arming, never to the next.
     claimedBy: principal,
     claimedAt: nowIso,
   }

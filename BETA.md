@@ -80,37 +80,42 @@ because the proof of ownership is **being able to write the datastore** — whic
 per DECISIONS D3, already outranks anything this system can enforce.
 
 ```bash
+bun scripts/claim.js --alias mine
+# → claim armed for you@example.com … and your browser opens the claim page
+```
+
+Sign in with Google on that page and click **Claim**. Your account is now the
+host's `configurator`. That is the whole ceremony.
+
+What the command did, with your operator credentials: it asked the host for its
+claim nonce, wrote it into `system:claim/current` as the proof, and **bound it
+to your email** (`--for someone@else.com` to arm it for another person). Only
+that verified account can complete the claim, and only within the hour. The
+nonce rotates on success, so the ceremony is not replayable, and it is
+re-runnable as break-glass if the configurator loses their account.
+
+**By hand**, if you would rather see every step (it is the same ceremony):
+
+```bash
 curl https://us-central1-<project>.cloudfunctions.net/claim
 # → { "nonce": "…", "writeTo": { "collection": "system:claim", "document": "current", "field": "proof" } }
 ```
 
-Write that nonce into `system:claim/current` in the `proof` field — Firebase
-console, `gcloud`, or admin credentials. `firestore.rules` is deny-all, so there
-is no path to that document through the API for anyone.
-
-Then, authenticated with a Google sign-in.
-
-**Getting `$ID_TOKEN`.** This has to be a real Firebase ID token — a platform
-token (below) will not do, deliberately: claiming is how authority begins, and
-it needs a human at a browser. The provisioner deploys hosting, so:
-
-1. open `https://<your-project>.web.app` and sign in with Google;
-2. in the browser console: `await fb.auth.currentUser.getIdToken()`
-
-(`fb` is exposed on `window` for exactly this kind of poking.) The token lasts
-about an hour.
+Write that nonce into the `proof` field of `system:claim/current` — Firebase
+console, `gcloud`, or admin credentials (`firestore.rules` is deny-all, so no
+API path reaches that document). Optionally add a `for` field with the one
+email allowed to claim. Then, with a real Firebase ID token (sign in at
+`https://<your-project>.web.app`, then `await fb.auth.currentUser.getIdToken()`
+in the browser console; in Safari wrap it in `copy(...)`):
 
 ```bash
 curl -X POST -H "Authorization: Bearer $ID_TOKEN" .../claim
 # → { "ok": true, "granted": "configurator" }
 ```
 
-The nonce rotates on success, so the ceremony is not replayable — and it is
-re-runnable as break-glass if the configurator loses their account.
-
-> If you are scripting this: a Firestore REST `PATCH` **without** `updateMask`
-> replaces the whole document and wipes the nonce you are trying to match. Use
-> `?updateMask.fieldPaths=proof`.
+> Scripting the write yourself? A Firestore REST `PATCH` **without**
+> `updateMask` replaces the whole document and wipes the nonce you are trying to
+> match. Use `?updateMask.fieldPaths=proof` (and `&updateMask.fieldPaths=for`).
 
 ---
 

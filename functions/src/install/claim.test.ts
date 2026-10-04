@@ -118,6 +118,40 @@ describe('refusals', () => {
   })
 })
 
+describe('armed for one person (board #2489)', () => {
+  const armed = (forEmail: unknown) => fresh({ proof: 'abc123', for: forEmail as string })
+  const claim = (state: ReturnType<typeof fresh>, principalEmail?: string | null) =>
+    decideClaim({ state, principal: 'uid-1', principalEmail, now: NOW })
+
+  test('the named, verified email claims', () => {
+    expect(claim(armed('owner@example.com'), 'owner@example.com')).toMatchObject({ status: 'granted' })
+    expect(claim(armed('Owner@Example.com '), 'owner@example.com')).toMatchObject({ status: 'granted' })
+  })
+  test('anyone else is refused, though the proof is valid', () => {
+    expect(claim(armed('owner@example.com'), 'intruder@example.com')).toEqual({ status: 'refused', reason: 'wrong-claimant' })
+  })
+  test('a caller with no VERIFIED email is refused', () => {
+    expect(claim(armed('owner@example.com'), null)).toEqual({ status: 'refused', reason: 'wrong-claimant' })
+    expect(claim(armed('owner@example.com'))).toEqual({ status: 'refused', reason: 'wrong-claimant' })
+  })
+  test('a malformed binding fails CLOSED, never "anyone"', () => {
+    for (const bad of ['', '   ', 42, null, {}]) {
+      expect(claim(armed(bad), 'owner@example.com')).toEqual({ status: 'refused', reason: 'wrong-claimant' })
+    }
+  })
+  test('no binding: the original ceremony is unchanged', () => {
+    expect(claim(fresh({ proof: 'abc123' }), null)).toMatchObject({ status: 'granted' })
+  })
+  test('rotation drops the binding with the proof', () => {
+    expect(rotatedState(armed('owner@example.com'), 'next', 'uid-1', 'T')).toEqual({
+      nonce: 'next',
+      issuedAt: 'T',
+      claimedBy: 'uid-1',
+      claimedAt: 'T',
+    })
+  })
+})
+
 describe('rotation — what stops the ceremony becoming a back door', () => {
   test('a grant always demands rotation', () => {
     const d = decideClaim({

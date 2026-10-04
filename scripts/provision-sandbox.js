@@ -526,7 +526,8 @@ async function main() {
       `  https://console.firebase.google.com/project/${projectId}/authentication/providers\n` +
       '  Enable "Google" as a sign-in provider.\n' +
       '\nUntil then no human can sign in to the sandbox; public/anonymous paths work.\n' +
-      `\nThen:  bun run use ${ALIAS}     # point this checkout at it\n` +
+      `\nThen:  bun scripts/claim.js --alias ${ALIAS}   # arms the claim for you and opens the page: sign in, click Claim\n` +
+      `       bun run use ${ALIAS}     # point this checkout at it\n` +
       `       bun run sandbox:reset    # wipe + reseed whenever you want a clean slate\n`
   )
 }

@@ -48,6 +48,7 @@ import {
 } from './install/claim'
 import { ROLES } from './collections/roles'
 import { credentialName, lookupEmail } from './collections/join-roles'
+import { claimPage } from './claim-page'
 import { fail, noStore } from './errors'
 
 /** `system:claim/current`, split. Not a registered collection — see epoch.ts. */
@@ -90,6 +91,8 @@ async function publishNonce(): Promise<ClaimState> {
     // PREVIOUS nonce would sit there, and if a nonce ever repeated it would
     // match — a replay this ceremony has no other defence against.
     delete next.proof
+    // …and any binding written with it: `for` belongs to one arming.
+    delete next.for
     tx.set(claimRef(), next)
     return next
   })
@@ -103,6 +106,14 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
   noStore(response)
   const req = request as AuthenticatedRequest
   if (optionsResponse(req, response, ['OPTIONS', 'GET', 'POST'])) {
+    return
+  }
+
+  // The one-click page (board #2489): sign in, click Claim. It grants nothing
+  // by itself — the POST below still requires the proof to have been written
+  // into the datastore, and (when armed that way) the right verified email.
+  if (req.method === 'GET' && 'page' in req.query) {
+    response.status(200).type('html').send(claimPage())
     return
   }
 
@@ -159,6 +170,9 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
       const decision = decideClaim({
         state,
         principal: user.uid,
+        // VERIFIED email only (lookupEmail): an unverified one is a claim, not
+        // an identity, and `for` is authority.
+        principalEmail: lookupEmail(user) ?? null,
         now: Date.now(),
       })
       if (decision.status === 'refused') return decision
