@@ -266,20 +266,24 @@ class AssetManager extends Component<AssetManagerParts> {
     const basePath = pathSelector.value
     if (fileInput.files?.length === 1) {
       const file = fileInput.files[0]
-      uploadFile(
-        file,
-        `/${basePath}/${filePath.value}`,
-        convertToWebP.checked
-      ).then((path: string) => {
-        postNotification({
-          type: 'info',
-          message: `${file.name} uploaded to path '${path}'`,
+      uploadFile(file, `/${basePath}/${filePath.value}`, convertToWebP.checked)
+        .then((path: string) => {
+          postNotification({
+            type: 'info',
+            message: `${file.name} uploaded to path '${path}'`,
+          })
+          // The name the file actually got (an area cleans it).
+          assetManagerData.filter.value = path.slice(path.indexOf('/') + 1)
+          filePath.value = ''
+          fileInput.value = ''
+          this.getFiles()
         })
-        assetManagerData.filter.value = filePath.value
-        filePath.value = ''
-        fileInput.value = ''
-        this.getFiles()
-      })
+        .catch((e) => {
+          postNotification({
+            type: 'error',
+            message: `${file.name} was not uploaded: ${e?.message ?? e}`,
+          })
+        })
     } else {
       postNotification({
         type: 'error',
@@ -362,8 +366,11 @@ class AssetManager extends Component<AssetManagerParts> {
           },
           span('Path'),
           tosiSelect({
-            options: 'blog,public',
-            value: 'blog',
+            // `blog:public` is a storage area (/blob); `public` is the legacy
+            // folder, not migrated yet. The old `blog` folder's files were
+            // copied into the area (board #2486) and still serve from /stored.
+            options: 'blog:public,public',
+            value: 'blog:public',
             part: 'pathSelector',
             onChange: this.getFiles,
           })

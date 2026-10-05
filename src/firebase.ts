@@ -42,6 +42,7 @@ import {
   listAll,
   deleteObject,
 } from 'firebase/storage'
+import { cleanPath, fileUrl, locate } from './blob-files'
 import { getFunctions, connectFunctionsEmulator } from 'firebase/functions'
 import {
   EventNameString,
@@ -826,7 +827,30 @@ export const service = new Proxy(
 
 // storage
 
+// Files live in two places (see blob-files.ts): a STORAGE AREA (`blog:public`),
+// served by /blob under the area's access rules, or a legacy folder (`public`),
+// still read through /stored and written with the Storage SDK. A path whose
+// folder contains `:` is an area; the helpers below take either.
+
+const blobFetch = async (
+  path: string,
+  options: RequestInit = {}
+): Promise<Response> => {
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  }
+  const user = getAuth().currentUser
+  if (user) headers['Authorization'] = 'Bearer ' + (await user.getIdToken())
+  return fetch(`${baseServiceUrl}blob${path}`, { ...options, headers })
+}
+
+const blobFailure = async (res: Response): Promise<string> => {
+  const body = await res.json().catch(() => ({}))
+  return body.message || body.error || `${res.status}`
+}
+
 export const pathToUrl = async (path: string): Promise<string | undefined> => {
+  if (locate(path).area) return fileUrl(path)
   try {
     const ref = storageRef(getStorage(), path)
     const url = await getDownloadURL(ref)
@@ -836,12 +860,8 @@ export const pathToUrl = async (path: string): Promise<string | undefined> => {
   }
 }
 
-// Convert a storage path to a /stored URL (simpler, more stable URLs)
-export const pathToStoredUrl = (path: string): string => {
-  // Remove leading slash if present
-  const cleanPath = path.startsWith('/') ? path.slice(1) : path
-  return `/stored/${cleanPath}`
-}
+// The site-relative address of a file: /blob/<area>/… or /stored/<folder>/…
+export const pathToStoredUrl = (path: string): string => fileUrl(path)
 
 const imageToWebP = (
   file: File,
@@ -926,13 +946,27 @@ export const uploadFile = async (
     type: 'progress',
     message: `Uploading "${file.name}" to "${desiredPath}"`,
   })
-  const ref = storageRef(getStorage(), desiredPath)
-  const { metadata } = await uploadBytes(
-    ref,
-    convertToWebP ? await imageToWebP(file) : file
-  )
-  closeNotification()
-  return metadata.fullPath
+  try {
+    const body = convertToWebP ? await imageToWebP(file) : file
+    const { area, name } = locate(desiredPath)
+    if (area) {
+      // /blob only takes clean names, so the name is cleaned here rather than
+      // refused there; the path returned is the one the file actually has.
+      const cleaned = cleanPath(name)
+      const res = await blobFetch(`/${area}/${cleaned}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': body.type || 'application/octet-stream' },
+        body,
+      })
+      if (!res.ok) throw new Error(await blobFailure(res))
+      return `${area}/${cleaned}`
+    }
+    const ref = storageRef(getStorage(), desiredPath)
+    const { metadata } = await uploadBytes(ref, body)
+    return metadata.fullPath
+  } finally {
+    closeNotification()
+  }
 }
 
 export interface FileRecord {
@@ -941,6 +975,10 @@ export interface FileRecord {
 }
 
 export const deleteFile = async (path: string): Promise<boolean> => {
+  const { area, name } = locate(path)
+  if (area) {
+    return (await blobFetch(`/${area}/${name}`, { method: 'DELETE' })).ok
+  }
   const ref = storageRef(getStorage(), path)
   try {
     await deleteObject(ref)
@@ -955,6 +993,24 @@ export const renameFile = async (
   newPath: string
 ): Promise<boolean> => {
   try {
+    const from = locate(oldPath)
+    const to = locate(newPath)
+    if (from.area || to.area) {
+      // A move on the server: nothing is downloaded. Legacy ↔ area is not a
+      // rename (that is the migration's `import`), so it is refused here.
+      if (!from.area || !to.area) return false
+      const res = await blobFetch('', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          op: 'move',
+          from: { area: from.area, path: from.name },
+          to: { area: to.area, path: cleanPath(to.name) },
+        }),
+      })
+      if (!res.ok) console.error('Error renaming file:', await blobFailure(res))
+      return res.ok
+    }
     const oldRef = storageRef(getStorage(), oldPath)
     const newRef = storageRef(getStorage(), newPath)
 
@@ -980,7 +1036,32 @@ export const renameFile = async (
   }
 }
 
+// An area's listing is its metadata documents. One request, up to this many:
+// past it the list is cut short, so say so rather than show a partial list as
+// the whole.
+const MAX_LISTED_FILES = 2000
+
 export const listFiles = async (path: string): Promise<FileRecord[]> => {
+  const { area } = locate(path)
+  if (area) {
+    const docs = (await service.docs.get({
+      p: area,
+      c: MAX_LISTED_FILES,
+      f: 'path',
+    })) as Array<{ path: string }>
+    if (!Array.isArray(docs)) throw new Error(`could not list ${area}`)
+    if (docs.length >= MAX_LISTED_FILES) {
+      console.warn(
+        `${area}: more than ${MAX_LISTED_FILES} files; the list is cut short`
+      )
+    }
+    return docs
+      .map((doc) => ({
+        name: doc.path,
+        path: `${area}/${doc.path}`,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
   const ref = storageRef(getStorage(), path)
   const response = await listAll(ref)
   return response.items.map((item) => ({
@@ -996,6 +1077,15 @@ export interface FileMetadata {
 export const getFileMetadata = async (
   path: string
 ): Promise<FileMetadata | undefined> => {
+  const { area, name } = locate(path)
+  if (area) {
+    // The metadata document; its id is the path with `/` as `~` (blob.ts).
+    try {
+      return await service.doc.get({ p: `${area}/${name.replace(/\//g, '~')}` })
+    } catch (e) {
+      return undefined
+    }
+  }
   const ref = storageRef(getStorage(), path)
   try {
     const metadata = await getMetadata(ref)
