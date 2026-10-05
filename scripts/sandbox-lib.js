@@ -136,6 +136,15 @@ export const assertProbeAllowed = async (projectId, argv = process.argv) => {
   process.exit(1)
 }
 
+/**
+ * The address a PERSON is sent to: the host's own site, never its functions'
+ * `…cloudfunctions.net` address. Google sign-in only works from a host's
+ * authorized domains, and `<project>.web.app` always is one; the function
+ * address never is (found live 2026-10-05). Hosting rewrites /authorize, /claim
+ * and /install to their functions, so the same paths work on both.
+ */
+export const siteBase = (projectId) => `https://${projectId}.web.app`
+
 /** The production project id. Anything equal to this is off limits, always. */
 export const productionProjectId = () => readRc().projects?.default ?? null
 

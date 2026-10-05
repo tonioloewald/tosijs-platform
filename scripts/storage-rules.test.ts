@@ -74,3 +74,31 @@ describe('firebase.json: files served from the site origin are sandboxed by HOST
   })
 })
 
+describe('firebase.json: the sign-in pages are served from the site domain', () => {
+  // Google sign-in only works from a host's AUTHORIZED domains; a function's
+  // cloudfunctions.net address is not one (found live 2026-10-05). So the
+  // pages go through Hosting, which needs a rewrite per path and a header
+  // rule carrying the pages' own CSP (Hosting replaces the function's).
+  const hosting = JSON.parse(readFileSync(new URL('../firebase.json', import.meta.url), 'utf-8')).hosting
+
+  test('each page path is rewritten to its function, before the catch-all', async () => {
+    const { PAGE_PATHS } = await import('../functions/src/page-csp')
+    const sources = hosting.rewrites.map((r: { source: string }) => r.source)
+    const catchAll = sources.indexOf('**')
+    for (const name of PAGE_PATHS) {
+      const i = sources.indexOf(`/${name}`)
+      expect(i).toBeGreaterThan(-1)
+      expect(i).toBeLessThan(catchAll)
+      expect(hosting.rewrites[i].function).toBe(name)
+    }
+  })
+
+  test('a header rule gives exactly those paths PAGE_CSP, after the site-wide rule', async () => {
+    const { PAGE_CSP, PAGE_PATHS } = await import('../functions/src/page-csp')
+    const rules: Array<{ source: string; headers: Array<{ key: string; value: string }> }> = hosting.headers
+    const i = rules.findIndex((r) => PAGE_PATHS.every((p: string) => r.source.includes(p)))
+    expect(i).toBeGreaterThan(rules.findIndex((r) => r.source === '**'))
+    expect(rules[i].headers.find((h) => h.key === 'Content-Security-Policy')?.value).toBe(PAGE_CSP)
+  })
+})
+

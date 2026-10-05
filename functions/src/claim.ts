@@ -32,6 +32,7 @@ somebody who should not be able to observe it at all.
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
+import { PAGE_CSP } from './page-csp'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
@@ -114,12 +115,7 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
   // into the datastore, and (when armed that way) the right verified email.
   if (req.method === 'GET' && 'page' in req.query) {
     // The same strict CSP as the other function-served pages.
-    response.set(
-      'Content-Security-Policy',
-      "default-src 'none'; script-src 'unsafe-inline' https://www.gstatic.com; " +
-        "connect-src https://*.googleapis.com https://*.google.com 'self'; " +
-        "style-src 'unsafe-inline'; frame-src https://*.firebaseapp.com"
-    )
+    response.set('Content-Security-Policy', PAGE_CSP)
     response.status(200).type('html').send(claimPage())
     return
   }

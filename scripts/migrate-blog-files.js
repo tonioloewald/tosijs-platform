@@ -93,7 +93,7 @@ if (!has('apply')) {
 let token
 let roleDoc
 if (isProduction) {
-  token = await lib.agentToken(BASE, {
+  token = await lib.agentToken(lib.siteBase(projectId), {
     label: `migration × ${folder}/ → ${area}`,
     caveats: { roles: ['author'], collections: [area] },
     open: !has('no-open'),

@@ -56,7 +56,9 @@ if (has('production')) {
 
 // No token: propose it and let a configurator approve in the browser.
 if (!token) {
-  const base = `https://us-central1-${projectId}.cloudfunctions.net/install`
+  // Through the site's own address, so the approval link the host answers with
+  // is one Google sign-in works on (lib.siteBase).
+  const base = `${lib.siteBase(projectId)}/install`
   const res = await fetch(`${base}?action=propose`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

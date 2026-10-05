@@ -74,7 +74,8 @@ if (!armed.ok) {
   process.exit(1)
 }
 
-const page = `${base}?page`
+// The site's own address: sign-in does not work on the function's (lib.siteBase).
+const page = `${lib.siteBase(projectId)}/claim?page`
 console.log(`${projectId}: claim armed for ${forEmail} (until ${published.expiresAt}).`)
 console.log(`Sign in as that account and click Claim:\n  ${page}`)
 if (!has('no-open')) {

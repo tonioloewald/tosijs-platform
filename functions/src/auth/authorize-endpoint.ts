@@ -32,6 +32,7 @@ collecting takes effect, and the "no secret is ever stored" property survives.
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
+import { PAGE_CSP } from '../page-csp'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
@@ -102,13 +103,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
         ? ({ ...snapshot.data(), _id: snapshot.id } as AuthorizeRequest)
         : null
 
-      response.set(
-        'Content-Security-Policy',
-        "default-src 'none'; " +
-          "script-src 'unsafe-inline' https://www.gstatic.com; " +
-          "connect-src https://*.googleapis.com https://*.google.com 'self'; " +
-          "style-src 'unsafe-inline'; frame-src https://*.firebaseapp.com"
-      )
+      response.set('Content-Security-Policy', PAGE_CSP)
       // Never cached: it renders a live, expiring authorization request.
       response.set('Cache-Control', 'no-store')
       response.status(record ? 200 : 404).send(consentPage(record, id))

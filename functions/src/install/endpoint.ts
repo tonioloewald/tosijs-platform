@@ -28,6 +28,7 @@ rather than for a few seconds.
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
+import { PAGE_CSP } from '../page-csp'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
@@ -265,12 +266,7 @@ async function handleProposal(
   // The page: every GET that names a request and no action.
   if (req.method === 'GET' && req.query.request && !action) {
     const proposal = await readProposal(requestId)
-    response.set(
-      'Content-Security-Policy',
-      "default-src 'none'; script-src 'unsafe-inline' https://www.gstatic.com; " +
-        "connect-src https://*.googleapis.com https://*.google.com 'self'; " +
-        "style-src 'unsafe-inline'; frame-src https://*.firebaseapp.com"
-    )
+    response.set('Content-Security-Policy', PAGE_CSP)
     response
       .status(proposal ? 200 : 404)
       .type('html')
