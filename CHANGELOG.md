@@ -1,5 +1,102 @@
 # Changelog
 
+## 0.4.0 — 2026-10-07
+
+Setup without the cloud console, the ceremonies as pages, and pages rendered
+when content is stored (D22, D23).
+
+### Added
+
+- **`bun run deploy`**: the whole host in order (indexes, then functions,
+  rules and hosting), then checked from outside. `bun run deploy:sandbox` does
+  the same for a sandbox and refuses a host that is not marked as one.
+- **Every endpoint declares `invoker: 'public'` in code**
+  (`functions/src/endpoint-options.ts`), so every deploy re-applies it. There is
+  no IAM step to remember; a lost one is fixed by redeploying.
+- **Signing set up by code**: `bun scripts/enable-signing.js --alias <host>`
+  grants the functions' service account Token Creator on itself and sets the
+  bucket CORS a page needs to read a signed redirect. New hosts get both from
+  the provisioner.
+- **One-click claim** (board #2489): `bun scripts/claim.js --alias <host>
+  [--for <email>]` arms the claim for one verified email and opens
+  `/claim?page`, where that person signs in and clicks Claim.
+- **Install approval in the browser** (board #2490): `install-manifest.js`
+  proposes a manifest with no credentials and prints a link and a confirmation
+  code; a configurator opens the link, sees a dry run of what would happen, and
+  approves. The host installs the manifest it stored, as that person.
+  Endpoints: `POST /install?action=propose|preview|approve`,
+  `GET /install?request=<id>` (the page), `GET /install?action=status`.
+- **`POST /blob {op: "import"}`**: copy a file from a legacy folder (`blog/`,
+  `public/`, `users/`) into a storage area on the server.
+  `scripts/migrate-blog-files.js` uses it to copy a whole folder, with clean
+  names; the originals stay. See BETA.md "Store files".
+- **Render on store** (D23, board #2698), behind `RENDER_ON_STORE`
+  (`false` | `compare` | `true`; default off). Pages, the nav, the blog index
+  and the sitemap are computed on first read, stored with the documents they
+  depend on, and invalidated when one of those is written. Rendering is always
+  done as the public. `scripts/render-store.js` lists, shows and purges stored
+  values; `scripts/compare-render.js` compares the two engines URL by URL.
+  Set `SITE_HOST` when turning it on: stored pages and the sitemap name it.
+- **The asset manager uses storage areas**: uploads, list, rename and delete
+  go through `/blob` for a folder that is an area (`blog:public`); file names
+  are cleaned on upload.
+- **Kernel (npm):** `afterWrite(data, userRoles, change?)` gains a third
+  argument, `WriteChange {path, before?, after?}`.
+
+### Changed
+
+- **`bun run deploy` now means the whole host**, and it passes `--force`:
+  indexes and functions that exist on the host but not in the checkout are
+  deleted without a prompt. `deploy-functions` and `deploy-hosting` remain for
+  partial deploys. `enable-gen-invoker.sh` is gone (the invoker is in code).
+- The backup takes **every collection the database has**, minus a short list
+  of caches. It used to name five, which left out storage-area metadata,
+  installed manifests, the registry and grants. The off-site archive keeps
+  `token` and `system:claim` local along with `role`.
+- `/stored` ignores a query string.
+- An install proposal holds at most 64 KB, and at most 20 can await a decision
+  at once (`429 rate-limited` past that). An authorization request's label and
+  caveats together are at most 4 KB.
+
+### Fixed
+
+- **Google sign-in never worked on the `/authorize`, `/claim` and `/install`
+  pages.** Their CSP blocked the loader popup sign-in needs
+  (`auth/internal-error`), and the scripts linked to the functions' address,
+  which is not an authorized sign-in domain. The pages are now served from the
+  site's own domain, with a CSP that allows the loader.
+- **Those pages could be framed by another site.** They grant authority on a
+  click; they now send `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+- **Server-rendered data could end its own `<script>`.** A post containing
+  `</script>` broke out of the embedded JSON. Both render paths use one safe
+  embedder.
+- Anonymous authorization requests and install proposals were never deleted.
+  Each new one now deletes expired ones.
+- Stored-data validators no longer fail a document for the fields the endpoint
+  stamps (`_by` and friends).
+
+### Upgrading a host
+
+Run `bun run deploy` (or deploy functions, rules **and hosting**: this release
+changes all three).
+
+- **`firebase.json`, if you maintain your own:** add rewrites for
+  `/authorize`, `/claim` and `/install` to their functions, **before** any
+  catch-all, and the header rule for `/@(authorize|claim|install)` from this
+  repo's `firebase.json`. Without them, browser sign-in on those pages fails.
+  Hosting replaces a function's headers, so the rule must carry the pages' CSP
+  exactly (`functions/src/page-csp.ts`; a test compares them).
+- **Signed URLs:** if you granted Token Creator by hand for 0.3.0, also run
+  `bun scripts/enable-signing.js --alias <host>`. It adds the bucket CORS;
+  without it a page's `fetch()` cannot read a `/blob` redirect (found by
+  tosijs-virta's upgrade, board #2488). It is safe to re-run.
+- **Render on store is off unless you set `RENDER_ON_STORE`.** To adopt it:
+  set `compare`, run `scripts/compare-render.js`, then set `true` and
+  `SITE_HOST`. After changing an access rule on a host that has it on, purge
+  with `scripts/render-store.js`. The invalidation hooks run whether or not
+  the flag is set (a few small writes on each post, page or config save).
+- **Kernel (npm):** nothing breaks; the `afterWrite` argument is optional.
+
 ## 0.3.0 — 2026-09-30
 
 File storage: **storage areas** and the `/blob` endpoint (board #1136).

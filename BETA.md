@@ -60,7 +60,7 @@ firebase deploy --only firestore:indexes   # first
 firebase deploy --only functions           # then
 ```
 
-**Every endpoint is publicly invocable, declared in code** (0.3.1+:
+**Every endpoint is publicly invocable, declared in code** (0.4.0+:
 `invoker: 'public'`, see `functions/src/endpoint-options.ts`), so every
 deploy re-applies it. There is no IAM step to remember, and one that was lost
 (a Cloud Run 401/403 with an HTML body from Google, before our code runs) is
@@ -431,8 +431,10 @@ What to know:
 - **Delivery.** A fetch is either a `302` to a signed Cloud Storage URL or the
   bytes streamed by the function. Both are correct; which one you get depends
   on the host. Signing needs the functions service account to hold "Service
-  Account Token Creator" on itself; without it the host streams, and logs once
-  that it is doing so. A redirect is never cached (`no-cache`): it names
+  Account Token Creator" on itself, and the bucket to allow cross-origin reads
+  of the signed response; `bun scripts/enable-signing.js --alias <host>` sets
+  up both (new hosts get them from the provisioner). Without signing the host
+  streams, and logs once that it is doing so. A redirect is never cached (`no-cache`): it names
   one version of the file, which a replace deletes. Streamed public files cache
   for five minutes (`public, max-age=300`); private ones are
   `private, no-store`, and a signed link to one lives for five minutes.

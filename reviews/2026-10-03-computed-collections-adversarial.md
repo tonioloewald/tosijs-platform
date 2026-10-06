@@ -54,3 +54,7 @@ Exposure at review time: **sandbox only**. Verified: loewald.com's prefetchData 
 - **Stored ajs:** a per-request fuel/IO budget across nested computes; dependency caps; no
   network capability for stored values without max age; output schema checked before storing.
 - Author-controlled page `regexp` runs per request (ReDoS) and feeds key construction: validate.
+
+---
+
+**STATUS: CLEARED** (recorded 2026-10-07; the switch itself was 2026-10-03, `751c3a4`). Blockers 1–5 were fixed in `2737244` and re-reviewed; the re-review's majors were fixed in `18e021c` (store-enforced keep rule, non-fatal log, prefix at serve, 24h backstop). `scripts/compare-render.js` showed 796/796 URLs identical before the switch. The closure was not written here at the time, which the 0.4.0 pre-tag review flagged. Majors 6 and 9 remain open, and 7 and 8 are partly answered; they are on the board under #2698 (comment of 2026-10-06), with the 0.4.0 review's follow-ups in #3108.
