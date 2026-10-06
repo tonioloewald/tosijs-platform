@@ -111,6 +111,16 @@ export interface StartInput {
   nowIso: string
 }
 
+/**
+ * Largest label + caveats a request will hold (bytes of JSON). Starting needs
+ * no credentials, so this bounds what an anonymous caller can make the host
+ * store per request (the class of 0.4.0 review B3). Real requests are well
+ * under 1 KB.
+ */
+export const MAX_REQUEST_BYTES = 4096
+/** Expired requests deleted per start call: starting is what cleans up after starting. */
+export const REQUEST_SWEEP_BATCH = 50
+
 export function decideStart(input: StartInput): StartDecision {
   const problems: string[] = []
   const fail = (m: string) => problems.push(m)
@@ -146,6 +156,10 @@ export function decideStart(input: StartInput): StartDecision {
     // delegate this" is unanswerable. `decideMint` answers it at exchange,
     // against the approver's live roles.
     fail('"caveats.roles" is required — a token must say what it is for')
+  }
+
+  if (Buffer.byteLength(JSON.stringify([input.label ?? null, input.caveats ?? null])) > MAX_REQUEST_BYTES) {
+    fail(`"label" and "caveats" together must be under ${MAX_REQUEST_BYTES} bytes`)
   }
 
   const ttlMs =

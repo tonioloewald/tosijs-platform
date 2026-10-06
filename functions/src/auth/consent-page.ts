@@ -18,6 +18,8 @@
  * CSP, with the Firebase auth SDK the only external script.
  */
 
+// embedJson, not JSON.stringify: a value inside a <script> must not be able to end it.
+import { embedJson } from '../render/document'
 import type { AuthorizeRequest } from './authorize'
 
 const escape = (value: unknown): string =>
@@ -123,7 +125,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js'
 
-const REQUEST = ${JSON.stringify(requestId)}
+const REQUEST = ${embedJson(requestId)}
 const status = document.getElementById('status')
 const approve = document.getElementById('approve')
 const deny = document.getElementById('deny')

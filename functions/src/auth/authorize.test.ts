@@ -272,3 +272,13 @@ describe('the approver\'s name travels to the token (#28)', () => {
     expect('approvedByName' in d.patch).toBe(false)
   })
 })
+
+describe('what an anonymous caller can make the host store per request', () => {
+  test('an ordinary request is accepted; an oversized label or caveats is refused', () => {
+    expect(start().status).toBe('started')
+    expect(problems(start({ label: 'x'.repeat(5000) }))).toContain('bytes')
+    expect(
+      problems(start({ caveats: { roles: ['author'], collections: Array(600).fill('blog:public') } }))
+    ).toContain('bytes')
+  })
+})

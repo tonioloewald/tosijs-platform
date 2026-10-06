@@ -32,7 +32,7 @@ collecting takes effect, and the "no secret is ever stored" property survives.
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
-import { PAGE_CSP } from '../page-csp'
+import { PAGE_HEADERS } from '../page-csp'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
@@ -52,6 +52,7 @@ import {
   AUTHORIZE_COLLECTION,
   POLL_INTERVAL_MS,
   type AuthorizeRequest,
+  REQUEST_SWEEP_BATCH,
 } from './authorize'
 import { decideMint, hashToken, newTokenSecret } from './token'
 import { consentPage } from './consent-page'
@@ -103,7 +104,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
         ? ({ ...snapshot.data(), _id: snapshot.id } as AuthorizeRequest)
         : null
 
-      response.set('Content-Security-Policy', PAGE_CSP)
+      response.set(PAGE_HEADERS)
       // Never cached: it renders a live, expiring authorization request.
       response.set('Cache-Control', 'no-store')
       response.status(record ? 200 : 404).send(consentPage(record, id))
@@ -126,6 +127,19 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
           problems: decision.problems,
         })
         return
+      }
+      // Starting is anonymous, so it cleans up after itself: a request past its
+      // expiry can be neither approved nor exchanged. `expiresAt` is an ISO
+      // string; it sorts as time. Best effort: cleanup never fails a start.
+      try {
+        const stale = await requests().where('expiresAt', '<', new Date().toJSON()).limit(REQUEST_SWEEP_BATCH).get()
+        if (!stale.empty) {
+          const batch = db().batch()
+          for (const doc of stale.docs) batch.delete(doc.ref)
+          await batch.commit()
+        }
+      } catch (e) {
+        functions.logger.warn('authorize: sweeping expired requests failed', e)
       }
       const ref = requests().doc()
       await ref.set(decision.record)

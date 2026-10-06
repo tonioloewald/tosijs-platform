@@ -125,7 +125,9 @@ export function routeTableFragment(pages: Doc[]): RouteTable {
  */
 export function routeKeysFor(url: string, appConfig: AppConfig | undefined, table: RouteTable): string[] {
   const pagePath = pagePathFor(url, appConfig)
-  if (!(pagePath in table)) return [] // unknown page: a 404, nothing computed
+  // Own keys only: `constructor`, `toString` and `__proto__` are URLs too, and
+  // `in` finds them on every object (0.4.0 review T7).
+  if (!Object.prototype.hasOwnProperty.call(table, pagePath)) return [] // unknown page: a 404, nothing computed
   const hydrated = hydratedPaths(url, table[pagePath])
   return hydrated.length ? [routeKey(pagePath, hydrated), routeKey(pagePath, [])] : [routeKey(pagePath, [])]
 }

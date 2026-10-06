@@ -15,7 +15,20 @@
 export const PAGE_CSP =
   "default-src 'none'; script-src 'unsafe-inline' https://www.gstatic.com https://apis.google.com; " +
   "connect-src https://*.googleapis.com https://*.google.com 'self'; " +
-  "style-src 'unsafe-inline'; frame-src https://*.firebaseapp.com"
+  "style-src 'unsafe-inline'; frame-src https://*.firebaseapp.com; frame-ancestors 'none'"
+
+/**
+ * Everything these pages are served with. They GRANT AUTHORITY on a click
+ * (approve a token, an install, a claim), and what protects that click is text
+ * on the page, so they must never render inside another site's frame, where
+ * that text can be covered (0.4.0 review B2). `frame-ancestors` is the modern
+ * control and `X-Frame-Options` the old one; both, because `default-src` does
+ * not fall back to `frame-ancestors`.
+ */
+export const PAGE_HEADERS: Record<string, string> = {
+  'Content-Security-Policy': PAGE_CSP,
+  'X-Frame-Options': 'DENY',
+}
 
 /** The paths served this way; each needs a Hosting rewrite to its function. */
 export const PAGE_PATHS = ['authorize', 'claim', 'install'] as const

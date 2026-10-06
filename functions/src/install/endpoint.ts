@@ -28,13 +28,23 @@ rather than for a few seconds.
 */
 
 import { onRequest } from 'firebase-functions/v2/https'
-import { PAGE_CSP } from '../page-csp'
+import { PAGE_HEADERS } from '../page-csp'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
 import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 import { randomBytes } from 'crypto'
 import { unenforcedKeywords } from 'tosijs-schema'
-import { decided, denied, propose, proposalState, taken, type Proposal } from './proposal'
+import {
+  MAX_LIVE_PROPOSALS,
+  SWEEP_BATCH,
+  approvingFrom,
+  decided,
+  denied,
+  propose,
+  proposalState,
+  taken,
+  type Proposal,
+} from './proposal'
 import { proposalPage } from './proposal-page'
 
 import {
@@ -266,7 +276,7 @@ async function handleProposal(
   // The page: every GET that names a request and no action.
   if (req.method === 'GET' && req.query.request && !action) {
     const proposal = await readProposal(requestId)
-    response.set('Content-Security-Policy', PAGE_CSP)
+    response.set(PAGE_HEADERS)
     response
       .status(proposal ? 200 : 404)
       .type('html')
@@ -293,6 +303,26 @@ async function handleProposal(
         outcome.reason === 'too-large' ? 413 : 400,
         outcome.reason === 'too-large' ? 'too-large' : 'bad-request',
         outcome.reason === 'too-large' ? 'the manifest is too large to propose' : 'expected { manifest } in the body'
+      )
+      return true
+    }
+    // Proposing is anonymous, so it cleans up after itself and is bounded
+    // (0.4.0 review B3): delete what has expired, then refuse if too many are
+    // still awaiting a decision. `expiresAt` is an ISO string; it sorts as time.
+    const nowIso = new Date().toJSON()
+    const stale = await proposals().where('expiresAt', '<', nowIso).limit(SWEEP_BATCH).get()
+    if (!stale.empty) {
+      const batch = db().batch()
+      for (const doc of stale.docs) batch.delete(doc.ref)
+      await batch.commit()
+    }
+    const live = await proposals().where('expiresAt', '>=', nowIso).count().get()
+    if (live.data().count >= MAX_LIVE_PROPOSALS) {
+      fail(
+        response,
+        429,
+        'rate-limited',
+        'too many install requests are awaiting a decision on this host; try again in a few minutes'
       )
       return true
     }
@@ -363,15 +393,24 @@ async function handleProposal(
     }
 
     // The STORED manifest, never one from the browser.
-    let result = await runInstall({ manifest: proposal.manifest, principal })
-    // An upgrade that adds capabilities: the page listed every capability the
-    // manifest asks for, so approving the proposal approves exactly those added.
+    // An upgrade that adds capabilities needs them approved. The page listed
+    // every capability the manifest asks for, so approving the proposal approves
+    // exactly the ones the host says are outstanding: ask (a dry run, nothing
+    // committed), then install approving those.
+    const asked = await runInstall({ manifest: proposal.manifest, principal, dryRun: true })
+    const approving =
+      !asked.error && asked.body?.status === 'needs-approval'
+        ? (approvingFrom(asked.body.added) as Record<string, CapabilityDeclaration>)
+        : undefined
+    let result = await runInstall({ manifest: proposal.manifest, principal, approving })
+    // Still outstanding (the grant changed between the two reads): that is NOT
+    // an install, and must never be recorded or reported as one.
     if (!result.error && result.body?.status === 'needs-approval') {
-      result = await runInstall({
-        manifest: proposal.manifest,
-        principal,
-        approving: result.body.added as Record<string, CapabilityDeclaration>,
-      })
+      result = {
+        httpStatus: 409,
+        error: 'conflict',
+        message: 'the upgrade still needs capabilities approved; nothing was applied. Propose it again.',
+      }
     }
     await proposals()
       .doc(requestId)

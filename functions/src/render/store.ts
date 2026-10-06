@@ -323,7 +323,7 @@ export async function serve(url: string): Promise<Served> {
     }
   }
   // Not a page: the site's 404 page if it has one, with status 404.
-  const notFound = '404' in table ? await route('page:404') : null
+  const notFound = Object.prototype.hasOwnProperty.call(table, '404') ? await route('page:404') : null
   const shown =
     notFound ??
     routeArtifact({ pagePath: pagePathFor(url, n.appConfig), page: undefined, hydrated: {}, latestPost: undefined, settings })

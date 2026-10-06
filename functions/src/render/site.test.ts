@@ -57,6 +57,10 @@ describe('routes', () => {
     ])
     expect(routeKeysFor('/', appConfig, table)).toEqual(['page:blog'])
     expect(routeKeysFor('/about', appConfig, table)).toEqual(['page:about'])
+    // Names every object has are URLs too, and are not pages (0.4.0 review T7).
+    for (const url of ['/constructor', '/toString', '/__proto__', '/hasOwnProperty']) {
+      expect(routeKeysFor(url, appConfig, table)).toEqual([])
+    }
   })
   test('an unknown page has NO keys: nothing is computed or stored for random URLs', () => {
     const table = routeTableFragment([blogPage])

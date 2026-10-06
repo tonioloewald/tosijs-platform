@@ -13,6 +13,8 @@
  * It holds no authority: approving sends only the request id, and the host
  * installs the manifest IT stored, as the signed-in configurator.
  */
+// embedJson, not JSON.stringify: a value inside a <script> must not be able to end it.
+import { embedJson } from '../render/document'
 import { summarize, type Proposal, type ProposalState } from './proposal'
 
 const escape = (value: unknown): string =>
@@ -112,7 +114,7 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/fireba
 import { getAuth, GoogleAuthProvider, signInWithPopup }
   from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js'
 
-const REQUEST = ${JSON.stringify(requestId)}
+const REQUEST = ${embedJson(requestId)}
 const status = document.getElementById('status')
 const review = document.getElementById('review')
 const install = document.getElementById('install')
@@ -133,7 +135,7 @@ const call = (action, data, authed) => fetch('/install?action=' + action, {
 }).then(async (r) => ({ ok: r.ok, status: r.status, body: await r.json().catch(() => ({})) }))
 
 const describe = (b) => {
-  if (b.status === 'needs-approval') return ['This upgrade adds capabilities: ' + Object.keys(b.added || {}).join(', ') + '. Installing approves them.']
+  if (b.status === 'needs-approval') return ['This upgrade adds capabilities: ' + (b.added || []).map((c) => c.name).join(', ') + '. Installing approves them.']
   if (b.status === 'unchanged') return ['This exact version is already installed. Installing changes nothing.']
   if (b.from) return ['This UPGRADES ' + b.name + ' from ' + b.from + ' to ' + b.version + '.']
   return ['This is a NEW install of ' + b.name + ' ' + b.version + '.']

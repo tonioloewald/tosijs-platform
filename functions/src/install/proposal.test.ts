@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
-import { MAX_PROPOSAL_BYTES, PROPOSAL_TTL_MS, confirmationCode, decided, denied, propose, proposalState, summarize, taken, type Proposal } from './proposal'
+import { MAX_LIVE_PROPOSALS, MAX_PROPOSAL_BYTES, PROPOSAL_TTL_MS, approvingFrom, isSweepable, confirmationCode, decided, denied, propose, proposalState, summarize, taken, type Proposal } from './proposal'
 
 const NOW = Date.parse('2026-10-04T12:00:00Z')
 const bytes = (n: number) => new Uint8Array(8).fill(n)
@@ -104,3 +104,65 @@ describe('summarize — what the approver reads', () => {
     expect(summarize({ collections: { a: null } }).collections[0]).toMatchObject({ name: 'a', access: [] })
   })
 })
+
+describe('approvingFrom (0.4.0 review B1)', () => {
+  test('turns the reported list into the name → declaration record', () => {
+    const added = [
+      { name: 'a:files', capability: { kind: 'blob', maxBytes: 10 } },
+      { name: 'a:notify', capability: { kind: 'outbound' } },
+    ]
+    expect(approvingFrom(added)).toEqual({
+      'a:files': { kind: 'blob', maxBytes: 10 },
+      'a:notify': { kind: 'outbound' },
+    })
+  })
+  test('anything else approves nothing', () => {
+    for (const bad of [undefined, null, {}, 'x', [null, 3, { capability: {} }]]) {
+      expect(approvingFrom(bad)).toEqual({})
+    }
+  })
+})
+
+describe('what an anonymous caller can make the host store (0.4.0 review B3)', () => {
+  test('is bounded: a few live proposals of limited size', () => {
+    expect(MAX_PROPOSAL_BYTES * MAX_LIVE_PROPOSALS).toBeLessThanOrEqual(2 * 1024 * 1024)
+  })
+  test('a proposal is deletable once past its expiry, whatever its status', () => {
+    const p = ok()
+    const expires = Date.parse(p.expiresAt)
+    expect(isSweepable(p, expires - 1)).toBe(false)
+    expect(isSweepable(p, expires + 1)).toBe(true)
+    expect(isSweepable({ ...p, ...decided({ body: {} }) } as Proposal, expires + 1)).toBe(true)
+    expect(isSweepable({ expiresAt: 'not a date' }, NOW)).toBe(true)
+  })
+  test('expiry strings sort as time, which the sweep query relies on', () => {
+    const a = ok().expiresAt
+    const later = propose(manifest, NOW + 1000, bytes(3))
+    if (later.status !== 'ok') throw new Error('expected a proposal')
+    expect(a < later.proposal.expiresAt).toBe(true)
+  })
+})
+
+describe('the approval page with a hostile manifest (0.4.0 review T11)', () => {
+  test('nothing an anonymous proposer wrote reaches the page as markup', async () => {
+    const { proposalPage } = await import('./proposal-page')
+    const evil = '</script><script>alert(1)</script><img src=x onerror=alert(2)>"\'&'
+    const p = ok({
+      manifest: 1,
+      name: evil,
+      version: evil,
+      description: evil,
+      collections: { [evil]: { blob: { maxBytes: 1, contentTypes: [evil] }, unique: [evil], access: [{ role: evil, read: 'ALL' }] } },
+      capabilities: { [evil]: { kind: evil } },
+    })
+    const html = proposalPage(p, 'pending', evil)
+    // The page's own module script is the only script; the payload never opens one.
+    expect(html.match(/<script/g)?.length).toBe(1)
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('alert(1)</script>')
+    // The request id is embedded as a JS string: it must not be able to end the script.
+    const script = html.slice(html.indexOf('<script'))
+    expect(script.indexOf('</script>')).toBe(script.length - '</script>'.length)
+  })
+})
+

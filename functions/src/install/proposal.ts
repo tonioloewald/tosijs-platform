@@ -26,8 +26,27 @@ import { createHash } from 'crypto'
 
 /** How long a proposal can be approved. */
 export const PROPOSAL_TTL_MS = 10 * 60 * 1000
-/** Largest manifest a proposal will hold (bytes of JSON). */
-export const MAX_PROPOSAL_BYTES = 200 * 1024
+/**
+ * Largest manifest a proposal will hold (bytes of JSON). Proposing needs no
+ * credentials, so this times MAX_LIVE_PROPOSALS is all an anonymous caller can
+ * make the host store (0.4.0 review B3). Real manifests are a few KB.
+ */
+export const MAX_PROPOSAL_BYTES = 64 * 1024
+/** Proposals that can be awaiting a decision at once. Past it, proposing is refused until some expire. */
+export const MAX_LIVE_PROPOSALS = 20
+/** Expired proposals deleted per propose call: proposing is what cleans up after proposing. */
+export const SWEEP_BATCH = 50
+
+/**
+ * Is a stored proposal finished with, so it can be deleted? Anything past its
+ * expiry: a pending one can no longer be approved, and a decided one has been
+ * reported (the CLI stops polling at the expiry). `expiresAt` is an ISO string,
+ * which sorts as time, so the store can query on it directly.
+ */
+export const isSweepable = (p: Pick<Proposal, 'expiresAt'>, nowMs: number): boolean => {
+  const expires = Date.parse(p.expiresAt)
+  return !Number.isFinite(expires) || nowMs > expires
+}
 
 /** `deciding`: an approval is in flight (set first, so a proposal is single-use even under two clicks). */
 export type ProposalStatus = 'pending' | 'deciding' | 'installed' | 'denied' | 'refused'
@@ -98,6 +117,24 @@ export const taken = (uid: string, nowIso: string): Partial<Proposal> => ({
   decidedBy: uid,
   decidedAt: nowIso,
 })
+
+/**
+ * What approving a proposal approves: exactly the capabilities the host said
+ * are outstanding, as the name → declaration record the installer matches BY
+ * CONTENT. (The host reports them as a list; passing that list straight back
+ * approved nothing, and the upgrade was recorded as installed while it was only
+ * parked: 0.4.0 review B1.)
+ */
+export function approvingFrom(added: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  if (!Array.isArray(added)) return out
+  for (const entry of added) {
+    if (entry && typeof entry === 'object' && typeof (entry as { name?: unknown }).name === 'string') {
+      out[(entry as { name: string }).name] = (entry as { capability?: unknown }).capability
+    }
+  }
+  return out
+}
 
 /** The update recording a denial. */
 export const denied = (nowIso: string): Partial<Proposal> => ({ status: 'denied', decidedAt: nowIso })

@@ -14,6 +14,7 @@
  */
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
+import { approvingFrom } from './proposal'
 import { describe, test, expect } from 'bun:test'
 import { unenforcedKeywords } from 'tosijs-schema'
 
@@ -298,6 +299,16 @@ describe('capabilities re-trigger human approval when they grow', () => {
     expect(d.status).toBe('needs-approval')
     expect((d as { added: CapabilityEntry[] }).added).toHaveLength(1)
     expect((d as { added: CapabilityEntry[] }).added[0].name).toBe('virta:notify')
+  })
+
+  test('approving what the host reported as outstanding completes the upgrade (0.4.0 review B1)', () => {
+    // The browser approval path: ask, then approve exactly what was reported.
+    // The report is a LIST; passed straight back it approves nothing.
+    const caps = { 'virta:files': BLOB, 'virta:notify': OUTBOUND }
+    const asked = upgrade(caps) as { status: string; added: CapabilityEntry[] }
+    expect(asked.status).toBe('needs-approval')
+    expect(upgrade(caps, asked.added as never).status).toBe('needs-approval')
+    expect(upgrade(caps, approvingFrom(asked.added) as never).status).toBe('upgraded')
   })
 
   test('a WIDENED argument counts as new — not the same capability', () => {

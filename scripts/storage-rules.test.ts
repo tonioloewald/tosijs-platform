@@ -94,11 +94,22 @@ describe('firebase.json: the sign-in pages are served from the site domain', () 
   })
 
   test('a header rule gives exactly those paths PAGE_CSP, after the site-wide rule', async () => {
-    const { PAGE_CSP, PAGE_PATHS } = await import('../functions/src/page-csp')
+    const { PAGE_CSP, PAGE_HEADERS, PAGE_PATHS } = await import('../functions/src/page-csp')
     const rules: Array<{ source: string; headers: Array<{ key: string; value: string }> }> = hosting.headers
     const i = rules.findIndex((r) => PAGE_PATHS.every((p: string) => r.source.includes(p)))
     expect(i).toBeGreaterThan(rules.findIndex((r) => r.source === '**'))
     expect(rules[i].headers.find((h) => h.key === 'Content-Security-Policy')?.value).toBe(PAGE_CSP)
+    // Hosting REPLACES what the function sets, so every header the function
+    // sends for these pages has to be in the rule too, with the same value.
+    for (const [key, value] of Object.entries(PAGE_HEADERS)) {
+      expect(rules[i].headers.find((h) => h.key === key)?.value).toBe(value)
+    }
+  })
+
+  test('the pages cannot be framed: they grant authority on a click (0.4.0 review B2)', async () => {
+    const { PAGE_CSP, PAGE_HEADERS } = await import('../functions/src/page-csp')
+    expect(PAGE_CSP).toContain("frame-ancestors 'none'")
+    expect(PAGE_HEADERS['X-Frame-Options']).toBe('DENY')
   })
 })
 
