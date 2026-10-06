@@ -24,6 +24,10 @@
  *     holds the cloud project can always re-establish roles directly. Posts
  *     cannot be re-created that way.
  *
+ * The same reasoning covers `token` (agent token hashes) and `system:claim`
+ * (the host claim nonce): credentials, and re-creatable by whoever holds the
+ * project. The list is `LOCAL_ONLY` in backup-lib.js.
+ *
  * So the default archive is exactly "the content, recoverable from anywhere".
  * `--include-roles` puts them in, and the run says loudly which it did.
  *
@@ -44,6 +48,8 @@ import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
 import { fileURLToPath } from 'url'
+
+import { LOCAL_ONLY, collectionDir } from './backup-lib.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..')
@@ -154,7 +160,7 @@ const archiveName = `${projectId}-${snapshot}.tar.gz`
 const staging = path.join(backupRoot, archiveName)
 
 log(`snapshot    ${snapshot}`)
-log(`roles       ${INCLUDE_ROLES ? 'INCLUDED (contact details leave this machine)' : 'excluded (contact details stay local)'}`)
+log(`private     ${Object.keys(LOCAL_ONLY).join(', ')}: ${INCLUDE_ROLES ? 'INCLUDED (contact details and credentials leave this machine)' : 'excluded (stay local)'}`)
 log(`destinations ${dests.length}:`)
 for (const d of dests) log(`  ${d}`)
 
@@ -162,7 +168,12 @@ if (!DRY) {
   // `tar` from the backup root so the archive contains `<snapshot>/…` and
   // unpacks into a predictable directory rather than spraying the cwd.
   const tarArgs = ['-czf', staging, '-C', backupRoot]
-  if (!INCLUDE_ROLES) tarArgs.push('--exclude', path.join(snapshot, 'role'))
+  // Contact details and credentials stay on this machine (backup-lib.js).
+  if (!INCLUDE_ROLES) {
+    for (const name of Object.keys(LOCAL_ONLY)) {
+      tarArgs.push('--exclude', path.join(snapshot, collectionDir(name)))
+    }
+  }
   tarArgs.push(snapshot)
   execFileSync('tar', tarArgs)
   fs.chmodSync(staging, 0o600)

@@ -26,7 +26,8 @@
  * (email, phone, mailing address) that Firestore exposes to admins only.
  *
  * Usage:
- *   bun run backup                      # dump every known collection
+ *   bun run backup                      # dump every collection the database has
+ *                                       # (minus caches: see backup-lib.js)
  *   bun run backup -- --out <dir>       # write somewhere else
  *   bun run backup -- --collection post # dump one collection
  *   bun run backup -- --quiet           # only print the summary line (for cron)
@@ -55,11 +56,12 @@ const projectRoot = path.resolve(__dirname, '..')
 // project. Same reason scripts/seed-production.js must run with it available.
 const adminDir = path.join(projectRoot, 'functions', 'node_modules', 'firebase-admin')
 
-// Collections registered in functions/src/collections + the content collections.
-// A collection missing here is simply not backed up, so keep it in sync when a
-// new one is added — the summary prints what it found, which makes a forgotten
-// collection visible as a zero.
-const COLLECTIONS = ['post', 'page', 'module', 'config', 'role']
+// Which collections: DISCOVERED from the database, minus a short list of caches
+// and short-lived requests (backup-lib.js). This used to be a fixed list of
+// five, so storage areas' file metadata, installed manifests, the registry and
+// grants were not backed up at all (found 2026-10-05: 132 new documents, same
+// "859 docs").
+import { collectionDir, selectCollections } from './backup-lib.js'
 
 const args = process.argv.slice(2)
 const flag = (name) => {
@@ -102,7 +104,6 @@ const outRoot =
   path.join(os.homedir(), 'Backups', 'tosijs-platform', PROJECT_ID)
 const outDir = path.join(outRoot, stamp)
 const only = flag('collection')
-const targets = only ? [only] : COLLECTIONS
 
 /**
  * Two transports, because the credential situation differs by machine:
@@ -137,6 +138,7 @@ async function makeReader() {
     const db = getFirestore()
     return {
       transport: emulator ? 'admin(emulator)' : 'admin',
+      list: async () => (await db.listCollections()).map((c) => c.id),
       read: async (name) => {
         const snap = await db.collection(name).get()
         return snap.docs.map((d) => ({ id: d.id, data: serialize(d.data()) }))
@@ -164,11 +166,29 @@ async function makeReader() {
   const base = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`
   return {
     transport: 'rest(gcloud-token)',
+    list: async () => {
+      const ids = []
+      let pageToken
+      do {
+        const res = await fetch(`${base}:listCollectionIds`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pageSize: 300, ...(pageToken ? { pageToken } : {}) }),
+        })
+        if (!res.ok) {
+          throw new Error(`${res.status} ${res.statusText}: ${await res.text()}`)
+        }
+        const body = await res.json()
+        ids.push(...(body.collectionIds || []))
+        pageToken = body.nextPageToken
+      } while (pageToken)
+      return ids
+    },
     read: async (name) => {
       const docs = []
       let pageToken
       do {
-        const url = new URL(`${base}/${name}`)
+        const url = new URL(`${base}/${encodeURIComponent(name)}`)
         url.searchParams.set('pageSize', '300')
         if (pageToken) url.searchParams.set('pageToken', pageToken)
         const res = await fetch(url, {
@@ -242,9 +262,26 @@ function serialize(value) {
 
 const reader = await makeReader()
 
+// No fallback to a fixed list: a backup that cannot see what the database holds
+// must not report success on whatever it happened to guess.
+let targets
+let excluded = []
+if (only) {
+  targets = [only]
+} else {
+  try {
+    const selected = selectCollections(await reader.list())
+    targets = selected.backup
+    excluded = selected.excluded
+  } catch (e) {
+    console.error(`\nBackup FAILED — could not list the database's collections: ${e.message}`)
+    process.exit(1)
+  }
+}
+
 async function backupCollection(name) {
   const docs = await reader.read(name)
-  const dir = path.join(outDir, name)
+  const dir = path.join(outDir, collectionDir(name))
   // F17: 0o700 / 0o600. `role` carries contacts (email, phone, mailing address)
   // that Firestore only exposes to admins; the default 0o755/0o644 turned that
   // into world-readable plaintext under a world-traversable home directory,
@@ -273,12 +310,14 @@ for (const name of targets) {
   try {
     const r = await backupCollection(name)
     results.push(r)
-    log(`  ${name.padEnd(10)} ${String(r.count).padStart(5)} docs  ${(r.bytes / 1024).toFixed(1)} KB`)
+    log(`  ${name.padEnd(18)} ${String(r.count).padStart(5)} docs  ${(r.bytes / 1024).toFixed(1)} KB`)
   } catch (e) {
     failed++
-    console.error(`  ${name.padEnd(10)} FAILED: ${e.message}`)
+    console.error(`  ${name.padEnd(18)} FAILED: ${e.message}`)
   }
 }
+
+for (const e of excluded) log(`  ${e.name.padEnd(18)}  skipped: ${e.why}`)
 
 const totalDocs = results.reduce((n, r) => n + r.count, 0)
 const totalBytes = results.reduce((n, r) => n + r.bytes, 0)
@@ -295,6 +334,8 @@ fs.writeFileSync(
       transport: reader.transport,
       collections: results,
       attempted: targets,
+      // Deliberately not taken, and why (caches, short-lived requests).
+      excluded,
       // F22: a `--collection x` run is a PARTIAL snapshot. The pruner refuses to
       // count partials toward retention, so debug runs cannot displace complete
       // ones — restoring from "the newest snapshot" must never silently miss
