@@ -34,17 +34,9 @@ import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 import { randomBytes } from 'crypto'
 import { unenforcedKeywords } from 'tosijs-schema'
-import {
-  MAX_LIVE_PROPOSALS,
-  SWEEP_BATCH,
-  approvingFrom,
-  decided,
-  denied,
-  propose,
-  proposalState,
-  taken,
-  type Proposal,
-} from './proposal'
+import { denied, proposalState, type Proposal } from './proposal'
+import { approveProposal, proposeManifest, type InstallResult, type ProposalStore } from './proposal-handler'
+import { firestoreSweepable } from '../sweep'
 import { proposalPage } from './proposal-page'
 
 import {
@@ -145,14 +137,7 @@ const superseded = (m: Manifest) => {
   return list.length ? { superseded: list } : {}
 }
 
-export interface InstallResult {
-  httpStatus: number
-  /** Set when refused; `body` is set otherwise. */
-  error?: string
-  message?: string
-  extra?: Record<string, unknown>
-  body?: Record<string, unknown>
-}
+export type { InstallResult }
 
 /**
  * Install (or upgrade) a manifest as `principal`: the ONE code path, used by
@@ -255,11 +240,36 @@ export async function runInstall(input: {
 const PROPOSALS = 'system:install-proposal'
 const proposals = () => db().collection(PROPOSALS)
 
-const readProposal = async (id: string): Promise<Proposal | null> => {
-  if (!/^[A-Za-z0-9-]{8,64}$/.test(id)) return null
-  const snap = await proposals().doc(id).get()
-  return snap.exists ? (snap.data() as Proposal) : null
-}
+const VALID_ID = /^[A-Za-z0-9-]{8,64}$/
+
+const logFailure = (what: string, e: unknown) => functions.logger.error(`install: ${what} failed`, e)
+
+/** Install proposals in Firestore (the flow that uses this is proposal-handler.ts). */
+const proposalStore = (): ProposalStore => ({
+  ...firestoreSweepable(proposals()),
+  async create(proposal) {
+    // create, never set: a proposal id can never be overwritten.
+    const ref = proposals().doc()
+    await ref.create(proposal)
+    return ref.id
+  },
+  async read(id) {
+    if (!VALID_ID.test(id)) return null
+    const snap = await proposals().doc(id).get()
+    return snap.exists ? (snap.data() as Proposal) : null
+  },
+  async updateIf(id, allow, change) {
+    if (!VALID_ID.test(id)) return false
+    return db().runTransaction(async (tx) => {
+      const snap = await tx.get(proposals().doc(id))
+      if (!allow(snap.exists ? (snap.data() as Proposal) : null)) return false
+      tx.update(snap.ref, change)
+      return true
+    })
+  },
+})
+
+const readProposal = (id: string): Promise<Proposal | null> => proposalStore().read(id)
 
 /**
  * Propose / view / poll / preview / approve an install (see proposal.ts).
@@ -296,8 +306,8 @@ async function handleProposal(
 
   if (action === 'propose') {
     // No credentials: a proposal is inert until a configurator approves it.
-    const outcome = propose(req.body?.manifest, Date.now(), randomBytes(8))
-    if (outcome.status === 'refused') {
+    const outcome = await proposeManifest({ store: proposalStore(), onError: logFailure }, req.body?.manifest, Date.now(), randomBytes(8))
+    if (outcome.status !== 'ok') {
       fail(
         response,
         outcome.reason === 'too-large' ? 413 : 400,
@@ -306,34 +316,11 @@ async function handleProposal(
       )
       return true
     }
-    // Proposing is anonymous, so it cleans up after itself and is bounded
-    // (0.4.0 review B3): delete what has expired, then refuse if too many are
-    // still awaiting a decision. `expiresAt` is an ISO string; it sorts as time.
-    const nowIso = new Date().toJSON()
-    const stale = await proposals().where('expiresAt', '<', nowIso).limit(SWEEP_BATCH).get()
-    if (!stale.empty) {
-      const batch = db().batch()
-      for (const doc of stale.docs) batch.delete(doc.ref)
-      await batch.commit()
-    }
-    const live = await proposals().where('expiresAt', '>=', nowIso).count().get()
-    if (live.data().count >= MAX_LIVE_PROPOSALS) {
-      fail(
-        response,
-        429,
-        'rate-limited',
-        'too many install requests are awaiting a decision on this host; try again in a few minutes'
-      )
-      return true
-    }
-    // create, never set: a proposal id can never be overwritten.
-    const ref = proposals().doc()
-    await ref.create(outcome.proposal)
     const host = req.headers['x-forwarded-host'] ?? req.headers.host
     response.json({
-      requestId: ref.id,
+      requestId: outcome.id,
       code: outcome.proposal.code,
-      url: `https://${host}/install?request=${ref.id}`,
+      url: `https://${host}/install?request=${outcome.id}`,
       expiresAt: outcome.proposal.expiresAt,
     })
     return true
@@ -371,69 +358,23 @@ async function handleProposal(
     else response.status(200).json(r.body)
   }
 
-  try {
-    if (action === 'preview') {
-      // Decide everything, commit nothing.
-      answer(await runInstall({ manifest: proposal.manifest, principal, dryRun: true }))
-      return true
-    }
-
-    // approve: single-use. Take the proposal first, in a transaction, so two
-    // clicks (or two tabs) cannot both install.
-    const took = await db().runTransaction(async (tx) => {
-      const snap = await tx.get(proposals().doc(requestId))
-      const current = snap.exists ? (snap.data() as Proposal) : null
-      if (proposalState(current, Date.now()) !== 'pending') return false
-      tx.update(snap.ref, taken(user.uid, new Date().toJSON()))
-      return true
-    })
-    if (!took) {
-      fail(response, 404, 'not-found', 'no pending install request with that id')
-      return true
-    }
-
-    // The STORED manifest, never one from the browser.
-    // An upgrade that adds capabilities needs them approved. The page listed
-    // every capability the manifest asks for, so approving the proposal approves
-    // exactly the ones the host says are outstanding: ask (a dry run, nothing
-    // committed), then install approving those.
-    const asked = await runInstall({ manifest: proposal.manifest, principal, dryRun: true })
-    const approving =
-      !asked.error && asked.body?.status === 'needs-approval'
-        ? (approvingFrom(asked.body.added) as Record<string, CapabilityDeclaration>)
-        : undefined
-    let result = await runInstall({ manifest: proposal.manifest, principal, approving })
-    // Still outstanding (the grant changed between the two reads): that is NOT
-    // an install, and must never be recorded or reported as one.
-    if (!result.error && result.body?.status === 'needs-approval') {
-      result = {
-        httpStatus: 409,
-        error: 'conflict',
-        message: 'the upgrade still needs capabilities approved; nothing was applied. Propose it again.',
-      }
-    }
-    await proposals()
-      .doc(requestId)
-      .update(
-        decided(
-          result.error
-            ? { failure: { error: result.error, message: result.message ?? '', ...(result.extra ?? {}) } }
-            : { body: result.body }
-        )
-      )
-    answer(result)
-  } catch (e) {
-    const conflict = e instanceof ManifestConflict
-    await proposals()
-      .doc(requestId)
-      .update(decided({ failure: { error: conflict ? 'conflict' : 'internal', message: conflict ? e.message : 'install failed' } }))
-      .catch(() => undefined)
-    if (conflict) fail(response, 409, 'conflict', e.message)
-    else {
-      functions.logger.error('install: approving a proposal failed', e)
-      fail(response, 500, 'internal', 'install failed')
-    }
+  if (action === 'preview') {
+    // Decide everything, commit nothing.
+    answer(await runInstall({ manifest: proposal.manifest, principal, dryRun: true }))
+    return true
   }
+  // approve: the flow (single use, ask, approve, record) is proposal-handler.ts.
+  answer(
+    await approveProposal(
+      {
+        store: proposalStore(),
+        install: (input) => runInstall(input as Parameters<typeof runInstall>[0]),
+        conflictMessage: (e) => (e instanceof ManifestConflict ? e.message : null),
+        onError: logFailure,
+      },
+      { id: requestId, principal, nowMs: Date.now() }
+    )
+  )
   return true
 }
 

@@ -51,9 +51,9 @@ import {
   loopbackRedirect,
   AUTHORIZE_COLLECTION,
   POLL_INTERVAL_MS,
-  type AuthorizeRequest,
-  REQUEST_SWEEP_BATCH,
+  type AuthorizeRequest
 } from './authorize'
+import { firestoreSweepable, sweepExpired } from '../sweep'
 import { decideMint, hashToken, newTokenSecret } from './token'
 import { consentPage } from './consent-page'
 import { fail, noStore } from '../errors'
@@ -128,19 +128,11 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
         })
         return
       }
-      // Starting is anonymous, so it cleans up after itself: a request past its
-      // expiry can be neither approved nor exchanged. `expiresAt` is an ISO
-      // string; it sorts as time. Best effort: cleanup never fails a start.
-      try {
-        const stale = await requests().where('expiresAt', '<', new Date().toJSON()).limit(REQUEST_SWEEP_BATCH).get()
-        if (!stale.empty) {
-          const batch = db().batch()
-          for (const doc of stale.docs) batch.delete(doc.ref)
-          await batch.commit()
-        }
-      } catch (e) {
+      // Starting is anonymous, so it cleans up after itself (sweep.ts): the
+      // same rule as install proposals, best effort.
+      await sweepExpired(firestoreSweepable(requests()), Date.now(), (e) =>
         functions.logger.warn('authorize: sweeping expired requests failed', e)
-      }
+      )
       const ref = requests().doc()
       await ref.set(decision.record)
       functions.logger.info(

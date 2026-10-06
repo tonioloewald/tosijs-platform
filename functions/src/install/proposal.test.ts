@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
-import { MAX_LIVE_PROPOSALS, MAX_PROPOSAL_BYTES, PROPOSAL_TTL_MS, approvingFrom, isSweepable, confirmationCode, decided, denied, propose, proposalState, summarize, taken, type Proposal } from './proposal'
+import { MAX_PROPOSAL_BYTES, PROPOSAL_TTL_MS, approvingFrom, confirmationCode, decided, denied, propose, proposalState, summarize, taken, type Proposal } from './proposal'
 
 const NOW = Date.parse('2026-10-04T12:00:00Z')
 const bytes = (n: number) => new Uint8Array(8).fill(n)
@@ -124,22 +124,8 @@ describe('approvingFrom (0.4.0 review B1)', () => {
 })
 
 describe('what an anonymous caller can make the host store (0.4.0 review B3)', () => {
-  test('is bounded: a few live proposals of limited size', () => {
-    expect(MAX_PROPOSAL_BYTES * MAX_LIVE_PROPOSALS).toBeLessThanOrEqual(2 * 1024 * 1024)
-  })
-  test('a proposal is deletable once past its expiry, whatever its status', () => {
-    const p = ok()
-    const expires = Date.parse(p.expiresAt)
-    expect(isSweepable(p, expires - 1)).toBe(false)
-    expect(isSweepable(p, expires + 1)).toBe(true)
-    expect(isSweepable({ ...p, ...decided({ body: {} }) } as Proposal, expires + 1)).toBe(true)
-    expect(isSweepable({ expiresAt: 'not a date' }, NOW)).toBe(true)
-  })
-  test('expiry strings sort as time, which the sweep query relies on', () => {
-    const a = ok().expiresAt
-    const later = propose(manifest, NOW + 1000, bytes(3))
-    if (later.status !== 'ok') throw new Error('expected a proposal')
-    expect(a < later.proposal.expiresAt).toBe(true)
+  test('one proposal is small; how they are deleted is sweep.test.ts and proposal-handler.test.ts', () => {
+    expect(MAX_PROPOSAL_BYTES).toBeLessThanOrEqual(64 * 1024)
   })
 })
 

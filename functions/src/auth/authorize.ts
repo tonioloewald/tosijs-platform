@@ -114,12 +114,11 @@ export interface StartInput {
 /**
  * Largest label + caveats a request will hold (bytes of JSON). Starting needs
  * no credentials, so this bounds what an anonymous caller can make the host
- * store per request (the class of 0.4.0 review B3). Real requests are well
+ * store per request (the class of 0.4.0 review B3; expired ones are swept, see
+ * sweep.ts). Real requests are well
  * under 1 KB.
  */
 export const MAX_REQUEST_BYTES = 4096
-/** Expired requests deleted per start call: starting is what cleans up after starting. */
-export const REQUEST_SWEEP_BATCH = 50
 
 export function decideStart(input: StartInput): StartDecision {
   const problems: string[] = []

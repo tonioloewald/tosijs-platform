@@ -238,3 +238,31 @@ describe('both endpoints are actually exported', () => {
     expect(indexTs).toMatch(/export \{ install \} from '\.\/install\/endpoint'/)
   })
 })
+
+describe('the proposal flow and the cleanup are the tested ones (0.4.0 re-review R1)', () => {
+  // proposal-handler.test.ts and sweep.test.ts run the flow for real. This is
+  // the other half: the endpoints call THOSE functions, and do not carry a
+  // private copy of the flow that the tests never see.
+  const authorizeTs = src('auth/authorize-endpoint.ts')
+
+  test('/install proposes and approves through proposal-handler', () => {
+    expect(endpointTs).toMatch(/proposeManifest\(/)
+    expect(endpointTs).toMatch(/approveProposal\(/)
+    expect(endpointTs).toMatch(/install:\s*\(input\)\s*=>\s*runInstall\(/)
+  })
+
+  test('the endpoint has no second copy of the approval flow', () => {
+    expect(endpointTs).not.toContain('approvingFrom')
+    expect(endpointTs).not.toMatch(/decided\(/)
+  })
+
+  test('both anonymous request collections are swept by the shared rule', () => {
+    expect(endpointTs).toMatch(/firestoreSweepable\(proposals\(\)\)/)
+    expect(authorizeTs).toMatch(/sweepExpired\(firestoreSweepable\(requests\(\)\)/)
+  })
+
+  test('the authority pages are sent with the no-framing headers', () => {
+    for (const source of [endpointTs, claimTs, authorizeTs]) expect(source).toMatch(/response\.set\(PAGE_HEADERS\)/)
+  })
+})
+

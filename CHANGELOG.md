@@ -54,9 +54,10 @@ when content is stored (D22, D23).
   installed manifests, the registry and grants. The off-site archive keeps
   `token` and `system:claim` local along with `role`.
 - `/stored` ignores a query string.
-- An install proposal holds at most 64 KB, and at most 20 can await a decision
-  at once (`429 rate-limited` past that). An authorization request's label and
-  caveats together are at most 4 KB.
+- An install proposal holds at most 64 KB (`413 too-large` past that), and an
+  authorization request's label and caveats together at most 4 KB.
+- Approving a proposed upgrade whose new capabilities are still not approved
+  answers `409 conflict`; it was reported as installed.
 
 ### Fixed
 
@@ -71,7 +72,11 @@ when content is stored (D22, D23).
   `</script>` broke out of the embedded JSON. Both render paths use one safe
   embedder.
 - Anonymous authorization requests and install proposals were never deleted.
-  Each new one now deletes expired ones.
+  Each new one now deletes a batch of long-expired ones. There is no cap on
+  how many may be pending: a cap would let a few anonymous requests lock out
+  real ones.
+- **Approving an upgrade that adds capabilities in the browser approved
+  nothing**, and the parked upgrade was reported as installed.
 - Stored-data validators no longer fail a document for the fields the endpoint
   stamps (`_by` and friends).
 

@@ -282,3 +282,19 @@ describe('what an anonymous caller can make the host store per request', () => {
     ).toContain('bytes')
   })
 })
+
+describe('the consent page with a hostile request (0.4.0 re-review)', () => {
+  test('nothing an anonymous caller wrote reaches the page as markup', async () => {
+    const { consentPage } = await import('./consent-page')
+    const evil = '</script><script>alert(1)</script><img src=x onerror=alert(2)>"\'&'
+    const html = consentPage(
+      request({ label: evil, mode: 'poll', caveats: { roles: [evil], collections: [evil], methods: [evil] } as never }),
+      evil
+    )
+    // The page's own module script is the only script, and the payload cannot end it.
+    expect(html.match(/<script/g)?.length).toBe(1)
+    expect(html).not.toContain('<img')
+    const script = html.slice(html.indexOf('<script'))
+    expect(script.indexOf('</script>')).toBe(script.length - '</script>'.length)
+  })
+})

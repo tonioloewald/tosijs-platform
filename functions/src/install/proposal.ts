@@ -23,31 +23,18 @@
  * - A proposal is single-use: approved, denied, refused or expired is final.
  */
 import { createHash } from 'crypto'
+import type { CapabilityEntry } from './apply'
+import type { CapabilityDeclaration } from './manifest'
 
 /** How long a proposal can be approved. */
 export const PROPOSAL_TTL_MS = 10 * 60 * 1000
 /**
  * Largest manifest a proposal will hold (bytes of JSON). Proposing needs no
- * credentials, so this times MAX_LIVE_PROPOSALS is all an anonymous caller can
- * make the host store (0.4.0 review B3). Real manifests are a few KB.
+ * credentials, so this bounds what an anonymous caller can make the host store
+ * per request (0.4.0 review B3; expired ones are swept, see sweep.ts). Real
+ * manifests are a few KB.
  */
 export const MAX_PROPOSAL_BYTES = 64 * 1024
-/** Proposals that can be awaiting a decision at once. Past it, proposing is refused until some expire. */
-export const MAX_LIVE_PROPOSALS = 20
-/** Expired proposals deleted per propose call: proposing is what cleans up after proposing. */
-export const SWEEP_BATCH = 50
-
-/**
- * Is a stored proposal finished with, so it can be deleted? Anything past its
- * expiry: a pending one can no longer be approved, and a decided one has been
- * reported (the CLI stops polling at the expiry). `expiresAt` is an ISO string,
- * which sorts as time, so the store can query on it directly.
- */
-export const isSweepable = (p: Pick<Proposal, 'expiresAt'>, nowMs: number): boolean => {
-  const expires = Date.parse(p.expiresAt)
-  return !Number.isFinite(expires) || nowMs > expires
-}
-
 /** `deciding`: an approval is in flight (set first, so a proposal is single-use even under two clicks). */
 export type ProposalStatus = 'pending' | 'deciding' | 'installed' | 'denied' | 'refused'
 
@@ -125,12 +112,12 @@ export const taken = (uid: string, nowIso: string): Partial<Proposal> => ({
  * approved nothing, and the upgrade was recorded as installed while it was only
  * parked: 0.4.0 review B1.)
  */
-export function approvingFrom(added: unknown): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
+export function approvingFrom(added: unknown): Record<string, CapabilityDeclaration> {
+  const out: Record<string, CapabilityDeclaration> = {}
   if (!Array.isArray(added)) return out
-  for (const entry of added) {
-    if (entry && typeof entry === 'object' && typeof (entry as { name?: unknown }).name === 'string') {
-      out[(entry as { name: string }).name] = (entry as { capability?: unknown }).capability
+  for (const entry of added as Array<Partial<CapabilityEntry> | null>) {
+    if (entry && typeof entry === 'object' && typeof entry.name === 'string' && entry.capability) {
+      out[entry.name] = entry.capability
     }
   }
   return out
