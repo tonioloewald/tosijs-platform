@@ -45,6 +45,27 @@ export const cleanPath = (name: string): string =>
     .map(cleanName)
     .join('/')
 
+export type FileKind = 'image' | 'video' | 'audio' | 'other'
+
+/**
+ * What kind of file this is, for the asset manager's insert menu. The stored
+ * content type decides when there is one: 34 of the files migrated into
+ * `blog:public` have no extension (`zod-bundled-on-bundlejs` is a webp), and by
+ * extension alone they were offered only links. Legacy folders list no content
+ * type, so the extension (`byExtension`) is the fallback.
+ */
+export function fileKind(
+  contentType: unknown,
+  byExtension: FileKind
+): FileKind {
+  const type = typeof contentType === 'string' ? contentType : ''
+  const category = /^([a-z]+)\/\S+$/i.exec(type)?.[1]?.toLowerCase()
+  if (category === 'image' || category === 'video' || category === 'audio') {
+    return category
+  }
+  return category ? 'other' : byExtension
+}
+
 /** The site-relative address of a file: what goes into a post. */
 export function fileUrl(path: string): string {
   const { area, folder, name } = locate(path)

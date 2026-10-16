@@ -8,6 +8,7 @@ import {
   getListItem,
   tosi,
   touch,
+  tosiValue,
 } from 'tosijs'
 import {
   tosiFloat,
@@ -28,6 +29,7 @@ import {
   renameFile,
 } from './firebase'
 import { getDimensionsStyleAttr } from './dimensions'
+import { fileKind } from './blob-files'
 import {
   getExtension,
   getMediaType,
@@ -63,6 +65,7 @@ const { h4, label, input, button, div, span, template } = elements
 export interface Asset {
   name: string
   path: string
+  contentType?: string
 }
 
 const { assetManagerData } = tosi({
@@ -107,7 +110,9 @@ class AssetManager extends Component<AssetManagerParts> {
     ) as CodeEditor | null
     const { getFiles } = this
     const storedUrl = pathToStoredUrl(file.path)
-    const type = getMediaType(file.path)
+    // Unwrapped: a field read off a list proxy is a boxed object, not a string.
+    const record = tosiValue(file) as Asset
+    const type = fileKind(record.contentType, getMediaType(record.path))
 
     const labels = codeEditor ? INSERT_LABELS[type] : COPY_LABELS[type]
 

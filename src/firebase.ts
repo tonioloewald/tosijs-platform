@@ -972,6 +972,8 @@ export const uploadFile = async (
 export interface FileRecord {
   name: string
   path: string
+  /** As stored (storage areas only; legacy folders do not list it). */
+  contentType?: string
 }
 
 export const deleteFile = async (path: string): Promise<boolean> => {
@@ -1047,8 +1049,8 @@ export const listFiles = async (path: string): Promise<FileRecord[]> => {
     const docs = (await service.docs.get({
       p: area,
       c: MAX_LISTED_FILES,
-      f: 'path',
-    })) as Array<{ path: string }>
+      f: 'path,contentType',
+    })) as Array<{ path: string; contentType?: string }>
     if (!Array.isArray(docs)) throw new Error(`could not list ${area}`)
     if (docs.length >= MAX_LISTED_FILES) {
       console.warn(
@@ -1059,6 +1061,7 @@ export const listFiles = async (path: string): Promise<FileRecord[]> => {
       .map((doc) => ({
         name: doc.path,
         path: `${area}/${doc.path}`,
+        contentType: doc.contentType,
       }))
       .sort((a, b) => a.name.localeCompare(b.name))
   }

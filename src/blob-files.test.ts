@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { cleanName, cleanPath, fileUrl, locate } from './blob-files'
+import { cleanName, cleanPath, fileKind, fileUrl, locate } from './blob-files'
 import { cleanName as scriptCleanName } from '../scripts/sandbox-lib.js'
 import { validateBlobPath } from '../functions/src/collections/blob'
 
@@ -54,5 +54,20 @@ describe('cleanName / cleanPath', () => {
       'my-folder/Character-Sheet.pdf'
     )
     expect(validateBlobPath(cleanPath('a b/c d.png'))).toBeNull()
+  })
+})
+
+describe('fileKind', () => {
+  test('the stored content type decides, so a file with no extension is still an image', () => {
+    expect(fileKind('image/webp', 'other')).toBe('image')
+    expect(fileKind('video/mp4', 'other')).toBe('video')
+    expect(fileKind('audio/mpeg', 'other')).toBe('audio')
+    expect(fileKind('application/pdf', 'image')).toBe('other')
+  })
+  test('with no usable content type, the extension decides', () => {
+    expect(fileKind(undefined, 'image')).toBe('image')
+    expect(fileKind('', 'video')).toBe('video')
+    expect(fileKind({}, 'image')).toBe('image') // a boxed proxy value is not a type
+    expect(fileKind('nonsense', 'other')).toBe('other')
   })
 })
