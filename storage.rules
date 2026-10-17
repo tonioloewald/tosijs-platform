@@ -18,31 +18,29 @@ service firebase.storage {
         && role in request.auth.token.roles;
     }
 
-    // Helper function to check if user has any content creation role
-    function canCreateContent() {
-      return hasRole('author')
-        || hasRole('editor')
-        || hasRole('admin')
-        || hasRole('developer')
-        || hasRole('owner');
-    }
-
-    // Blog assets - only content creators can write
+    // Blog assets: READ-ONLY since 2026-10-17 (board #2486). Posts still link
+    // here, so reads stay; new files go to the blog:public storage area through
+    // /blob, which applies its limits, metadata and provenance. A write here
+    // could only come from an editor tab still running the pre-/blob client
+    // (one did, on 2026-10-16); it now fails instead of landing where the asset
+    // manager no longer looks.
     match /blog/{path=**} {
       allow read: if true;
-      allow write: if canCreateContent();
     }
 
-    // Public assets - only admins/developers can write
+    // Public assets - only admins/developers can write. The one legacy folder
+    // still written to: the asset manager offers it until it is migrated into
+    // a storage area (board #2486).
     match /public/{path=**} {
       allow read: if true;
       allow write: if hasRole('admin') || hasRole('developer') || hasRole('owner');
     }
 
-    // User uploads - users can write to their own folder
+    // User uploads: READ-ONLY since 2026-10-17 (board #2486). No client writes
+    // here and the production bucket has no users/ folder; a storage area is
+    // where per-user files belong.
     match /users/{userId}/{path=**} {
       allow read: if true;
-      allow write: if request.auth != null && request.auth.uid == userId;
     }
 
     // NOTHING ELSE. No default rule, so anything not matched above is denied:

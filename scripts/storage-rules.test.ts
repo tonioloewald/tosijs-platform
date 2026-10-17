@@ -17,8 +17,8 @@ const rules = readFileSync(new URL('../storage.rules', import.meta.url), 'utf-8'
   .filter((l) => !l.trim().startsWith('//'))
   .join('\n')
 
-/** Every `match <path> { … allow read|get|list … }`, by the path's first segment. */
-function readGrants(): string[] {
+/** Every `match <path> { … allow <kind> … }`, by the path's first segment. */
+function grants(kind: RegExp): string[] {
   const out: string[] = []
   const re = /match\s+(\/[^\s{]*(?:\{[^}]*\}[^\s{]*)*)\s*\{/g
   let m: RegExpExecArray | null
@@ -27,10 +27,13 @@ function readGrants(): string[] {
     if (path.startsWith('/b/')) continue // the bucket wrapper
     const bodyStart = re.lastIndex
     const body = rules.slice(bodyStart, rules.indexOf('}', bodyStart))
-    if (/allow\s+[^:]*\b(read|get|list)\b/.test(body)) out.push(path.split('/')[1])
+    const allow = new RegExp(`allow\\s+[^:]*\\b(${kind.source})\\b`)
+    if (allow.test(body)) out.push(path.split('/')[1])
   }
   return out
 }
+const readGrants = () => grants(/read|get|list/)
+const writeGrants = () => grants(/write|create|update|delete/)
 
 describe('storage.rules: reads are an allowlist of the legacy folders', () => {
   test('the rules parse into some read grants (the test is looking at something)', () => {
@@ -40,6 +43,12 @@ describe('storage.rules: reads are an allowlist of the legacy folders', () => {
     for (const first of readGrants()) {
       expect(LEGACY_FOLDERS as readonly string[]).toContain(first)
     }
+  })
+  test('direct writes are retired except the legacy public/ folder (board #2486)', () => {
+    // blog/ was copied into blog:public (2026-10-05) and is read-only; new
+    // files go through /blob. public/ is still the asset manager's second folder.
+    expect(writeGrants()).toEqual(['public'])
+    expect(readGrants()).toContain('blog')
   })
   test('no rule matches everything', () => {
     expect(rules).not.toMatch(/match\s+\/\{\w+=\*\*\}/)
