@@ -6,6 +6,7 @@
  *   bun scripts/migrate-blog-files.js --alias sandbox            # PLAN only (default)
  *   bun scripts/migrate-blog-files.js --alias sandbox --apply
  *   bun scripts/migrate-blog-files.js --alias default --apply    # production: asks for an agent token in the browser
+ *   bun scripts/migrate-blog-files.js --alias default --apply --only flashforge-cj270   # just that file
  *
  * What it does:
  * - COPIES each file (server-side, `/blob` op `import`): the originals stay
@@ -68,6 +69,16 @@ do {
   }
   pageToken = r.json.nextPageToken ?? ''
 } while (pageToken)
+
+// `--only <name>`: one file (e.g. one a stale editor tab uploaded to the old folder).
+const only = val('only')
+if (only) {
+  files.splice(0, files.length, ...files.filter((f) => f.from === `${folder}/${only}`))
+  if (!files.length) {
+    console.error(`no file ${folder}/${only}`)
+    process.exit(1)
+  }
+}
 
 const byTarget = new Map()
 for (const f of files) byTarget.set(f.to, [...(byTarget.get(f.to) ?? []), f.from])
