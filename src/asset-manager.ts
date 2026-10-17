@@ -328,7 +328,11 @@ class AssetManager extends Component<AssetManagerParts> {
     }
   }
 
+  // On every keystroke, not just on `change` (Return or blur), which a phone's
+  // search field rarely fires. Read from the field itself, so the list never
+  // waits on the binding to catch up.
   updateList = () => {
+    assetManagerData.filter.value = this.parts.search.value
     touch(assetManagerData.filteredFiles)
   }
 
@@ -358,6 +362,7 @@ class AssetManager extends Component<AssetManagerParts> {
           type: 'search',
           placeholder: 'filter items',
           bindValue: assetManagerData.filter,
+          onInput: this.updateList,
           onChange: this.updateList,
         }),
         span({ class: 'elastic' }),
