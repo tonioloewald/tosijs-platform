@@ -322,6 +322,21 @@ export const collectionPath = (path: string): string => {
 }
 
 /**
+ * The path a document answers to, whatever it was looked up by. A request for
+ * `post/path=old-slug` used to report `_path: 'post/path=old-slug'`, and the
+ * blog editor saves to `_path`: so after the author changed the slug, the next
+ * save looked for the OLD slug and got 404 (2026-10-21). The lookup form is a
+ * query; `_path` is an address, so it names the document by id.
+ */
+export function documentPath(requestPath: string, docId: string): string {
+  const parts = requestPath.split('/')
+  // Only the final specifier can be a lookup we resolve here; anything else
+  // (an id already, or a lookup earlier in the path) is left as asked.
+  if (parts.slice(0, -1).some((p) => p.includes('='))) return requestPath
+  return [...parts.slice(0, -1), docId].join('/')
+}
+
+/**
  * Join the grants a caller holds into one effective grant.
  *
  * ## Why this replaced last-match-wins

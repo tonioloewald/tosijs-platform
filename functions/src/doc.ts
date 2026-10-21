@@ -25,6 +25,7 @@ import {
 import { Response } from 'express'
 import {
   collectionPath,
+  documentPath,
   getMethodAccess,
   REST_METHOD,
   ALL,
@@ -288,14 +289,15 @@ export const getDoc = async (
     }
 
     let data = doc.data() as Record<string, unknown> | undefined
+    const _path = documentPath(path, doc.id)
     if (access === ALL) {
-      data = { ...data, _path: path }
+      data = { ...data, _path }
     } else if (typeof access === 'function') {
       const filtered = await access(data, userRoles)
       if (filtered instanceof Error) {
         return opaqueError(userRoles, filtered.message, 403)
       }
-      data = { ...filtered, _path: path }
+      data = { ...filtered, _path }
     }
 
     // Store in cache if cacheLatencySeconds is configured
@@ -408,11 +410,12 @@ export const doc = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
     case 'GET':
       if (doc.exists) {
         let data = doc.data as Record<string, unknown> | undefined
+        // The document's own path, never the lookup (see documentPath).
         if (access === ALL) {
-          data = { ...data, _path: path }
+          data = { ...data, _path: canonicalPath }
         } else if (typeof access === 'function') {
           const filtered = await access(data, userRoles)
-          data = { ...filtered, _path: path }
+          data = { ...filtered, _path: canonicalPath }
         }
         compressResponse(req, res, () => {
           res.json(data)
