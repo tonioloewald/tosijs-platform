@@ -370,8 +370,9 @@ const {
   textarea,
   template,
   xinSlot,
+  details,
+  summary: summaryTag,
 } = elements
-
 
 bindings.date = {
   toDOM(element, dateString) {
@@ -804,13 +805,34 @@ interface PostEditorParts extends PartsMap {
   preview: MarkdownViewer
   tabSelector: TabSelector
   proofBar: HTMLDivElement
+  summaryPrompt: HTMLTextAreaElement
+}
+
+/**
+ * The summary prompt is site config (`config/blog-prompts`, field `summary`):
+ * admin-writable, publicly readable like all config, so it follows the author
+ * across devices. The post's markdown is appended after it.
+ */
+const PROMPTS_DOC = 'config/blog-prompts'
+const DEFAULT_SUMMARY_PROMPT =
+  'Please write a short teaser paragraph for the following blog post in the style of the author. The post is provided below in markdown format:'
+
+/** Why /gen failed, in words an author can act on. */
+const genFailure = (e: unknown): string => {
+  const message = e instanceof Error ? e.message : String(e ?? '')
+  if (/402|credits are depleted/i.test(message)) {
+    return 'the Gemini account is out of prepaid credits (top up in AI Studio → Billing)'
+  }
+  return (
+    message.replace(/^Generation failed:\s*/, '').slice(0, 200) ||
+    'unknown error'
+  )
 }
 
 // The live CodeMirror EditorView, as exposed by <tosi-code>.editor — derived from
 // the element's own type so we never import @codemirror (which would load a second
 // instance; see tosijs-ui#131).
 type CmView = NonNullable<CodeEditor['editor']>
-
 
 export class XinPostEditor extends Component<PostEditorParts> {
   // The resolved doc path, remembered across re-saves within this editor session
@@ -1166,7 +1188,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
       console.error('proofread failed', e)
       postNotification({
         type: 'error',
-        message: 'Proofreading failed — see console',
+        message: `Proofreading failed: ${genFailure(e)}`,
       })
       return
     }
@@ -1268,6 +1290,35 @@ export class XinPostEditor extends Component<PostEditorParts> {
     console.info(`[proofread] ${notes.length} margin note(s) rendered`)
   }
 
+  loadSummaryPrompt = async (): Promise<string> => {
+    const doc = await service.doc.get({ p: PROMPTS_DOC })
+    const stored =
+      !(doc instanceof Error) && typeof doc?.summary === 'string'
+        ? doc.summary.trim()
+        : ''
+    const prompt = stored || DEFAULT_SUMMARY_PROMPT
+    this.parts.summaryPrompt.value = prompt
+    return prompt
+  }
+
+  saveSummaryPrompt = async () => {
+    const summary = this.parts.summaryPrompt.value.trim()
+    if (!summary) {
+      postNotification({ type: 'error', message: 'The prompt is empty.' })
+      return
+    }
+    let result = await service.doc.put({ p: PROMPTS_DOC, data: { summary } })
+    if (result instanceof Error) {
+      // First save on this site: the document does not exist yet.
+      result = await service.doc.post({ p: PROMPTS_DOC, data: { summary } })
+    }
+    postNotification(
+      result instanceof Error
+        ? { type: 'error', message: `Prompt not saved: ${result.message}` }
+        : { type: 'success', message: 'Summary prompt saved', duration: 2 }
+    )
+  }
+
   summarize = async () => {
     if (this.#blockedByProofread('generating a summary')) return
     const content = this.parts.source.value
@@ -1275,11 +1326,28 @@ export class XinPostEditor extends Component<PostEditorParts> {
       message: 'Summarizing…',
       type: 'progress',
     })
-    const { text } = await service.gen.post({
-      prompt: `Please write a short teaser paragraph for the following blog post in the style of the author. The post is provided below in markdown format:\n\n ${content}`,
-    })
-    blog.editorPost.summary = text
-    close()
+    let text = ''
+    let failure = ''
+    try {
+      const prompt =
+        this.parts.summaryPrompt.value.trim() ||
+        (await this.loadSummaryPrompt())
+      const res = await service.gen.post({ prompt: `${prompt}\n\n${content}` })
+      if (res instanceof Error) failure = genFailure(res)
+      else text = String(res?.text ?? '').trim()
+      if (!text && !failure) failure = 'the model returned nothing'
+    } catch (e) {
+      failure = genFailure(e)
+    } finally {
+      close()
+    }
+    // A failure used to land here as `summary = undefined`, with no message:
+    // it looked like success and left the field empty.
+    if (failure) {
+      postNotification({ type: 'error', message: `Summary failed: ${failure}` })
+      return
+    }
+    ;(blog.editorPost.summary as any).value = text
   }
 
   convertToMarkdown = async () => {
@@ -1515,6 +1583,32 @@ export class XinPostEditor extends Component<PostEditorParts> {
               })
             ),
             textarea({ bindValue: blog.editorPost.summary })
+          ),
+          details(
+            {
+              onToggle: (event: Event) => {
+                const open = (event.target as HTMLDetailsElement).open
+                if (open && !this.parts.summaryPrompt.value) {
+                  this.loadSummaryPrompt()
+                }
+              },
+            },
+            summaryTag('Summary prompt'),
+            textarea({
+              part: 'summaryPrompt',
+              rows: 4,
+              style: { width: '100%', boxSizing: 'border-box' },
+            }),
+            div(
+              { class: 'row', style: { gap: vars.pad50 } },
+              span({ class: 'elastic' }),
+              button('Reset to default', {
+                onClick: () => {
+                  this.parts.summaryPrompt.value = DEFAULT_SUMMARY_PROMPT
+                },
+              }),
+              button('Save prompt', { onClick: this.saveSummaryPrompt })
+            )
           )
         )
       )
