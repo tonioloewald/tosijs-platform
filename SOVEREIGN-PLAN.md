@@ -236,13 +236,27 @@ has landed.
 | **1** | **Ports, no behaviour change** (on Firebase) | Data (`query`, `transaction`, counters) wired into `docs.ts`, `commit.ts`, `claim.ts`, render, install, epoch, blob metadata; Files; Auth; HTTP `(Request) => Response` with `onRequest` as a wrapper; `logger` behind an injected sink, as `setAccessLogger` already is | A test fails if any file outside `adapters/firebase/` imports `firebase-admin` or `firebase-functions`. One **conformance suite** passes against `MemoryStore` and the Firestore emulator. Production deploy is byte-for-byte the same behaviour |
 | **2** | **Bun server + SQLite** (`bun run serve:local`) | SQLite Data, directory Files, Google-token Auth plus dev identities, all 17 endpoints on `Bun.serve` | The conformance suite passes on SQLite. **Local development needs no Java emulators.** A `bun run backup` snapshot of loewald.com imports and serves locally |
 | **3** | **Live v1: rooms** (on the Bun server) | `/live`, room collection, join/leave/presence, relay, signaling, quotas, TURN credential minting; role epoch in HTTP and Live | A two-browser test: join, relay, signaling to a connected data channel, revocation evicts within one epoch, quota trips. Runs both in-process and as a sidecar to the **sandbox** Firebase host |
-| **4** | **Sovereign deploy** | one VPS: `bun build --compile` binary + data dir + Caddy + systemd; Litestream; coturn; D16 claim via a `sqlite3` prompt | A fresh VPS from a script to a claimed host. **Restore from off-box backup is run and checked.** The deploy check (`scripts/deploy.js`'s outside-in probe) passes against it |
+| **4** | **Sovereign deploy** | one VPS: a container image (or a `bun build --compile` binary under systemd) + data volume + Caddy; Litestream; coturn; D16 claim via a `sqlite3` prompt | A fresh VPS from a script to a claimed host. **Restore from off-box backup is run and checked.** The deploy check (`scripts/deploy.js`'s outside-in probe) passes against it |
 | **5** | **Data subscriptions** | `sub` channel, tiers 0–4, projection as subject, visibility transitions, backpressure by tier degradation; tier 0 also over SSE | The Snowfox case as a test: thousands of writes to unprojected fields produce zero notifications; visibility add/remove is never filtered |
 | **6** | **Server-side unreliable channels**: spike | §5.5 option 2 under Bun, measured | A go/no-go note with numbers, when a server-authoritative game asks |
 | **7** | **Scaled shape**: design check only | Postgres Data adapter, Redis/`NOTIFY` Bus, room routing, S3 Files | The conformance suite passes on Postgres. Not built until a host needs it (D13) |
 
 loewald.com stays on Firebase throughout (#2863). New shapes are proven on the sandbox and on a
 VPS of our own.
+
+**Phase 4's test box is the preview/tunnel VPS** (owner, 2026-10-22). Its address comes from
+`PREVIEW_HOST` (`~/local-secrets/tosijs-preview.env`) and is **never committed** (practices
+`deployment.md`). It shares the box with the tunnel, so isolation is the requirement. The default way to get it is
+**a container** (owner: "or a docker container or similar"): one image (Bun plus the compiled
+server), the data directory as a mounted volume, and the same image runs locally, on the preview
+box and later as the scaled shape's unit. A bare binary under systemd is the fallback for a box
+without a container runtime. Either way:
+- the platform runs as its own user, with its own data directory;
+- it has its own subdomain behind the existing reverse proxy;
+- coturn's UDP ports are chosen not to collide;
+- a deploy script that would touch the tunnel's config refuses.
+
+Moving to a dedicated box later is a host change, not a redesign.
 
 ## 7. Decisions needed
 
@@ -299,6 +313,6 @@ Each has a default I would proceed on. Recorded in DECISIONS.md only when the ow
 
 ## 9. Not in this plan
 
-SFU or media servers, an in-house CRDT, multi-region, container orchestration, Redis on the single
+SFU or media servers, an in-house CRDT, multi-region, container orchestration (one container, yes; Kubernetes, no), Redis on the single
 box, migrating loewald.com off Firebase, the Rust port (#2864, which depends on this plan's ports
 and conformance suite).
