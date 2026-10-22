@@ -6,19 +6,9 @@ import { Request } from 'firebase-functions/v2/https'
 import { Response } from 'express'
 import { DecodedIdToken } from 'firebase-admin/auth'
 
-import { UserRoles, anonymousUser } from './collections/roles'
-import {
-  credentialName,
-  joinRoleDocs,
-  lookupEmail,
-  MAX_ROLE_DOCS,
-} from './collections/join-roles'
-import {
-  TOKEN_PREFIX,
-  hashToken,
-  tokenAuthority,
-  type TokenRecord,
-} from './auth/token'
+import { UserRoles } from './collections/roles'
+import { resolvePrincipal } from './collections/principal'
+import { firestoreQuery } from './firestore-store'
 
 admin.initializeApp()
 
@@ -219,6 +209,17 @@ async function getUser(
   if (idToken == null) {
     return false
   }
+  const decodedIdToken = await verifyFirebaseIdToken(idToken)
+  if (decodedIdToken) req.user = decodedIdToken
+  return decodedIdToken
+}
+
+/**
+ * The Firebase identity adapter: a Firebase ID token → its verified claims.
+ */
+async function verifyFirebaseIdToken(
+  idToken: string
+): Promise<DecodedIdToken | false> {
   try {
     // `checkRevoked` costs one extra Auth lookup, and buys the difference
     // between "signed out everywhere" meaning it and meaning it in an hour.
@@ -228,9 +229,7 @@ async function getUser(
     //
     // Unauthenticated requests never reach here (no header, early return), so
     // public and SSR traffic pays nothing.
-    const decodedIdToken = await admin.auth().verifyIdToken(idToken, true)
-    req.user = decodedIdToken
-    return decodedIdToken
+    return await admin.auth().verifyIdToken(idToken, true)
   } catch (error) {
     // Fails CLOSED in every case, including a transient Auth outage: an
     // unverifiable token is anonymous, never trusted-by-default. Revocation is
@@ -274,178 +273,33 @@ async function syncRolesToCustomClaims(
 }
 
 /**
- * Role documents naming this email as a contact.
- *
- * An INDEXED equality match on the whole contact object — Firestore compares
- * maps by content, so `{type, value}` matches regardless of key order. It
- * replaces a scan of the 100 most recently created role documents that then
- * matched client-side: on any host with more than 100 roles, a principal whose
- * grant fell outside that window silently resolved to `anonymousUser`. Silently
- * is the problem — "you have no access" and "we did not look properly" were
- * indistinguishable, to the user and in the logs.
- *
- * The trade is that matching is now exact rather than fuzzy, so a contact
- * stored with different case than the token's email will not match; both forms
- * are tried below.
+ * The caller's authority. The decision lives in the portable kernel
+ * (`collections/principal.ts`); this binds it to Firebase: ID tokens verified
+ * by Firebase Auth, `role`/`token` read from Firestore.
  */
-async function rolesByEmail(email: string): Promise<RoleDoc[]> {
-  return getRecords<RoleDoc>(
-    'role',
-    'contacts',
-    'array-contains',
-    { type: 'email', value: email },
-    MAX_ROLE_DOCS
-  )
-}
-
-/**
- * Every role document granting authority to this principal.
- *
- * `userIds` first, `contacts` only if that finds nothing. Both are AUTHORITY —
- * neither is a cache of the other.
- *
- * That is the change: the email path used to APPEND the uid to `userIds` for
- * "future fast lookups", which made `userIds` a derived cache while looking
- * like a grant. An operator revoking the obvious way — removing the uid — was
- * silently re-granted on the principal's next request, and the write happened
- * during a READ, so it was invisible in any audit of writes. Now removing
- * either one removes exactly that grant, and revoking both revokes.
- */
-async function findRoleDocs(uid: string, email?: string): Promise<RoleDoc[]> {
-  const byUid = await getRecords<RoleDoc>(
-    'role',
-    'userIds',
-    'array-contains',
-    uid,
-    MAX_ROLE_DOCS
-  )
-  if (byUid.length || !email) return byUid
-
-  const lower = email.toLowerCase()
-  const found = await rolesByEmail(lower)
-  if (found.length || lower === email) return found
-  // Stored contacts predating any normalisation may carry the original case.
-  return rolesByEmail(email)
-}
-
-/**
- * Resolve a capability token to what it can do RIGHT NOW (B2, #6).
- *
- * The principal's roles are read live, on every request — never cached on the
- * token, never trusted from mint time. That is the single choice that makes
- * revoking a human revoke every agent they authorised, with no revocation list
- * to maintain and nothing to remember to do.
- *
- * Lookup is by uid only, deliberately: the token names a uid, so the email
- * fallback has nothing to add and would let a token outlive the uid it was
- * minted against.
- */
-async function rolesForToken(secret: string): Promise<UserRoles> {
-  const found = await getRecords<TokenRecord & FirestoreDoc>(
-    'token',
-    'hash',
-    '==',
-    hashToken(secret),
-    2
-  )
-  const record = found[0] ?? null
-  if (!record) {
-    functions.logger.warn('rejected an unknown capability token')
-    return anonymousUser
-  }
-
-  const principal = joinRoleDocs(
-    await getRecords<RoleDoc>(
-      'role',
-      'userIds',
-      'array-contains',
-      record.principalUid,
-      MAX_ROLE_DOCS
-    )
-  )
-
-  const authority = tokenAuthority(record, principal.roles, Date.now())
-  if (authority.status === 'refused') {
-    // Specific in the log, anonymous on the wire — the caller learns only that
-    // they are nobody, which is all a rejected credential should reveal.
-    functions.logger.warn(
-      `token ${record._id} refused: ${authority.reason}`
-    )
-    return anonymousUser
-  }
-
-  return {
-    ...principal,
-    // The token's OWNER authenticated (through the token), not whoever is
-    // listed first on their role document (#28).
-    // …named as the human names themselves when they sign in: the credential
-    // name captured at mint (older tokens have none and fall back).
-    principal: {
-      uid: record.principalUid,
-      ...(record.principalName ? { name: record.principalName } : {}),
-    },
-    // ATTENUATED. Never `principal.roles` — that would hand the agent the
-    // human's full authority, which is the entire thing this design exists to
-    // prevent.
-    roles: authority.roles,
-    token: {
-      id: authority.tokenId,
-      label: authority.label,
-      methods: authority.methods,
-      ...(authority.collections ? { collections: authority.collections } : {}),
-    },
-  }
-}
-
 async function getUserRoles(req: AuthenticatedRequest): Promise<UserRoles> {
-  // A capability token is self-identifying by prefix, so the two credential
-  // kinds never have to be told apart by trying one and falling back — a
-  // fallback that, on a malformed token, would silently try it as a Firebase
-  // ID token and log a confusing verification error instead of the real one.
-  const bearer = req.headers.authorization?.split('Bearer ')[1]
-  if (bearer?.startsWith(TOKEN_PREFIX)) {
-    return rolesForToken(bearer)
-  }
-
-  const user = await getUser(req)
-  if (!user) {
-    return anonymousUser
-  }
-
-  // Only a VERIFIED email may resolve a role by contact — see lookupEmail.
-  const docs = await findRoleDocs(user.uid, lookupEmail(user))
-  if (docs.length >= MAX_ROLE_DOCS) {
-    functions.logger.error(
-      `role lookup for ${user.uid} hit the ${MAX_ROLE_DOCS}-document bound — ` +
-        `authority may be incomplete`
-    )
-  }
-  const userRole = joinRoleDocs(docs, (m) => functions.logger.warn(m))
-
-  // Sync roles to custom claims for Storage rules enforcement.
-  //
-  // A second source of truth for authorization, written best-effort during a
-  // READ, consumed only by `storage.rules`. It is on the list to DELETE along
-  // with those rules (#3) — claims are baked into an issued token, so a role
-  // revoked here stays live in storage until it expires. Not removed yet
-  // because `asset-manager.ts` uploads through the Storage client SDK and
-  // would break; kept deliberately, not by oversight.
-  if (userRole !== anonymousUser && userRole.roles?.length > 0) {
-    await syncRolesToCustomClaims(user.uid, userRole.roles)
-  }
-
-  // No role document: stay the shared anonymous identity (compared by
-  // reference elsewhere), exactly as before.
-  if (userRole === anonymousUser) return userRole
-
-  // Who AUTHENTICATED, from the verified ID token — not the first uid on the
-  // matched role document, which for a contact match or a shared document is
-  // someone else (#28). The display name comes from the credential too.
-  const name = credentialName(user)
-  return {
-    ...userRole,
-    principal: { uid: user.uid, ...(name ? { name } : {}) },
-  }
+  return resolvePrincipal(req.headers.authorization, {
+    store: { query: firestoreQuery },
+    verify: async (idToken) => {
+      const decoded = await verifyFirebaseIdToken(idToken)
+      if (!decoded) return null
+      req.user = decoded
+      return decoded
+    },
+    log: {
+      warn: (m) => functions.logger.warn(m),
+      error: (m) => functions.logger.error(m),
+    },
+    // Sync roles to custom claims for Storage rules enforcement.
+    //
+    // A second source of truth for authorization, written best-effort during a
+    // READ, consumed only by `storage.rules`. It is on the list to DELETE along
+    // with those rules (#3) — claims are baked into an issued token, so a role
+    // revoked here stays live in storage until it expires. Not removed yet
+    // because `asset-manager.ts` still uploads to the legacy `public/` folder
+    // through the Storage client SDK (#2486); kept deliberately.
+    onResolved: syncRolesToCustomClaims,
+  })
 }
 
 const DAY_IN_MS = 24 * 3600 * 1000

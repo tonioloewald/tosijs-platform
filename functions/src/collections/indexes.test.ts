@@ -51,6 +51,13 @@ const utilities = readFileSync(
   join(__dirname, '..', 'utilities.ts'),
   'utf-8'
 )
+// Role and token lookups moved to the kernel (2026-10-22) and reach Firestore
+// through `firestoreQuery`, which keeps getRecords' query shape.
+const principal = readFileSync(join(__dirname, 'principal.ts'), 'utf-8')
+const firestoreStore = readFileSync(
+  join(__dirname, '..', 'firestore-store.ts'),
+  'utf-8'
+)
 
 const hasIndex = (
   collection: string,
@@ -74,8 +81,26 @@ describe('firestore.indexes.json covers the queries the code actually makes', ()
     expect(utilities).toMatch(/ref\.orderBy\(/)
   })
 
-  test('getUserRoles still uses array-contains on role.userIds', () => {
-    expect(utilities).toMatch(/'role',\s*\n?\s*'userIds',\s*\n?\s*'array-contains'/)
+  test('firestoreQuery orders by _created desc by default, as getRecords does', () => {
+    expect(firestoreStore).toMatch(/options\.orderBy \?\? '_created desc'/)
+    expect(firestoreStore).toMatch(/ref\.orderBy\(/)
+    expect(principal).toMatch(/orderBy: '_created desc'/)
+  })
+
+  test('the resolver uses array-contains on role.userIds', () => {
+    expect(principal).toMatch(/arrayContains: \{ field: 'userIds'/)
+  })
+
+  test('the token lookup is hash equality, and its index is declared', () => {
+    expect(principal).toMatch(/equals: \{ field: 'hash'/)
+    expect(
+      indexes.indexes.some(
+        (i) =>
+          i.collectionGroup === 'token' &&
+          i.fields.some((f) => f.fieldPath === 'hash') &&
+          i.fields.some((f) => f.fieldPath === '_created' && f.order)
+      )
+    ).toBe(true)
   })
 
   test('role: userIds array-contains + _created order IS declared', () => {
@@ -88,9 +113,7 @@ describe('firestore.indexes.json covers the queries the code actually makes', ()
     // 2026-09-19. The query it became needs its own composite index — and
     // this is the ONE path a brand-new user hits on first sign-in, so getting
     // it wrong means a fresh host works for nobody.
-    expect(utilities).toMatch(
-      /'role',\s*\n?\s*'contacts',\s*\n?\s*'array-contains'/
-    )
+    expect(principal).toMatch(/arrayContains: \{ field: 'contacts'/)
   })
 
   test('role: contacts array-contains + _created order IS declared', () => {

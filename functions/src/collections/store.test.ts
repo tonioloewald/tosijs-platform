@@ -213,6 +213,21 @@ describe('MemoryStore implements the same contract as the Firestore adapter', ()
     expect(await store.isUnique('post', 'slug', 'ok', 'post/a')).toBe(true)
   })
 
+  test('query compares objects by CONTENT, as Firestore does', async () => {
+    // `includes` compared by reference, so array-contains on an object (the role
+    // lookup by `{type, value}` contact) never matched here while matching in
+    // production. Firestore's map equality ignores key order.
+    const store = new MemoryStore({
+      'role/r': { contacts: [{ type: 'email', value: 'a@example.com' }], meta: { a: 1, b: [2] } },
+      'role/s': { contacts: [{ type: 'email', value: 'b@example.com' }], meta: { a: 1 } },
+    })
+    const ids = async (o: Parameters<MemoryStore['query']>[1]) =>
+      (await store.query('role', { orderBy: '~', ...o })).map((d) => d.path)
+    expect(await ids({ arrayContains: { field: 'contacts', value: { value: 'a@example.com', type: 'email' } } })).toEqual(['role/r'])
+    expect(await ids({ arrayContains: { field: 'contacts', value: { type: 'email' } } })).toEqual([])
+    expect(await ids({ equals: { field: 'meta', value: { b: [2], a: 1 } } })).toEqual(['role/r'])
+  })
+
   test('stored documents are cloned, so callers cannot mutate the store', async () => {
     // A failure mode a real store does not have and a naive fake does.
     const store = new MemoryStore({ 'post/a': { tags: ['x'] } })

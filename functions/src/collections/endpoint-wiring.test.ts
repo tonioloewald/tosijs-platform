@@ -26,7 +26,10 @@ import { join } from 'path'
 const src = (f: string) => readFileSync(join(__dirname, '..', f), 'utf-8')
 const docTs = src('doc.ts')
 const docsTs = src('docs.ts')
-const utilitiesTs = src('utilities.ts')
+// Role resolution moved to the portable kernel on 2026-10-22 (SOVEREIGN-PLAN.md
+// Phase 1). Its BEHAVIOUR is pinned in principal.test.ts against MemoryStore;
+// what is left to assert here is that the Firebase binding actually uses it.
+const principalTs = src('collections/principal.ts')
 // Since the 2026-09-16 cutover the write DECISION lives in the pipeline and only
 // the commit and the HTTP mapping remain in doc.ts, so wiring assertions about
 // rejection messages have to span both files.
@@ -52,15 +55,21 @@ describe('getUserRoles: the B1 defects stay fixed (#6)', () => {
     expect(utilities).not.toMatch(/userIds\.push\(/)
   })
 
-  test('all matching role documents are joined, not [0]', () => {
-    expect(utilities).toMatch(/joinRoleDocs\(docs/)
-    expect(utilities).not.toMatch(/roles\[0\]/)
-    expect(utilities).not.toMatch(/const firstRole/)
+  test('getUserRoles delegates to the kernel resolver, bound to Firebase', () => {
+    // Joining (not [0]), verified-email lookup, token attenuation and #28
+    // attribution are behaviour tests in principal.test.ts now. They only
+    // protect production if production calls the resolver.
+    expect(utilities).toMatch(/return resolvePrincipal\(req\.headers\.authorization, \{/)
+    expect(utilities).toMatch(/store: \{ query: firestoreQuery \}/)
+    expect(utilities).toMatch(/verifyFirebaseIdToken\(idToken\)/)
+    // No second, inline resolution path left behind by a partial revert.
+    expect(utilities).not.toMatch(/joinRoleDocs\(/)
+    expect(utilities).not.toMatch(/tokenAuthority\(/)
   })
 
-  test('the email lookup is a query, not a scan', () => {
-    expect(utilities).toMatch(/'contacts',\s*\n?\s*'array-contains'/)
-    expect(utilities).not.toMatch(/allRoles\.find\(/)
+  test('the resolver can only READ (its store is query-only)', () => {
+    expect(principalTs).toMatch(/store: Pick<Store, 'query'>/)
+    expect(principalTs).not.toMatch(/\.(set|delete|update)\(/)
   })
 
   test('/install attributes the act to the TOKEN, not the role document', () => {
@@ -150,8 +159,8 @@ describe('doc.ts denial branches do not disclose existence', () => {
   })
 
   test('role lookup by email requires a VERIFIED email (M1)', () => {
-    expect(utilitiesTs).toContain('findRoleDocs(user.uid, lookupEmail(user))')
-    expect(utilitiesTs).not.toContain('findRoleDocs(user.uid, user.email)')
+    // Behaviour: principal.test.ts ("a VERIFIED email resolves a role…").
+    expect(principalTs).toContain('findRoleDocs(deps.store, credential.uid, lookupEmail(credential))')
   })
 
   test('doc.ts is wired to the pipeline and keeps no second write path', () => {
@@ -250,31 +259,15 @@ describe('/state stays retired', () => {
 
 describe('capability tokens are actually wired (B2, #6)', () => {
   // Call forms only, never prose.
-  const utilities = src('utilities.ts')
   const access = src('collections/access.ts')
   const endpoint = src('auth/endpoint.ts')
   const records = src('collections/token-records.ts')
 
-  test('getUserRoles routes a token bearer to the token path', () => {
-    expect(utilities).toMatch(/bearer\?\.startsWith\(TOKEN_PREFIX\)/)
-    expect(utilities).toMatch(/return rolesForToken\(bearer\)/)
-  })
-
-  test('it ATTENUATES — the agent never gets the human authority', () => {
-    // `roles: principal.roles` here would hand every agent its human's full
-    // authority, which is the entire thing this design exists to prevent.
-    expect(utilities).toMatch(/roles: authority\.roles/)
-    expect(utilities).not.toMatch(/roles: principal\.roles/)
-  })
-
-  test('the principal is read LIVE, not trusted from the record', () => {
-    // `record.caveats.roles` used directly would mean a token keeps working
-    // after its human is revoked.
-    expect(utilities).toMatch(/tokenAuthority\(record, principal\.roles/)
-  })
-
-  test('only a HASH is ever looked up, never a stored secret', () => {
-    expect(utilities).toMatch(/hashToken\(secret\)/)
+  test('the token path is wired, and looks up only a HASH', () => {
+    // Routing by prefix, attenuation, live principal and refusals are behaviour
+    // tests in principal.test.ts ("capability tokens").
+    expect(principalTs).toMatch(/if \(bearer\.startsWith\(TOKEN_PREFIX\)\) return rolesForToken\(bearer, deps\)/)
+    expect(principalTs).toMatch(/hashToken\(secret\)/)
     expect(endpoint).toMatch(/hash: hashToken\(secret\)/)
     // The secret must never be written next to the hash.
     expect(endpoint).not.toMatch(/secret,\s*\n\s*hash:/)
@@ -427,14 +420,9 @@ describe('rejectionStatus — the one refusal-to-status map (0.2.0 review)', () 
   })
 })
 
-describe('role resolution records WHO AUTHENTICATED (#28)', () => {
-  test('a human caller gets principal.uid from the verified ID token', () => {
-    expect(utilitiesTs).toMatch(/principal: \{\s*uid: user\.uid/)
-  })
-  test('a token caller gets principal.uid from the token record\'s owner', () => {
-    expect(utilitiesTs).toMatch(/principal: \{\s*uid: record\.principalUid,[\s\S]*?record\.principalName/)
-  })
-})
+// role resolution records WHO AUTHENTICATED (#28): behaviour tests in
+// principal.test.ts ("the principal is WHO AUTHENTICATED…" and "the principal is
+// the token's OWNER…"), since 2026-10-22.
 
 describe('/claim never names a role document after an email (0.2.1 re-review)', () => {
   test('the claimer\'s new role document is named from the display name, not user.email', () => {

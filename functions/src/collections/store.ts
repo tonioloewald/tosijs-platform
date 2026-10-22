@@ -83,14 +83,38 @@ export interface Store {
   /**
    * List documents in a collection.
    *
-   * DECLARED BUT NOT YET WIRED — `docs.ts` still queries Firestore directly. It
-   * is here because the port is only honest if it describes the whole surface,
-   * and because the read path's filter-before-limit behaviour (D7) constrains
-   * the shape: the store returns rows, the endpoint filters them, so `limit` is
-   * applied by the CALLER after access filtering, not pushed down. Wiring
-   * `docs.ts` is the remaining half of #7.
+   * Wired for the principal resolver (`principal.ts`, 2026-10-22); `docs.ts`
+   * still queries Firestore directly, and wiring it is the remaining half of
+   * #7. The read path's filter-before-limit behaviour (D7) constrains the
+   * shape: the store returns rows, the endpoint filters them, so for an
+   * access-filtered list `limit` is applied by the CALLER after filtering, not
+   * pushed down. `equals` and `arrayContains` compare objects by content, as
+   * Firestore does.
    */
   query(collection: string, options?: QueryOptions): Promise<StoredDoc[]>
+}
+
+/**
+ * Equality as Firestore's `==` and `array-contains` define it: objects by
+ * CONTENT, regardless of key order. `===` compared them by reference, so an
+ * array-contains on an object (the role lookup by `{type, value}` contact)
+ * could never match in MemoryStore while matching in production — the kind of
+ * substrate drift the conformance suite exists to catch.
+ */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
+    return false
+  }
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  const ka = Object.keys(a as object)
+  const kb = Object.keys(b as object)
+  return (
+    ka.length === kb.length &&
+    ka.every((k) =>
+      sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])
+    )
+  )
 }
 
 const clone = <T>(v: T): T =>
@@ -194,13 +218,13 @@ export class MemoryStore implements Store {
 
     if (options.equals) {
       const { field, value } = options.equals
-      rows = rows.filter((r) => r.data[field] === value)
+      rows = rows.filter((r) => sameValue(r.data[field], value))
     }
     if (options.arrayContains) {
       const { field, value } = options.arrayContains
       rows = rows.filter((r) => {
         const held = r.data[field]
-        return Array.isArray(held) && held.includes(value)
+        return Array.isArray(held) && held.some((h) => sameValue(h, value))
       })
     }
 

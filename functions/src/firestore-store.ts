@@ -109,15 +109,48 @@ export class FirestoreStore implements Store {
   }
 
   async query(
-    _collection: string,
-    _options: QueryOptions = {}
+    collection: string,
+    options: QueryOptions = {}
   ): Promise<StoredDoc[]> {
-    // NOT WIRED — `docs.ts` still queries Firestore directly, including its
-    // filter-before-limit scan (D7). Throwing is deliberate: a silently empty
-    // result would look like "no documents" and be far harder to notice than a
-    // loud failure. Implementing this is the remaining half of #7.
-    throw new Error(
-      'FirestoreStore.query is not implemented yet — docs.ts still queries directly'
-    )
+    return firestoreQuery(collection, options)
   }
+}
+
+/**
+ * `Store.query` against Firestore, with exactly the query shape `getRecords`
+ * (`utilities.ts`) issues: one optional `where`, then `orderBy` (default
+ * `_created desc`, `~` for none), then `limit`. Kept identical on purpose — an
+ * `array-contains` or `==` combined with an order on another field needs a
+ * COMPOSITE INDEX, and the ones production has (`firestore.indexes.json`:
+ * role.userIds, role.contacts, token.hash, each with `_created desc`) are
+ * exactly this shape. A different shape would 500 on a fresh host, and the
+ * emulator would not notice (indexes.test.ts).
+ *
+ * Used by the principal resolver (`collections/principal.ts`) today; `docs.ts`
+ * still queries directly (the remaining half of #7) and moves here next.
+ */
+export async function firestoreQuery(
+  collection: string,
+  options: QueryOptions = {}
+): Promise<StoredDoc[]> {
+  let ref: FirebaseFirestore.Query = admin
+    .firestore()
+    .collection(physicalPath(collection))
+  if (options.equals) {
+    ref = ref.where(options.equals.field, '==', options.equals.value)
+  }
+  if (options.arrayContains) {
+    ref = ref.where(options.arrayContains.field, 'array-contains', options.arrayContains.value)
+  }
+  const [field, direction] = (options.orderBy ?? '_created desc').split(' ')
+  if (field !== '~') {
+    ref = ref.orderBy(field, direction === 'desc' ? 'desc' : 'asc')
+  }
+  if (options.limit) ref = ref.limit(options.limit)
+  const snapshot = await ref.get()
+  return snapshot.docs.map((d) => ({
+    path: `${collection}/${d.id}`,
+    exists: true,
+    data: d.data() as Record<string, unknown>,
+  }))
 }
