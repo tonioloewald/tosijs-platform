@@ -38,14 +38,25 @@ export interface StoredDoc {
 }
 
 export interface QueryOptions {
-  /** Max rows to return AFTER any caller-side filtering. */
+  /** Max rows to return. */
   limit?: number
-  /** `field desc` / `field asc`; `~` means "do not order". */
+  /**
+   * `field desc` / `field asc`, default `_created desc`; `~` means "no explicit
+   * order", which is document-id order. Ordering by a field EXCLUDES documents
+   * that lack it, and ties fall back to document id — both as Firestore does.
+   */
   orderBy?: string
   /** Restrict to documents whose `field` array contains `value`. */
   arrayContains?: { field: string; value: unknown }
-  /** Restrict to documents where `field === value`. */
+  /** Restrict to documents where `field` equals `value`. */
   equals?: { field: string; value: unknown }
+  /** Restrict to documents whose `field` is strictly greater (the `_seq` cursor). */
+  greaterThan?: { field: string; value: number | string }
+  /**
+   * Return only these fields. A pushdown, so a caller that must FILTER on other
+   * fields fetches whole documents and projects afterwards (D7, docs.ts).
+   */
+  fields?: string[]
 }
 
 export interface Store {
@@ -92,6 +103,18 @@ export interface Store {
    * Firestore does.
    */
   query(collection: string, options?: QueryOptions): Promise<StoredDoc[]>
+
+  /**
+   * The same query, in pages of `pageSize`, until the collection is exhausted
+   * or the consumer stops. Paging is the adapter's business (Firestore
+   * `startAfter`, SQL keyset); deciding how many pages to read — the
+   * filter-before-limit loop and its scan bound (D7) — is the caller's.
+   */
+  scan(
+    collection: string,
+    options: Omit<QueryOptions, 'limit'>,
+    pageSize: number
+  ): AsyncIterable<StoredDoc[]>
 }
 
 /**
@@ -115,6 +138,23 @@ function sameValue(a: unknown, b: unknown): boolean {
       sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])
     )
   )
+}
+
+/**
+ * Firestore's cross-type order, as far as JSON values go: null < boolean <
+ * number < string < array < object. Within a type, numbers numerically and
+ * strings by code unit (Firestore compares UTF-8 bytes, NOT locale order).
+ */
+function compareValues(a: unknown, b: unknown): number {
+  const rank = (v: unknown) =>
+    v === null ? 0 : typeof v === 'boolean' ? 1 : typeof v === 'number' ? 2
+      : typeof v === 'string' ? 3 : Array.isArray(v) ? 4 : 5
+  const ra = rank(a)
+  const rb = rank(b)
+  if (ra !== rb) return ra - rb
+  if (ra === 2 || ra === 1) return Number(a) - Number(b)
+  if (ra === 3) return a === b ? 0 : (a as string) < (b as string) ? -1 : 1
+  return 0
 }
 
 const clone = <T>(v: T): T =>
@@ -227,18 +267,51 @@ export class MemoryStore implements Store {
         return Array.isArray(held) && held.some((h) => sameValue(h, value))
       })
     }
-
-    const order = options.orderBy ?? '_created desc'
-    const [field, direction] = order.split(' ')
-    if (field !== '~') {
-      const sign = direction === 'desc' ? -1 : 1
-      rows.sort(
-        (a, b) =>
-          sign * String(a.data[field] ?? '').localeCompare(String(b.data[field] ?? ''))
+    if (options.greaterThan) {
+      const { field, value } = options.greaterThan
+      rows = rows.filter(
+        (r) =>
+          typeof r.data[field] === typeof value &&
+          compareValues(r.data[field], value) > 0
       )
     }
 
-    return options.limit ? rows.slice(0, options.limit) : rows
+    const byId = (a: StoredDoc, b: StoredDoc) => compareValues(a.path, b.path)
+    const order = options.orderBy ?? '_created desc'
+    const [field, direction] = order.split(' ')
+    if (field === '~') {
+      rows.sort(byId)
+    } else {
+      const sign = direction === 'desc' ? -1 : 1
+      rows = rows.filter((r) => r.data[field] !== undefined)
+      rows.sort(
+        (a, b) =>
+          sign * (compareValues(a.data[field], b.data[field]) || byId(a, b))
+      )
+    }
+
+    if (options.limit) rows = rows.slice(0, options.limit)
+    if (options.fields) {
+      const keep = options.fields
+      rows = rows.map((r) => ({
+        ...r,
+        data: Object.fromEntries(
+          keep.filter((f) => f in r.data).map((f) => [f, r.data[f]])
+        ),
+      }))
+    }
+    return rows
+  }
+
+  async* scan(
+    collection: string,
+    options: Omit<QueryOptions, 'limit'>,
+    pageSize: number
+  ): AsyncIterable<StoredDoc[]> {
+    const all = await this.query(collection, options)
+    for (let i = 0; i < all.length; i += pageSize) {
+      yield all.slice(i, i + pageSize)
+    }
   }
 
   /** Test affordance: every stored path, for assertions. */

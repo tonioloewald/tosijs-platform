@@ -228,6 +228,35 @@ describe('MemoryStore implements the same contract as the Firestore adapter', ()
     expect(await ids({ equals: { field: 'meta', value: { b: [2], a: 1 } } })).toEqual(['role/r'])
   })
 
+  test('query orders as Firestore does', async () => {
+    // localeCompare on String() put 10 before 9, and kept documents lacking the
+    // order field; Firestore orders numbers numerically, strings by code unit,
+    // EXCLUDES documents without the field, and breaks ties by document id.
+    const store = new MemoryStore({
+      'n/b': { k: 10 },
+      'n/a': { k: 9 },
+      'n/c': { k: 10 },
+      'n/d': {},
+      'n/e': { k: 'Z' },
+      'n/f': { k: 'a' },
+    })
+    const ids = async (orderBy: string, extra = {}) =>
+      (await store.query('n', { orderBy, ...extra })).map((d) => d.path.slice(2))
+    expect(await ids('k asc')).toEqual(['a', 'b', 'c', 'e', 'f'])
+    expect(await ids('k desc')).toEqual(['f', 'e', 'c', 'b', 'a'])
+    expect(await ids('~')).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect(await ids('k asc', { greaterThan: { field: 'k', value: 9 } })).toEqual(['b', 'c'])
+    expect(await ids('~', { fields: ['k'], limit: 2 })).toEqual(['a', 'b'])
+    expect((await store.query('n', { orderBy: '~', fields: ['k'], limit: 1 }))[0].data).toEqual({ k: 9 })
+  })
+
+  test('scan pages through the same query', async () => {
+    const store = new MemoryStore({ 'n/a': {}, 'n/b': {}, 'n/c': {} })
+    const pages: string[][] = []
+    for await (const page of store.scan('n', { orderBy: '~' }, 2)) pages.push(page.map((d) => d.path))
+    expect(pages).toEqual([['n/a', 'n/b'], ['n/c']])
+  })
+
   test('stored documents are cloned, so callers cannot mutate the store', async () => {
     // A failure mode a real store does not have and a naive fake does.
     const store = new MemoryStore({ 'post/a': { tags: ['x'] } })

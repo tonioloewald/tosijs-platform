@@ -11,6 +11,9 @@
  * arithmetic, and the projection ordering. The end-to-end behaviour is covered
  * by the integration suite.
  *
+ * Since 2026-10-22 the REAL loop (`collections/list.ts`) runs against
+ * MemoryStore in list.test.ts; this copy stays as the record of the bug.
+ *
  * Run: cd functions && bun test src/collections/filter-before-limit.test.ts
  */
 import { describe, test, expect } from 'bun:test'

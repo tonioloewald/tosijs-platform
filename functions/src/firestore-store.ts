@@ -48,10 +48,14 @@ export class FirestoreStore implements Store {
     if (!('id' in ref) || !('set' in ref)) {
       return new Error(`invalid path for document ${path}`)
     }
-    // Canonicalize: getRef has already turned `field=value` into a concrete
-    // document, so rebuild the path from the resolved id.
-    const collection = parts.filter((_, i) => i % 2 === 0).join('/')
-    return `${collection}/${(ref as DocRef).id}`
+    // Canonicalize: getRef has already turned every `field=value` into a
+    // concrete document, so its own path IS the canonical one. This used to
+    // rebuild the path from the even segments plus the id, which is the LOGICAL
+    // collection path: right for `post/xyz`, wrong for a sub-collection
+    // document (`post/abc/comment/c1` became `post/comment/c1`, which is not a
+    // Firestore path at all). Latent, since no host has sub-collections yet;
+    // found porting /docs (2026-10-22). Physical == logical today (namespace.ts).
+    return (ref as DocRef).path
   }
 
   private ref(path: string): DocRef {
@@ -114,6 +118,14 @@ export class FirestoreStore implements Store {
   ): Promise<StoredDoc[]> {
     return firestoreQuery(collection, options)
   }
+
+  scan(
+    collection: string,
+    options: Omit<QueryOptions, 'limit'>,
+    pageSize: number
+  ): AsyncIterable<StoredDoc[]> {
+    return firestoreScan(collection, options, pageSize)
+  }
 }
 
 /**
@@ -129,10 +141,10 @@ export class FirestoreStore implements Store {
  * Used by the principal resolver (`collections/principal.ts`) today; `docs.ts`
  * still queries directly (the remaining half of #7) and moves here next.
  */
-export async function firestoreQuery(
+function buildQuery(
   collection: string,
-  options: QueryOptions = {}
-): Promise<StoredDoc[]> {
+  options: QueryOptions
+): FirebaseFirestore.Query {
   let ref: FirebaseFirestore.Query = admin
     .firestore()
     .collection(physicalPath(collection))
@@ -142,15 +154,47 @@ export async function firestoreQuery(
   if (options.arrayContains) {
     ref = ref.where(options.arrayContains.field, 'array-contains', options.arrayContains.value)
   }
+  if (options.greaterThan) {
+    ref = ref.where(options.greaterThan.field, '>', options.greaterThan.value)
+  }
   const [field, direction] = (options.orderBy ?? '_created desc').split(' ')
   if (field !== '~') {
     ref = ref.orderBy(field, direction === 'desc' ? 'desc' : 'asc')
   }
+  if (options.fields) ref = ref.select(...options.fields)
+  return ref
+}
+
+const toStored = (collection: string) => (d: FirebaseFirestore.QueryDocumentSnapshot): StoredDoc => ({
+  path: `${collection}/${d.id}`,
+  exists: true,
+  data: d.data() as Record<string, unknown>,
+})
+
+export async function firestoreQuery(
+  collection: string,
+  options: QueryOptions = {}
+): Promise<StoredDoc[]> {
+  let ref = buildQuery(collection, options)
   if (options.limit) ref = ref.limit(options.limit)
   const snapshot = await ref.get()
-  return snapshot.docs.map((d) => ({
-    path: `${collection}/${d.id}`,
-    exists: true,
-    data: d.data() as Record<string, unknown>,
-  }))
+  return snapshot.docs.map(toStored(collection))
+}
+
+/** `Store.scan` against Firestore: pages chained by `startAfter` the last document. */
+export async function* firestoreScan(
+  collection: string,
+  options: Omit<QueryOptions, 'limit'>,
+  pageSize: number
+): AsyncIterable<StoredDoc[]> {
+  const base = buildQuery(collection, options)
+  let cursor: FirebaseFirestore.QueryDocumentSnapshot | undefined
+  for (;;) {
+    const page = cursor ? base.startAfter(cursor).limit(pageSize) : base.limit(pageSize)
+    const snapshot = await page.get()
+    if (snapshot.empty) return
+    cursor = snapshot.docs[snapshot.docs.length - 1]
+    yield snapshot.docs.map(toStored(collection))
+    if (snapshot.size < pageSize) return
+  }
 }

@@ -229,7 +229,10 @@ describe('CROSS-ARCHITECTURE: same data, same behaviour, any substrate', () => {
   /** A source that reads configs out of a document store, like Firestore would. */
   const storeBackedSource = (store: MemoryStore): ConfigSource => ({
     load: async () => {
-      const rows = await store.query('collection')
+      // No order, like InstalledConfigSource's query. The default
+      // (`_created desc`) would EXCLUDE every config, which has no `_created` —
+      // as Firestore does, and as MemoryStore now does too (2026-10-22).
+      const rows = await store.query('collection', { orderBy: '~' })
       return rows.map((r) => r.data as unknown as StoredCollectionConfig)
     },
   })

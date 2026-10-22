@@ -216,7 +216,7 @@ const isUnique = async (
 }
 
 /**
- * The substrate the endpoint's MUTATIONS go through (tosijs-platform#7).
+ * The substrate `/doc` (mutations) and `/docs` (lists) go through (tosijs-platform#7).
  *
  * `getRef`/`isUnique` are injected rather than imported by the store, which
  * keeps the dependency acyclic and — more importantly — means the ported code
@@ -229,7 +229,7 @@ const isUnique = async (
  * key against the platform map, which has no entry for it, and reject every
  * such path as "not an allowed key".
  */
-const storeFor = (collections: CollectionMap) =>
+export const storeFor = (collections: CollectionMap) =>
   new FirestoreStore({
     getRef: (path, isCollection) => getRef(path, isCollection, collections),
     isUnique: (path, field, value, existing) =>
