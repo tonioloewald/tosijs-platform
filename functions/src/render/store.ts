@@ -16,6 +16,10 @@
  * every value misses and recomputes on its next read.
  */
 import * as admin from 'firebase-admin'
+// Modular imports, not `admin.firestore.FieldValue`: the functions emulator
+// wraps the `admin.firestore` namespace WITHOUT its static members, so the
+// namespace form threw there (found 2026-10-22) while working in production.
+import { FieldValue, Timestamp } from 'firebase-admin/firestore'
 import * as functions from 'firebase-functions'
 import type { Response } from 'express'
 import { getDoc } from '../doc'
@@ -101,8 +105,8 @@ export const firestoreBackend: ComputedBackend = {
       } else {
         const [s, n] = expected.split('.').map(Number)
         await ref.update(
-          { ...full, stale: admin.firestore.FieldValue.delete() },
-          { lastUpdateTime: new admin.firestore.Timestamp(s, n) }
+          { ...full, stale: FieldValue.delete() },
+          { lastUpdateTime: new Timestamp(s, n) }
         )
       }
       return true
@@ -141,7 +145,7 @@ export const firestoreBackend: ComputedBackend = {
     // Chunked, never truncated: an unlogged dep would reopen the first-fill race.
     for (let i = 0; i < deps.length; i += 450) {
       const batch = admin.firestore().batch()
-      for (const dep of deps.slice(i, i + 450)) batch.set(logRef(dep), { dep, at: admin.firestore.FieldValue.serverTimestamp() })
+      for (const dep of deps.slice(i, i + 450)) batch.set(logRef(dep), { dep, at: FieldValue.serverTimestamp() })
       await batch.commit()
     }
   },
@@ -149,7 +153,7 @@ export const firestoreBackend: ComputedBackend = {
     if (!deps.length) return false
     const snaps = await admin.firestore().getAll(...deps.map(logRef))
     return snaps.some((s) => {
-      const at = s.exists ? (s.data()?.at as admin.firestore.Timestamp | undefined) : undefined
+      const at = s.exists ? (s.data()?.at as Timestamp | undefined) : undefined
       return Boolean(at && at.toMillis() >= sinceMs)
     })
   },

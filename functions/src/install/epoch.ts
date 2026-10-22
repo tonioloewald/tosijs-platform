@@ -30,6 +30,10 @@
  */
 
 import * as admin from 'firebase-admin'
+// Modular imports, not `admin.firestore.FieldValue`: the functions emulator
+// wraps the `admin.firestore` namespace WITHOUT its static members, so the
+// namespace form threw there (found 2026-10-22) while working in production.
+import { FieldValue } from 'firebase-admin/firestore'
 
 export const EPOCH_PATH = { collection: 'system:registry', doc: 'epoch' }
 
@@ -41,7 +45,7 @@ const bumpValue = () => ({
   // millisecond would produce the same timestamp, and an instance that had
   // already seen that value would skip the reload. `FieldValue.increment` is
   // atomic server-side, so concurrent installs cannot lose a bump either.
-  value: admin.firestore.FieldValue.increment(1),
+  value: FieldValue.increment(1),
   at: new Date().toJSON(),
 })
 
