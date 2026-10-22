@@ -59,6 +59,21 @@ export interface QueryOptions {
   fields?: string[]
 }
 
+/**
+ * One transaction's view of the store.
+ *
+ * Every READ must precede every WRITE (Firestore's rule, and the shape the
+ * commit already has). Writes are buffered and land together or not at all; a
+ * throw inside the transaction discards them. Reads see committed state, not
+ * this transaction's own pending writes.
+ */
+export interface Tx {
+  get(path: string): Promise<StoredDoc>
+  query(collection: string, options?: QueryOptions): Promise<StoredDoc[]>
+  /** `merge` updates the named fields and keeps the rest. */
+  set(path: string, data: Record<string, unknown>, options?: { merge?: boolean }): void
+}
+
 export interface Store {
   /**
    * Turn a request path into a canonical `collection/id`.
@@ -115,6 +130,14 @@ export interface Store {
     options: Omit<QueryOptions, 'limit'>,
     pageSize: number
   ): AsyncIterable<StoredDoc[]>
+
+  /**
+   * Run `fn` atomically. The body MUST be retry-safe: Firestore re-runs it on
+   * contention, and a SQL store re-runs it on a serialization failure — so no
+   * side effects inside it (SOVEREIGN-PLAN.md §3, invariant 3). Side effects go
+   * after it returns.
+   */
+  transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T>
 }
 
 /**
@@ -301,6 +324,43 @@ export class MemoryStore implements Store {
       }))
     }
     return rows
+  }
+
+  /**
+   * Transactions run ONE AT A TIME, which is the strongest isolation there is
+   * and what SQLite gives a single box: two concurrent creates of one id cannot
+   * both see "missing" (#1184). Writes are buffered and applied only when the
+   * body returns.
+   */
+  private queue: Promise<unknown> = Promise.resolve()
+
+  transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const run = async (): Promise<T> => {
+      const pending: Array<[string, Record<string, unknown>, boolean]> = []
+      let writing = false
+      const tx: Tx = {
+        get: async (path) => {
+          if (writing) throw new Error('transaction read after a write')
+          return this.get(path)
+        },
+        query: async (collection, options) => {
+          if (writing) throw new Error('transaction read after a write')
+          return this.query(collection, options)
+        },
+        set: (path, data, options) => {
+          writing = true
+          pending.push([path, clone(data), options?.merge === true])
+        },
+      }
+      const result = await fn(tx)
+      for (const [path, data, merge] of pending) {
+        this.docs.set(path, merge ? { ...(this.docs.get(path) ?? {}), ...data } : data)
+      }
+      return result
+    }
+    const next = this.queue.then(run, run)
+    this.queue = next.catch(() => undefined)
+    return next
   }
 
   async* scan(

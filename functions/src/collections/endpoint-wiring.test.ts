@@ -401,8 +401,12 @@ describe('rejectionStatus — the one refusal-to-status map (0.2.0 review)', () 
 
   test('a transactional commit runs afterWrite after the transaction, like /doc', () => {
     // A post committed through a batch otherwise left the blog cache stale.
+    // Behaviour: commit.test.ts ("afterWrite runs AFTER the commit"). Here:
+    // the Firestore binding is the kernel commit, and /docs calls it.
     const commitTs = src('commit.ts')
-    const afterTx = commitTs.slice(commitTs.indexOf('await db.runTransaction'))
+    expect(commitTs).toMatch(/return commitWrites\(firestoreStore, writes, collections, userRoles,/)
+    const kernel = src('collections/commit.ts')
+    const afterTx = kernel.slice(kernel.indexOf('await store.transaction'))
     // Since D23 the change (before/after) is passed too, for render on store.
     expect(afterTx).toMatch(/results\.committed[\s\S]*config\.afterWrite\(data, userRoles, \{ path: w\.p, before, after: data \}\)/)
     expect(docsTs).toContain('commitTransactionally(writes, collections, userRoles)')

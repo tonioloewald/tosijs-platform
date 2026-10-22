@@ -132,11 +132,19 @@ describe('uniqueness WITHIN one batch (0.2.0 re-review, M1)', () => {
   })
 
   test('the transactional commit refuses the repeat inside the transaction — nothing is written', async () => {
-    const { readFileSync } = await import('fs')
-    const { join } = await import('path')
-    const docs = readFileSync(join(__dirname, '..', 'commit.ts'), 'utf8')
-    const phase1 = docs.slice(docs.indexOf('PHASE 1'), docs.indexOf('PHASE 2'))
-    expect(phase1).toContain('new BatchUniqueClaims()')
-    expect(phase1).toMatch(/claims\.claim\([\s\S]*?reason: 'unique'/)
+    // By behaviour since 2026-10-22: the real commit over MemoryStore.
+    const { MemoryStore } = await import('./store')
+    const { commitWrites } = await import('./commit')
+    const { ROLES } = await import('./roles')
+    const { ALL } = await import('./access')
+    const store = new MemoryStore()
+    const outcome = await commitWrites(
+      store,
+      [{ p: 'm/a', data: { n: 'same' } }, { p: 'm/b', data: { n: 'same' } }],
+      { m: { unique: ['n'], access: { [ROLES.admin]: { read: ALL, write: ALL } } } } as never,
+      { name: 't', contacts: [], roles: [ROLES.admin], userIds: ['u'] } as never
+    )
+    expect(outcome).toMatchObject({ status: 'refused', refusal: { p: 'm/b', reason: 'unique' } })
+    expect(store.paths()).toEqual([])
   })
 })

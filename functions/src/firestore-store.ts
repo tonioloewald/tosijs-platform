@@ -21,7 +21,7 @@
  */
 import * as admin from 'firebase-admin'
 
-import type { Store, StoredDoc, QueryOptions } from './collections/store'
+import type { Store, StoredDoc, QueryOptions, Tx } from './collections/store'
 import { physicalPath } from './collections/namespace'
 
 type DocRef = FirebaseFirestore.DocumentReference
@@ -126,6 +126,10 @@ export class FirestoreStore implements Store {
   ): AsyncIterable<StoredDoc[]> {
     return firestoreScan(collection, options, pageSize)
   }
+
+  transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+    return firestoreTransaction(fn)
+  }
 }
 
 /**
@@ -197,4 +201,43 @@ export async function* firestoreScan(
     yield snapshot.docs.map(toStored(collection))
     if (snapshot.size < pageSize) return
   }
+}
+
+const docRef = (path: string): DocRef => admin.firestore().doc(physicalPath(path))
+
+/**
+ * `Store.transaction` against Firestore: `runTransaction`, which retries the
+ * body on contention — hence the port's retry-safe rule.
+ */
+export function firestoreTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+  return admin.firestore().runTransaction(async (t) => {
+    const tx: Tx = {
+      get: async (path) => {
+        const snapshot = await t.get(docRef(path))
+        return {
+          path,
+          exists: snapshot.exists,
+          data: (snapshot.data() ?? {}) as Record<string, unknown>,
+        }
+      },
+      query: async (collection, options = {}) => {
+        let ref = buildQuery(collection, options)
+        if (options.limit) ref = ref.limit(options.limit)
+        const snapshot = await t.get(ref)
+        return snapshot.docs.map(toStored(collection))
+      },
+      set: (path, data, options) => {
+        if (options?.merge) t.set(docRef(path), data, { merge: true })
+        else t.set(docRef(path), data)
+      },
+    }
+    return fn(tx)
+  })
+}
+
+/** Firestore for kernel code that needs no `field=value` path resolution (that needs the per-request collection map; see `storeFor` in doc.ts). */
+export const firestoreStore: Pick<Store, 'query' | 'scan' | 'transaction'> = {
+  query: firestoreQuery,
+  scan: firestoreScan,
+  transaction: firestoreTransaction,
 }
