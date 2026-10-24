@@ -20,6 +20,7 @@
  * point `doc.ts` stops needing them directly.
  */
 import * as admin from 'firebase-admin'
+import { FieldPath } from 'firebase-admin/firestore'
 
 import type { Store, StoredDoc, QueryOptions, Tx } from './collections/store'
 import { physicalPath } from './collections/namespace'
@@ -227,8 +228,13 @@ export function firestoreTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> 
         return snapshot.docs.map(toStored(collection))
       },
       set: (path, data, options) => {
-        if (options?.merge) t.set(docRef(path), data, { merge: true })
-        else t.set(docRef(path), data)
+        // `mergeFields`, not `merge: true`: the port replaces each named
+        // top-level field WHOLE (as `update` does, and as MemoryStore does);
+        // `merge: true` would deep-merge a map field instead. FieldPath, so a
+        // key containing `.` names one field, not a nested path.
+        if (options?.merge) {
+          t.set(docRef(path), data, { mergeFields: Object.keys(data).map((k) => new FieldPath(k)) })
+        } else t.set(docRef(path), data)
       },
     }
     return fn(tx)

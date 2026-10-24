@@ -59,8 +59,9 @@ import {
   type Manifest,
   type CapabilityDeclaration,
 } from './manifest'
-import { bumpEpochIn } from './epoch'
-import { sameManifest, ManifestConflict } from './manifest-identity'
+import { ManifestConflict } from './manifest-identity'
+import { commitInstall, updateProposalIf } from './install-store'
+import { firestoreStore } from '../firestore-store'
 import { fail, noStore } from '../errors'
 
 const MANIFESTS = 'manifest'
@@ -89,47 +90,9 @@ const readManifest = async (
   return snapshot.exists ? (snapshot.data() as Manifest) : null
 }
 
-/**
- * Commit the decided records, plus the epoch bump, atomically.
- *
- * ## A version's CONTENT is immutable
- *
- * Manifests are append-only, so a version already on file is never rewritten.
- * But re-submitting one is normal: approving a parked upgrade means POSTing the
- * same manifest again with `approving` set. So the rule is not "you may only
- * send a version once", it is "a version always means the same thing":
- *
- *   - not on file  → written
- *   - on file, identical → nothing to write, proceed
- *   - on file, DIFFERENT → refused, 409
- *
- * That last case is the one worth having. Without it, a library could be
- * reviewed at 1.2.0, parked pending approval, and then have 1.2.0's collections
- * and access rules swapped before the human clicks approve — so what takes
- * effect is not what was read. `approving` already pins the capabilities; this
- * pins everything else.
- */
-async function commit(records: InstallRecords): Promise<void> {
-  const batch = db().batch()
-  if (records.manifest) {
-    const ref = db().collection(MANIFESTS).doc(records.manifest.id)
-    const existing = await ref.get()
-    if (!existing.exists) {
-      // `create`, not `set` — so a concurrent install of the same version
-      // loses the race loudly instead of silently overwriting.
-      batch.create(ref, records.manifest.data)
-    } else if (!sameManifest(existing.data(), records.manifest.data)) {
-      throw new ManifestConflict(
-        `${records.manifest.id} is already on file with different content — ` +
-          `a published version may not change. Publish a new version.`
-      )
-    }
-  }
-  batch.set(db().collection(GRANTS).doc(records.grant.id), records.grant.data)
-  batch.set(db().collection(LOG).doc(records.log.id), records.log.data)
-  bumpEpochIn(batch)
-  await batch.commit()
-}
+/** The records, the manifest check and the epoch bump, in one transaction (install-store.ts). */
+const commit = (records: InstallRecords): Promise<void> =>
+  commitInstall(firestoreStore, records, new Date().toJSON())
 
 /** Only present when there is something to say, so existing responses are unchanged. */
 const superseded = (m: Manifest) => {
@@ -260,12 +223,7 @@ const proposalStore = (): ProposalStore => ({
   },
   async updateIf(id, allow, change) {
     if (!VALID_ID.test(id)) return false
-    return db().runTransaction(async (tx) => {
-      const snap = await tx.get(proposals().doc(id))
-      if (!allow(snap.exists ? (snap.data() as Proposal) : null)) return false
-      tx.update(snap.ref, change)
-      return true
-    })
+    return updateProposalIf(firestoreStore, `${PROPOSALS}/${id}`, allow, change)
   },
 })
 

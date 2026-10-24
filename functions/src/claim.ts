@@ -11,7 +11,9 @@ datastore, which per D3 already outranks anything this system can enforce, so
 it is the strongest claim available to bootstrap from — and nothing secret is
 ever published.
 
-This file is the plumbing. Every decision lives in `decideClaim`.
+This file is the plumbing. Every decision lives in `decideClaim`; the
+transactions that apply it live in `install/claim-ceremony.ts`, over the store
+port.
 
 ## Two things here that are not in the pure logic
 
@@ -40,63 +42,25 @@ import { randomUUID } from 'crypto'
 
 import { optionsResponse, getUser, AuthenticatedRequest } from './utilities'
 import { Response } from 'express'
-import {
-  decideClaim,
-  rotatedState,
-  hasBeenClaimed,
-  NONCE_TTL_MS,
-  type ClaimState,
-} from './install/claim'
+import { NONCE_TTL_MS } from './install/claim'
+import { claimConfigurator, publishNonce } from './install/claim-ceremony'
+import { firestoreStore } from './firestore-store'
 import { ROLES } from './collections/roles'
-import { credentialName, lookupEmail } from './collections/join-roles'
 import { claimPage } from './claim-page'
 import { fail, noStore } from './errors'
 
-/** `system:claim/current`, split. Not a registered collection — see epoch.ts. */
+/**
+ * `system:claim/current` (`CLAIM_PATH`), split for the instructions below. Not
+ * a registered collection — see epoch.ts.
+ */
 const CLAIM = { collection: 'system:claim', doc: 'current' }
 /** The field the claimant writes the nonce into, by hand, in the datastore. */
 const PROOF_FIELD = 'proof'
 
-const claimRef = () =>
-  admin.firestore().collection(CLAIM.collection).doc(CLAIM.doc)
-
-const isFresh = (state: ClaimState | null, now: number): boolean => {
-  if (!state?.nonce || !state.issuedAt) return false
-  const issued = Date.parse(state.issuedAt)
-  return Number.isFinite(issued) && now - issued <= NONCE_TTL_MS
-}
-
-/**
- * Publish a nonce, minting one only if there isn't a fresh one.
- *
- * Deliberately NOT "mint on every GET". An unauthenticated caller can hit this
- * endpoint freely, and a fresh nonce on every request means an attacker can
- * rotate the nonce out from under a legitimate claimant between the moment they
- * read it and the moment they finish writing it into the console — turning an
- * open read into a denial of the ceremony. Reusing a live nonce costs nothing,
- * because the nonce is public and proves nothing on its own.
- */
-async function publishNonce(): Promise<ClaimState> {
-  const now = Date.now()
-  return admin.firestore().runTransaction(async (tx) => {
-    const snapshot = await tx.get(claimRef())
-    const state = (snapshot.data() ?? null) as ClaimState | null
-    if (isFresh(state, now)) return state as ClaimState
-
-    const next: ClaimState = {
-      ...(state ?? {}),
-      nonce: randomUUID(),
-      issuedAt: new Date(now).toJSON(),
-    }
-    // A re-mint clears any stale proof. Otherwise a proof written against the
-    // PREVIOUS nonce would sit there, and if a nonce ever repeated it would
-    // match — a replay this ceremony has no other defence against.
-    delete next.proof
-    // …and any binding written with it: `for` belongs to one arming.
-    delete next.for
-    tx.set(claimRef(), next)
-    return next
-  })
+/** The Firebase binding of the ceremony's dependencies. */
+const ceremonyDeps = {
+  nonce: randomUUID,
+  newId: (collection: string) => admin.firestore().collection(collection).doc().id,
 }
 
 export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
@@ -122,7 +86,7 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
 
   if (req.method === 'GET') {
     try {
-      const state = await publishNonce()
+      const state = await publishNonce(firestoreStore, ceremonyDeps)
       response.json({
         nonce: state.nonce,
         expiresAt: new Date(
@@ -157,85 +121,7 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
   }
 
   try {
-    const outcome = await admin.firestore().runTransaction(async (tx) => {
-      // All reads before any write — a Firestore transaction rule, and the
-      // reason the role lookup happens up here rather than next to the grant.
-      const snapshot = await tx.get(claimRef())
-      const state = (snapshot.data() ?? null) as ClaimState | null
-      const existingRoles = await tx.get(
-        admin
-          .firestore()
-          .collection('role')
-          .where('userIds', 'array-contains', user.uid)
-          .limit(1)
-      )
-
-      const decision = decideClaim({
-        state,
-        principal: user.uid,
-        // VERIFIED email only (lookupEmail): an unverified one is a claim, not
-        // an identity, and `for` is authority.
-        principalEmail: lookupEmail(user) ?? null,
-        now: Date.now(),
-      })
-      if (decision.status === 'refused') return decision
-
-      const nowIso = new Date().toJSON()
-      const reclaim = hasBeenClaimed(state)
-
-      // Grant `configurator` on the caller's existing role document, or make
-      // one. Written directly with admin credentials, NOT through /doc: `role`
-      // is owner-only (D4), and this is a privileged internal write of the same
-      // kind `getUserRoles` already performs.
-      const roleDoc = existingRoles.docs[0]
-      if (roleDoc) {
-        const roles = (roleDoc.data().roles ?? []) as string[]
-        if (!roles.includes(ROLES.configurator)) {
-          tx.update(roleDoc.ref, {
-            roles: [...roles, ROLES.configurator],
-            _modified: nowIso,
-          })
-        }
-      } else {
-        // A contact is authority (role lookup matches on it), so only a
-        // VERIFIED email may be recorded as one — the same rule as M1. The
-        // grant itself rides on the uid either way.
-        const contactEmail = lookupEmail(user)
-        tx.set(admin.firestore().collection('role').doc(), {
-          // Never the email: a role document's name is what "curated when
-          // owned" publishes as `_by.name` (0.2.1 re-review). The display name
-          // if there is one; otherwise a neutral label an operator can edit.
-          // Role names are UNIQUE, so the fallback carries a uid prefix (the
-          // uid is already public in `_by.uid`); a constant would collide on a
-          // second claimer and block edits to both documents.
-          name: credentialName(user) ?? `Host owner ${user.uid.slice(0, 8)}`,
-          contacts: contactEmail
-            ? [{ type: 'email', value: contactEmail }]
-            : [],
-          roles: [ROLES.configurator],
-          userIds: [user.uid],
-          _created: nowIso,
-          _modified: nowIso,
-        })
-      }
-
-      // Rotate in the SAME transaction. `decideClaim` returns `rotate: true`
-      // as a requirement, not advice: an unrotated proof stays valid and the
-      // next authenticated caller claims for free.
-      tx.set(
-        claimRef(),
-        rotatedState(state as ClaimState, randomUUID(), user.uid, nowIso)
-      )
-
-      tx.set(admin.firestore().collection('install-log').doc(), {
-        at: nowIso,
-        by: user.uid,
-        action: reclaim ? 'claim-again' : 'claim',
-        granted: ROLES.configurator,
-      })
-
-      return { ...decision, reclaim }
-    })
+    const outcome = await claimConfigurator(firestoreStore, user, ceremonyDeps)
 
     if (outcome.status === 'refused') {
       // Specific in the log, generic on the wire. See the header.

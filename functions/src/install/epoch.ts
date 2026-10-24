@@ -30,43 +30,12 @@
  */
 
 import * as admin from 'firebase-admin'
-// Modular imports, not `admin.firestore.FieldValue`: the functions emulator
-// wraps the `admin.firestore` namespace WITHOUT its static members, so the
-// namespace form threw there (found 2026-10-22) while working in production.
-import { FieldValue } from 'firebase-admin/firestore'
 
 export const EPOCH_PATH = { collection: 'system:registry', doc: 'epoch' }
 
-export const epochRef = (): FirebaseFirestore.DocumentReference =>
-  admin.firestore().collection(EPOCH_PATH.collection).doc(EPOCH_PATH.doc)
-
-const bumpValue = () => ({
-  // Monotonic by increment rather than by clock: two installs in the same
-  // millisecond would produce the same timestamp, and an instance that had
-  // already seen that value would skip the reload. `FieldValue.increment` is
-  // atomic server-side, so concurrent installs cannot lose a bump either.
-  value: FieldValue.increment(1),
-  at: new Date().toJSON(),
-})
-
-/**
- * Bump the epoch as PART of the batch that changes config.
- *
- * Prefer this over `bumpEpoch()` wherever a batch exists. A bump issued after a
- * successful commit can be lost — the process is killed, the network drops, the
- * function times out — and the failure mode is silent and durable: the config
- * changed, the epoch did not, and every other instance keeps enforcing the old
- * rules indefinitely rather than for a few seconds. Batching makes "the rules
- * changed" and "everyone find out" the same write.
- */
-export function bumpEpochIn(batch: FirebaseFirestore.WriteBatch): void {
-  batch.set(epochRef(), bumpValue(), { merge: true })
-}
-
-/** Standalone bump, for paths with no batch to join. */
-export async function bumpEpoch(): Promise<void> {
-  await epochRef().set(bumpValue(), { merge: true })
-}
+// The bump itself is `commitInstall` (install-store.ts): part of the
+// transaction that changes config, never a separate write that can be lost.
+// `EPOCH_DOC` there is this path, joined (endpoint-wiring.test.ts).
 
 /**
  * Read the current epoch.

@@ -70,7 +70,11 @@ export interface QueryOptions {
 export interface Tx {
   get(path: string): Promise<StoredDoc>
   query(collection: string, options?: QueryOptions): Promise<StoredDoc[]>
-  /** `merge` updates the named fields and keeps the rest. */
+  /**
+   * `merge` replaces each named TOP-LEVEL field whole and keeps the rest — a
+   * map field is replaced, not deep-merged (Firestore `update` semantics,
+   * without its must-exist rule).
+   */
   set(path: string, data: Record<string, unknown>, options?: { merge?: boolean }): void
 }
 

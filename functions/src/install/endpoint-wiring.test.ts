@@ -28,6 +28,9 @@
 import { describe, test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
+import { CLAIM_PATH } from './claim'
+import { EPOCH_PATH } from './epoch'
+import { EPOCH_DOC } from './install-store'
 
 /** Remove block and line comments. Crude, and sufficient for this source. */
 const stripComments = (source: string): string =>
@@ -38,6 +41,7 @@ const src = (f: string) =>
 
 const endpointTs = src('install/endpoint.ts')
 const claimTs = src('claim.ts')
+const ceremonyTs = src('install/claim-ceremony.ts')
 const epochTs = src('install/epoch.ts')
 const indexTs = src('index.ts')
 
@@ -51,7 +55,8 @@ describe('the stripper works', () => {
   })
 
   test('code survives it', () => {
-    expect(claimTs).toContain('decideClaim')
+    expect(claimTs).toContain('claimConfigurator')
+    expect(ceremonyTs).toContain('decideClaim')
     expect(endpointTs).toContain('decideInstall')
   })
 })
@@ -85,66 +90,44 @@ describe('/install is gated on configurator, and refuses before reading', () => 
   })
 })
 
-describe('the commit is one batch, epoch included', () => {
-  const commitFn = endpointTs.slice(
-    endpointTs.indexOf('async function commit'),
-    endpointTs.indexOf('export const install')
-  )
-
-  test('it exists and is a batch', () => {
-    expect(commitFn).toContain('db().batch()')
-    expect(commitFn).toContain('batch.commit()')
+describe('the commit is one transaction, epoch included', () => {
+  // What the commit does — manifest append-only, content-checked, epoch bumped
+  // in the same transaction — is tested by behaviour in install-store.test.ts.
+  test('the endpoint commits through the kernel, over the Firestore store', () => {
+    expect(endpointTs).toMatch(/commitInstall\(firestoreStore, records,/)
+    expect(endpointTs).not.toContain('batch()')
+    expect(endpointTs).not.toContain('runTransaction')
   })
 
-  test('the epoch bump is IN the batch, not after it', () => {
-    // A bump issued after a successful commit can be lost — and then the config
-    // changed while every other warm instance keeps enforcing the old rules
-    // indefinitely. That is the revocation-does-not-propagate failure.
-    expect(commitFn).toContain('bumpEpochIn(batch)')
-    expect(commitFn).not.toMatch(/await\s+bumpEpoch\(\)/)
+  test('the kernel bumps the epoch document epoch.ts reads', () => {
+    expect(`${EPOCH_PATH.collection}/${EPOCH_PATH.doc}`).toBe(EPOCH_DOC)
   })
 
-  test('the manifest is created, never set — history is append-only', () => {
-    // `set` would let a re-POST of an existing version rewrite the manifest the
-    // NEXT upgrade's additive-only check diffs against.
-    expect(commitFn).toMatch(/batch\.create\(ref,/)
-    expect(commitFn).not.toMatch(/batch\.set\(\s*db\(\)\.collection\(MANIFESTS\)/)
-    expect(commitFn).not.toMatch(/ref\.set\(/)
-  })
-
-  test('re-submitting a version is checked for CONTENT, not just existence', () => {
-    // Approving a parked upgrade re-POSTs the same version, so "already on
-    // file" cannot simply fail — but it must not be waved through either, or a
-    // reviewed 1.2.0 can be swapped before the human clicks approve.
-    expect(commitFn).toMatch(/sameManifest\(existing\.data\(\)/)
-    expect(commitFn).toMatch(/throw new ManifestConflict/)
+  test('a conflicting version still answers 409', () => {
     expect(endpointTs).toMatch(/fail\(response, 409, 'conflict'/)
-  })
-
-  test('a null manifest record is guarded, not committed', () => {
-    expect(commitFn).toMatch(/if \(records\.manifest\)/)
   })
 })
 
 describe('/claim runs the whole ceremony in one transaction', () => {
-  test('the POST path is transactional', () => {
-    expect(claimTs).toMatch(/runTransaction\(async \(tx\)/)
+  // The transactions themselves are tested by behaviour in
+  // claim-ceremony.test.ts (including the simultaneous-claim race); what is
+  // left to pin here is that the endpoint is bound to them.
+  test('the POST path is the transactional kernel, over the Firestore store', () => {
+    expect(claimTs).toMatch(/claimConfigurator\(firestoreStore, user, ceremonyDeps\)/)
+    expect(claimTs).not.toContain('runTransaction')
   })
 
-  test('rotation is a transaction WRITE, in the same transaction', () => {
-    // If rotation were a separate write, a crash between grant and rotation
-    // leaves a live proof in the datastore: the next authenticated caller
-    // claims for free.
-    expect(claimTs).toMatch(/tx\.set\(\s*claimRef\(\),\s*rotatedState\(/)
+  test('the GET path mints through the kernel too', () => {
+    expect(claimTs).toMatch(/publishNonce\(firestoreStore, ceremonyDeps\)/)
   })
 
-  test('the role grant is a transaction write too', () => {
-    expect(claimTs).toMatch(/tx\.update\(roleDoc\.ref/)
-    expect(claimTs).toMatch(/tx\.set\(admin\s*\.firestore\(\)\s*\.collection\('role'\)/)
+  test('the published location is the document the kernel uses', () => {
+    expect(`${claimTs.match(/collection: '([^']+)', doc: '([^']+)'/)?.slice(1).join('/')}`).toBe(CLAIM_PATH)
   })
 
   test('it grants configurator specifically', () => {
-    expect(claimTs).toContain('ROLES.configurator')
+    expect(ceremonyTs).toContain('ROLES.configurator')
+    expect(ceremonyTs).not.toContain('ROLES.owner')
     expect(claimTs).not.toContain('ROLES.owner')
   })
 

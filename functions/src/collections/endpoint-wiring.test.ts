@@ -428,15 +428,8 @@ describe('rejectionStatus — the one refusal-to-status map (0.2.0 review)', () 
 // principal.test.ts ("the principal is WHO AUTHENTICATED…" and "the principal is
 // the token's OWNER…"), since 2026-10-22.
 
-describe('/claim never names a role document after an email (0.2.1 re-review)', () => {
-  test('the claimer\'s new role document is named from the display name, not user.email', () => {
-    const claim = src('claim.ts')
-    expect(claim).not.toMatch(/name: user\.email/)
-    expect(claim).toContain('credentialName(user)')
-    // …and its fallback is unique per claimer (role names are unique).
-    expect(claim).toMatch(/Host owner \$\{user\.uid\.slice/)
-  })
-})
+// /claim never names a role document after an email (0.2.1 re-review): now
+// tested by behaviour in install/claim-ceremony.test.ts.
 
 describe('storage areas are written ONLY through /blob (#1136)', () => {
   test('/doc refuses writes and deletes to an area, before any commit path', () => {
