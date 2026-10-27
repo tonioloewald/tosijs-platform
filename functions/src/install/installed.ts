@@ -38,8 +38,9 @@
  * through; two independent defences, because this one is worth two.
  */
 
-import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
+import type { Store } from '../collections/store'
+import { firestoreStore } from '../firestore-store'
 
 import {
   CollectionRegistry,
@@ -53,7 +54,7 @@ import {
   isReservedCollection,
   refuseDeclaration,
 } from '../collections/namespace'
-import { readEpoch } from './epoch'
+import { readEpoch } from './install-store'
 import {
   PLATFORM_REGISTRY_COLLECTION,
   extraPlatformConfigs,
@@ -111,9 +112,16 @@ export function configsFromInstalled(
   return configs
 }
 
+export interface InstalledSourceDeps {
+  store: Pick<Store, 'get' | 'query'>
+  log: { error: (message: string) => void }
+}
+
 export class InstalledConfigSource implements ConfigSource {
+  constructor(private deps: InstalledSourceDeps) {}
+
   async load(): Promise<StoredCollectionConfig[]> {
-    const db = admin.firestore()
+    const { store, log } = this.deps
     // Everything except a revoked tombstone. A revoked grant's row survives so
     // a re-install restores the same library to the same collections, but it
     // must not contribute config.
@@ -124,50 +132,45 @@ export class InstalledConfigSource implements ConfigSource {
     // asking for one new capability took the whole library offline until
     // somebody clicked approve, which turns a safety prompt into an outage and
     // would teach every operator to approve without reading.
-    const grants = await db
-      .collection('grant')
-      .where('status', 'in', ['active', 'pending'])
-      .get()
+    const grants = await store.query('grant', {
+      oneOf: { field: 'status', values: ['active', 'pending'] },
+      orderBy: '~',
+    })
 
     const pairs: InstalledPair[] = await Promise.all(
-      grants.docs.map(async (doc) => {
-        const grant = doc.data() as Grant
+      grants.map(async (doc) => {
+        const grant = doc.data as unknown as Grant
         if (!grant.activeVersion) return { grant, manifest: null }
-        const snapshot = await db
-          .collection('manifest')
-          .doc(`${grant.name}@${grant.activeVersion}`)
-          .get()
+        const snapshot = await store.get(`manifest/${grant.name}@${grant.activeVersion}`)
         return {
           grant,
-          manifest: snapshot.exists ? (snapshot.data() as Manifest) : null,
+          manifest: snapshot.exists ? (snapshot.data as unknown as Manifest) : null,
         }
       })
     )
-    const installed = configsFromInstalled(pairs, (m) =>
-      functions.logger.error(m)
-    )
+    const installed = configsFromInstalled(pairs, (m) => log.error(m))
     if (!platformFromRegistry()) return installed
 
     // The platform's own configs, stored as data (D19). One load, one epoch,
     // one snapshot with the installed libraries: a rule change anywhere is a
     // single consistent view everywhere.
-    const platform = await db.collection(PLATFORM_REGISTRY_COLLECTION).get()
+    const platform = await store.query(PLATFORM_REGISTRY_COLLECTION, { orderBy: '~' })
     const configs = platformConfigsFrom(
-      platform.docs.map((d) => ({ id: d.id, data: d.data() })),
-      (m) => functions.logger.error(m)
+      platform.map((d) => ({ id: d.path.split('/').pop() as string, data: d.data })),
+      (m) => log.error(m)
     )
     // Missing is not an error the design can recover from on its own — that
     // collection is simply inaccessible — so it must at least be LOUD. An
     // unseeded registry (switch flipped before seeding) shows up here as every
     // platform name at once.
     for (const name of missingPlatformConfigs(configs)) {
-      functions.logger.error(
+      log.error(
         `platform registry: no config for "${name}" — it is INACCESSIBLE. ` +
           'Run: bun scripts/seed-registry.js --alias <alias> --apply'
       )
     }
     for (const name of extraPlatformConfigs(configs)) {
-      functions.logger.error(
+      log.error(
         `platform registry: "${name}" is stored but not in PLATFORM_CONFIGS — ` +
           'it IS being served. Remove it, or add it to the code, deliberately.'
       )
@@ -176,12 +179,12 @@ export class InstalledConfigSource implements ConfigSource {
   }
 
   async epoch(): Promise<number> {
-    return readEpoch()
+    return readEpoch(this.deps.store)
   }
 }
 
 export const installedRegistry = new CollectionRegistry(
-  new InstalledConfigSource(),
+  new InstalledConfigSource({ store: firestoreStore, log: functions.logger }),
   { onError: (message) => functions.logger.warn(message) }
 )
 

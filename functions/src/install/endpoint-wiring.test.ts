@@ -239,6 +239,13 @@ describe('the proposal flow and the cleanup are the tested ones (0.4.0 re-review
     expect(endpointTs).not.toMatch(/decided\(/)
   })
 
+  test('a denial is conditional on the proposal STILL being pending', () => {
+    // Unconditional, it could overwrite a proposal an approval had just taken,
+    // recording "denied" while that install ran.
+    const deny = endpointTs.slice(endpointTs.indexOf('req.body?.approve === false'))
+    expect(deny.slice(0, 600)).toMatch(/updateIf\(\s*requestId,\s*\(current\) => proposalState\(current, Date\.now\(\)\) === 'pending'/)
+  })
+
   test('both anonymous request collections are swept by the shared rule', () => {
     expect(endpointTs).toMatch(/storeSweepable\(firestoreStore, PROPOSALS\)/)
     expect(authorizeTs).toMatch(/sweepExpired\(storeSweepable\(firestoreStore, AUTHORIZE_COLLECTION\)/)

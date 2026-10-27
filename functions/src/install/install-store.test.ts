@@ -13,7 +13,8 @@ import { MemoryStore } from '../collections/store'
 import type { InstallRecords } from './apply'
 import type { Proposal } from './proposal'
 import { ManifestConflict } from './manifest-identity'
-import { commitInstall, updateProposalIf, EPOCH_DOC } from './install-store'
+import { commitInstall, createDocument, readEpoch, updateProposalIf, EPOCH_DOC } from './install-store'
+import { newDocId } from '../collections/store'
 
 const NOW = '2026-10-24T12:00:00.000Z'
 const manifest = { name: 'lib', version: '1.0.0', collections: { 'lib:thing': { access: {} } } }
@@ -95,5 +96,29 @@ describe('updateProposalIf', () => {
     const store = new MemoryStore()
     expect(await updateProposalIf(store, 'p/none', () => true, { status: 'approved' } as unknown as Partial<Proposal>)).toBe(false)
     expect(store.paths()).toEqual([])
+  })
+})
+
+describe('createDocument', () => {
+  test('creates, and refuses to overwrite', async () => {
+    const store = new MemoryStore()
+    await createDocument(store, 'p/1', { v: 1 })
+    await expect(createDocument(store, 'p/1', { v: 2 })).rejects.toThrow('already exists')
+    expect((await store.get('p/1')).data).toEqual({ v: 1 })
+  })
+})
+
+describe('newDocId', () => {
+  test('20 characters of [A-Za-z0-9] — a Firestore-shaped id that passes the endpoint id checks', () => {
+    const ids = Array.from({ length: 500 }, newDocId)
+    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9]{20}$/)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe('readEpoch', () => {
+  test('missing is 0; stored is the value', async () => {
+    expect(await readEpoch(new MemoryStore())).toBe(0)
+    expect(await readEpoch(new MemoryStore({ [EPOCH_DOC]: { value: 3 } }))).toBe(3)
   })
 })

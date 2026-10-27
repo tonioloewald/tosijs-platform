@@ -75,6 +75,35 @@ export async function commitInstall(
 }
 
 /**
+ * Store `data` at `path` only if nothing is there yet — Firestore `create`.
+ * Throws when the document exists, so an id can never be overwritten.
+ */
+export async function createDocument(
+  store: Pick<Store, 'transaction'>,
+  path: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  await store.transaction(async (tx) => {
+    if ((await tx.get(path)).exists) throw new Error(`${path} already exists`)
+    tx.set(path, data)
+  })
+}
+
+/**
+ * Read the current epoch.
+ *
+ * A missing document reads as 0, which is correct for a host that has never
+ * installed anything. An unreadable one THROWS rather than defaulting, because
+ * `CollectionRegistry` treats a failed epoch check as "freshness unknown" and
+ * reloads — swallowing the error here would turn that into "unchanged" and
+ * silently freeze the rules.
+ */
+export async function readEpoch(store: Pick<Store, 'get'>): Promise<number> {
+  const doc = await store.get(EPOCH_DOC)
+  return (doc.data.value as number) ?? 0
+}
+
+/**
  * Apply `change` to the proposal at `path` if `allow` says so for what is
  * stored NOW, atomically. Returns whether it did. This is what makes approval
  * single-use: two approvals racing on one proposal cannot both see "pending".

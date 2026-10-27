@@ -41,7 +41,6 @@ const NOT_YET_PORTED = [
   'hello.ts',
   'index.ts',
   'install/endpoint.ts',
-  'install/epoch.ts',
   'install/installed.ts',
   'prefetch.ts',
   'render/store.ts',

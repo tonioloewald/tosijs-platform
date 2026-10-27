@@ -22,7 +22,10 @@ import {
   mergePlatformLast,
   collectionsFor,
   withPlatformHooks,
+  InstalledConfigSource,
 } from './installed'
+import { MemoryStore } from '../collections/store'
+import { EPOCH_DOC } from './install-store'
 import { PLATFORM_HOOKS } from '../collections/hooks'
 import { compileStored } from '../collections/registry'
 import { COLLECTIONS } from '../collections'
@@ -270,5 +273,42 @@ describe('withPlatformHooks', () => {
   test('memoised per snapshot — a request pays a lookup, not a copy', () => {
     const snapshot = { post: { access: {} } } as CollectionMap
     expect(withPlatformHooks(snapshot)).toBe(withPlatformHooks(snapshot))
+  })
+})
+
+describe('InstalledConfigSource over the store port (SOVEREIGN-PLAN.md Phase 1)', () => {
+  const load = (seed: Record<string, Record<string, unknown>>) => {
+    const errors: string[] = []
+    const source = new InstalledConfigSource({ store: new MemoryStore(seed), log: { error: (m) => errors.push(m) } })
+    return { source, errors }
+  }
+  const g = (over: Partial<Grant>) => grant(over) as unknown as Record<string, unknown>
+  const m = (name: string, cols: Record<string, unknown>) => manifest(cols, name) as unknown as Record<string, unknown>
+
+  test('active AND pending grants contribute; a revoked tombstone does not', async () => {
+    const { source, errors } = load({
+      'grant/alpha': g({ name: 'alpha', status: 'active' }),
+      'grant/beta': g({ name: 'beta', status: 'pending' }),
+      'grant/gamma': g({ name: 'gamma', status: 'revoked' }),
+      'manifest/alpha@1.0.0': m('alpha', { 'alpha:task': TASK }),
+      'manifest/beta@1.0.0': m('beta', { 'beta:task': TASK }),
+      'manifest/gamma@1.0.0': m('gamma', { 'gamma:task': TASK }),
+    })
+    expect((await source.load()).map((c) => c.name).sort()).toEqual(['alpha:task', 'beta:task'])
+    expect(errors).toEqual([])
+  })
+
+  test('a grant whose manifest is missing contributes nothing, and does not break the others', async () => {
+    const { source } = load({
+      'grant/alpha': g({ name: 'alpha' }),
+      'grant/delta': g({ name: 'delta' }),
+      'manifest/alpha@1.0.0': m('alpha', { 'alpha:task': TASK }),
+    })
+    expect((await source.load()).map((c) => c.name)).toEqual(['alpha:task'])
+  })
+
+  test('the epoch is read from the document the install commit bumps; missing is 0', async () => {
+    expect(await load({}).source.epoch()).toBe(0)
+    expect(await load({ [EPOCH_DOC]: { value: 7 } }).source.epoch()).toBe(7)
   })
 })

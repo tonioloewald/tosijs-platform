@@ -165,6 +165,9 @@ function buildQuery(
   if (options.lessThan) {
     ref = ref.where(options.lessThan.field, '<', options.lessThan.value)
   }
+  if (options.oneOf) {
+    ref = ref.where(options.oneOf.field, 'in', options.oneOf.values)
+  }
   const [field, direction] = (options.orderBy ?? '_created desc').split(' ')
   if (field !== '~') {
     ref = ref.orderBy(field, direction === 'desc' ? 'desc' : 'asc')

@@ -1,3 +1,5 @@
+import { randomBytes } from 'crypto'
+
 /**
  * The substrate port (tosijs-platform#7).
  *
@@ -54,6 +56,8 @@ export interface QueryOptions {
   greaterThan?: { field: string; value: number | string }
   /** The mirror of `greaterThan` (Firestore `<`), same-type only. */
   lessThan?: { field: string; value: number | string }
+  /** The field equals one of `values` (Firestore `in`), compared by content. */
+  oneOf?: { field: string; values: unknown[] }
   /**
    * Return only these fields. A pushdown, so a caller that must FILTER on other
    * fields fetches whole documents and projects afterwards (D7, docs.ts).
@@ -189,6 +193,24 @@ function compareValues(a: unknown, b: unknown): number {
 const clone = <T>(v: T): T =>
   v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T)
 
+const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+
+/**
+ * A fresh document id: 20 characters of [A-Za-z0-9], the shape of a Firestore
+ * auto-id, so ids minted on any substrate look alike (and pass the endpoints'
+ * id checks). Rejection-sampled, so every character is equally likely.
+ */
+export function newDocId(): string {
+  let id = ''
+  while (id.length < 20) {
+    for (const byte of randomBytes(32)) {
+      // 248 = 4 × 62: bytes at or above it would bias the first characters.
+      if (byte < 248 && id.length < 20) id += ID_ALPHABET[byte % 62]
+    }
+  }
+  return id
+}
+
 /**
  * A complete in-memory substrate.
  *
@@ -303,6 +325,10 @@ export class MemoryStore implements Store {
           typeof r.data[field] === typeof value &&
           compareValues(r.data[field], value) > 0
       )
+    }
+    if (options.oneOf) {
+      const { field, values } = options.oneOf
+      rows = rows.filter((r) => values.some((v) => sameValue(r.data[field], v)))
     }
     if (options.lessThan) {
       const { field, value } = options.lessThan

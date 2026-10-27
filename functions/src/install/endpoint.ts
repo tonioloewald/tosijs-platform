@@ -30,7 +30,6 @@ rather than for a few seconds.
 import { onRequest } from 'firebase-functions/v2/https'
 import { PAGE_HEADERS } from '../page-csp'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
-import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 import { randomBytes } from 'crypto'
 import { unenforcedKeywords } from 'tosijs-schema'
@@ -60,15 +59,13 @@ import {
   type CapabilityDeclaration,
 } from './manifest'
 import { ManifestConflict } from './manifest-identity'
-import { commitInstall, updateProposalIf } from './install-store'
+import { commitInstall, createDocument, updateProposalIf } from './install-store'
+import { newDocId } from '../collections/store'
 import { firestoreStore } from '../firestore-store'
 import { fail, noStore } from '../errors'
 
 const MANIFESTS = 'manifest'
 const GRANTS = 'grant'
-const LOG = 'install-log'
-
-const db = () => admin.firestore()
 
 const validateOptions = {
   unenforced: (schema: unknown) =>
@@ -77,8 +74,8 @@ const validateOptions = {
 }
 
 const readGrant = async (name: string): Promise<Grant | null> => {
-  const snapshot = await db().collection(GRANTS).doc(name).get()
-  return snapshot.exists ? (snapshot.data() as Grant) : null
+  const doc = await firestoreStore.get(`${GRANTS}/${name}`)
+  return doc.exists ? (doc.data as unknown as Grant) : null
 }
 
 const readManifest = async (
@@ -86,8 +83,8 @@ const readManifest = async (
   version: string | null
 ): Promise<Manifest | null> => {
   if (!version) return null
-  const snapshot = await db().collection(MANIFESTS).doc(`${name}@${version}`).get()
-  return snapshot.exists ? (snapshot.data() as Manifest) : null
+  const doc = await firestoreStore.get(`${MANIFESTS}/${name}@${version}`)
+  return doc.exists ? (doc.data as unknown as Manifest) : null
 }
 
 /** The records, the manifest check and the epoch bump, in one transaction (install-store.ts). */
@@ -137,7 +134,7 @@ export async function runInstall(input: {
     previousManifest,
     principal,
     nowIso: new Date().toJSON(),
-    logId: db().collection(LOG).doc().id,
+    logId: newDocId(),
     validate: validateOptions,
     approving,
   })
@@ -201,7 +198,6 @@ export async function runInstall(input: {
 }
 
 const PROPOSALS = 'system:install-proposal'
-const proposals = () => db().collection(PROPOSALS)
 
 const VALID_ID = /^[A-Za-z0-9-]{8,64}$/
 
@@ -212,14 +208,14 @@ const proposalStore = (): ProposalStore => ({
   ...storeSweepable(firestoreStore, PROPOSALS),
   async create(proposal) {
     // create, never set: a proposal id can never be overwritten.
-    const ref = proposals().doc()
-    await ref.create(proposal)
-    return ref.id
+    const id = newDocId()
+    await createDocument(firestoreStore, `${PROPOSALS}/${id}`, proposal as unknown as Record<string, unknown>)
+    return id
   },
   async read(id) {
     if (!VALID_ID.test(id)) return null
-    const snap = await proposals().doc(id).get()
-    return snap.exists ? (snap.data() as Proposal) : null
+    const doc = await firestoreStore.get(`${PROPOSALS}/${id}`)
+    return doc.exists ? (doc.data as unknown as Proposal) : null
   },
   async updateIf(id, allow, change) {
     if (!VALID_ID.test(id)) return false
@@ -290,7 +286,13 @@ async function handleProposal(
   // Denying needs no sign-in: it can only ever stop an install.
   if (action === 'approve' && req.body?.approve === false) {
     if (proposal && state === 'pending') {
-      await proposals().doc(requestId).update(denied(new Date().toJSON()))
+      // Conditional on it STILL being pending: an approval that took it in the
+      // meantime must not be overwritten as denied while its install runs.
+      await proposalStore().updateIf(
+        requestId,
+        (current) => proposalState(current, Date.now()) === 'pending',
+        denied(new Date().toJSON())
+      )
     }
     response.json({ status: 'denied' })
     return true
@@ -409,10 +411,10 @@ export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Resp
   try {
     switch (req.method) {
       case 'GET': {
-        const snapshot = await db().collection(GRANTS).get()
+        const grants = await firestoreStore.query(GRANTS, { orderBy: '~' })
         response.json({
-          installed: snapshot.docs.map((d) => {
-            const g = d.data() as Grant
+          installed: grants.map((d) => {
+            const g = d.data as unknown as Grant
             return {
               name: g.name,
               version: g.activeVersion,
@@ -458,7 +460,7 @@ export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Resp
           existing,
           principal,
           new Date().toJSON(),
-          db().collection(LOG).doc().id
+          newDocId()
         )
         if (decision.status === 'refused') {
           fail(response, 403, 'refused', 'the revoke was refused', {

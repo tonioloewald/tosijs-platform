@@ -29,28 +29,9 @@
  * can declare it either (see namespace.ts).
  */
 
-import * as admin from 'firebase-admin'
-
 export const EPOCH_PATH = { collection: 'system:registry', doc: 'epoch' }
 
 // The bump itself is `commitInstall` (install-store.ts): part of the
 // transaction that changes config, never a separate write that can be lost.
-// `EPOCH_DOC` there is this path, joined (endpoint-wiring.test.ts).
-
-/**
- * Read the current epoch.
- *
- * A missing document reads as 0, which is correct for a host that has never
- * installed anything. An unreadable one THROWS rather than defaulting, because
- * `CollectionRegistry` treats a failed epoch check as "freshness unknown" and
- * reloads — swallowing the error here would turn that into "unchanged" and
- * silently freeze the rules.
- */
-export async function readEpoch(): Promise<number> {
-  const snapshot = await admin
-    .firestore()
-    .collection(EPOCH_PATH.collection)
-    .doc(EPOCH_PATH.doc)
-    .get()
-  return (snapshot.data()?.value as number) ?? 0
-}
+// `EPOCH_DOC` there is this path, joined (endpoint-wiring.test.ts), and
+// `readEpoch` there reads it.
