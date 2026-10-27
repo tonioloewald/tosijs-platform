@@ -36,7 +36,6 @@ somebody who should not be able to observe it at all.
 import { onRequest } from 'firebase-functions/v2/https'
 import { PAGE_HEADERS } from './page-csp'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
-import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 import { randomUUID } from 'crypto'
 
@@ -45,6 +44,7 @@ import { Response } from 'express'
 import { NONCE_TTL_MS } from './install/claim'
 import { claimConfigurator, publishNonce } from './install/claim-ceremony'
 import { firestoreStore } from './firestore-store'
+import { newDocId } from './collections/store'
 import { ROLES } from './collections/roles'
 import { claimPage } from './claim-page'
 import { fail, noStore } from './errors'
@@ -60,7 +60,7 @@ const PROOF_FIELD = 'proof'
 /** The Firebase binding of the ceremony's dependencies. */
 const ceremonyDeps = {
   nonce: randomUUID,
-  newId: (collection: string) => admin.firestore().collection(collection).doc().id,
+  newId: () => newDocId(),
 }
 
 export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
