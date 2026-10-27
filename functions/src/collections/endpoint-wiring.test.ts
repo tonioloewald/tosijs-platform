@@ -443,6 +443,14 @@ describe('storage areas are written ONLY through /blob (#1136)', () => {
   test('a /docs batch refuses a write to an area', () => {
     expect(docsTs).toMatch(/collections\[cp\]\?\.blob[\s\S]*?'refused'/)
   })
+  test('the endpoint reaches storage only through ports: the store and the Files adapter', () => {
+    const ep = src('blob-endpoint.ts')
+    expect(ep).not.toContain('firebase-admin')
+    expect(ep).toMatch(/cloudStorageObjects\(/)
+    expect(ep).toMatch(/firestoreStore\.get\(docPath\)/)
+    expect(ep).toMatch(/firestoreStore\.delete\(docPath\)/)
+    expect(ep).toMatch(/objects\.read\(result\.key\)/)
+  })
   test('the endpoint is exported, marks responses no-store first, and ships in the platform profile', () => {
     expect(src('index.ts')).toContain("export { blob } from './blob-endpoint'")
     const ep = src('blob-endpoint.ts')

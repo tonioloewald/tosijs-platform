@@ -244,13 +244,20 @@ export function firestoreTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> 
   })
 }
 
+/** `Store.get` against Firestore. A missing document is `exists: false`, never a throw. */
+export async function firestoreGet(path: string): Promise<StoredDoc> {
+  const snapshot = await docRef(path).get()
+  return { path, exists: snapshot.exists, data: (snapshot.data() ?? {}) as Record<string, unknown> }
+}
+
 /** `Store.delete` against Firestore. Deleting a missing document is not an error. */
 export async function firestoreDelete(path: string): Promise<void> {
   await docRef(path).delete()
 }
 
 /** Firestore for kernel code that needs no `field=value` path resolution (that needs the per-request collection map; see `storeFor` in doc.ts). */
-export const firestoreStore: Pick<Store, 'query' | 'scan' | 'transaction' | 'delete'> = {
+export const firestoreStore: Pick<Store, 'get' | 'query' | 'scan' | 'transaction' | 'delete'> = {
+  get: firestoreGet,
   query: firestoreQuery,
   delete: firestoreDelete,
   scan: firestoreScan,
