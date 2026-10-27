@@ -23,16 +23,17 @@ import {
   SideNav,
   postNotification,
   tabSelector,
-  codeEditor,
-  CodeEditor,
   icons,
   popMenu,
-  LiveExample,
   MarkdownViewer,
   TabSelector,
   makeSorter,
   tosiSegmented,
 } from 'tosijs-ui'
+// Since tosijs-ui 1.14 the editor and live examples are subpath exports, so
+// the root bundle no longer drags CodeMirror in.
+import { codeEditor, CodeEditor } from 'tosijs-ui/code-editor'
+import { LiveExample } from 'tosijs-ui/live-example'
 
 import * as tosijs from 'tosijs'
 import * as tosijsui from 'tosijs-ui'
@@ -802,7 +803,7 @@ export const xinBlogSearch = XinBlogSearch.elementCreator({
 interface PostEditorParts extends PartsMap {
   title: HTMLInputElement
   source: CodeEditor
-  preview: MarkdownViewer
+  preview: XinBlogPost
   tabSelector: TabSelector
   proofBar: HTMLDivElement
   summaryPrompt: HTMLTextAreaElement
@@ -990,7 +991,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
     const { source, preview } = this.parts
 
     blog.editorPost.content.value = source.value
-    preview.post = { ...blog.editorPost }
+    preview.post = { ...(tosiValue(blog.editorPost) as unknown as BlogPost) }
   }
 
   tabChanged = (event: Event) => {
@@ -1002,7 +1003,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
       const { source, preview } = this.parts
 
       blog.editorPost.content.value = source.value
-      preview.post = { ...blog.editorPost }
+      preview.post = { ...(tosiValue(blog.editorPost) as unknown as BlogPost) }
     }
   }
 

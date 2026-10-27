@@ -16,11 +16,11 @@ import {
   icons,
   postNotification,
   popMenu,
-  CodeEditor,
   tosiSelect,
   TosiSelect,
   TosiDialog,
 } from 'tosijs-ui'
+import type { CodeEditor } from 'tosijs-ui/code-editor'
 import {
   uploadFile,
   listFiles,
