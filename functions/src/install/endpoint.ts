@@ -36,7 +36,7 @@ import { randomBytes } from 'crypto'
 import { unenforcedKeywords } from 'tosijs-schema'
 import { denied, proposalState, type Proposal } from './proposal'
 import { approveProposal, proposeManifest, type InstallResult, type ProposalStore } from './proposal-handler'
-import { firestoreSweepable } from '../sweep'
+import { storeSweepable } from '../sweep'
 import { proposalPage } from './proposal-page'
 
 import {
@@ -209,7 +209,7 @@ const logFailure = (what: string, e: unknown) => functions.logger.error(`install
 
 /** Install proposals in Firestore (the flow that uses this is proposal-handler.ts). */
 const proposalStore = (): ProposalStore => ({
-  ...firestoreSweepable(proposals()),
+  ...storeSweepable(firestoreStore, PROPOSALS),
   async create(proposal) {
     // create, never set: a proposal id can never be overwritten.
     const ref = proposals().doc()

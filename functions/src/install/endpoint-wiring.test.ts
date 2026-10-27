@@ -240,8 +240,8 @@ describe('the proposal flow and the cleanup are the tested ones (0.4.0 re-review
   })
 
   test('both anonymous request collections are swept by the shared rule', () => {
-    expect(endpointTs).toMatch(/firestoreSweepable\(proposals\(\)\)/)
-    expect(authorizeTs).toMatch(/sweepExpired\(firestoreSweepable\(requests\(\)\)/)
+    expect(endpointTs).toMatch(/storeSweepable\(firestoreStore, PROPOSALS\)/)
+    expect(authorizeTs).toMatch(/sweepExpired\(storeSweepable\(firestoreStore, AUTHORIZE_COLLECTION\)/)
   })
 
   test('the authority pages are sent with the no-framing headers', () => {

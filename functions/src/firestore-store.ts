@@ -162,6 +162,9 @@ function buildQuery(
   if (options.greaterThan) {
     ref = ref.where(options.greaterThan.field, '>', options.greaterThan.value)
   }
+  if (options.lessThan) {
+    ref = ref.where(options.lessThan.field, '<', options.lessThan.value)
+  }
   const [field, direction] = (options.orderBy ?? '_created desc').split(' ')
   if (field !== '~') {
     ref = ref.orderBy(field, direction === 'desc' ? 'desc' : 'asc')
@@ -241,9 +244,15 @@ export function firestoreTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> 
   })
 }
 
+/** `Store.delete` against Firestore. Deleting a missing document is not an error. */
+export async function firestoreDelete(path: string): Promise<void> {
+  await docRef(path).delete()
+}
+
 /** Firestore for kernel code that needs no `field=value` path resolution (that needs the per-request collection map; see `storeFor` in doc.ts). */
-export const firestoreStore: Pick<Store, 'query' | 'scan' | 'transaction'> = {
+export const firestoreStore: Pick<Store, 'query' | 'scan' | 'transaction' | 'delete'> = {
   query: firestoreQuery,
+  delete: firestoreDelete,
   scan: firestoreScan,
   transaction: firestoreTransaction,
 }

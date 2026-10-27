@@ -14,6 +14,7 @@
  *
  * Best effort, always: cleanup never fails the request that triggered it.
  */
+import type { Store } from './collections/store'
 
 /** Requests deleted per call. More than one, so deletion outpaces creation. */
 export const SWEEP_BATCH = 50
@@ -62,17 +63,26 @@ export async function sweepExpired(
   }
 }
 
-/** A Firestore collection of requests, each with an ISO `expiresAt`. */
-export function firestoreSweepable(collection: FirebaseFirestore.CollectionReference): Sweepable {
+/**
+ * A collection of requests, each with an ISO `expiresAt`, in any store. The
+ * query is exactly the Firestore one this replaced (`expiresAt < cutoff`,
+ * projected, limited, no explicit order), so it needs no new index.
+ */
+export function storeSweepable(store: Pick<Store, 'query' | 'delete'>, collection: string): Sweepable {
   return {
     async expiredBefore(cutoffIso, limit) {
-      const snap = await collection.where('expiresAt', '<', cutoffIso).select('expiresAt').limit(limit).get()
-      return snap.docs.map((d) => ({ id: d.id, expiresAt: d.get('expiresAt') }))
+      const rows = await store.query(collection, {
+        lessThan: { field: 'expiresAt', value: cutoffIso },
+        orderBy: '~',
+        fields: ['expiresAt'],
+        limit,
+      })
+      return rows.map((d) => ({ id: d.path.split('/').pop() as string, expiresAt: d.data.expiresAt }))
     },
     async remove(ids) {
-      const batch = collection.firestore.batch()
-      for (const id of ids) batch.delete(collection.doc(id))
-      await batch.commit()
+      // Not a batch: a sweep is best effort, and a partly-finished one is
+      // simply finished by the next.
+      await Promise.all(ids.map((id) => store.delete(`${collection}/${id}`)))
     },
   }
 }

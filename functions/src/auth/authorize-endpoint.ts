@@ -53,7 +53,8 @@ import {
   POLL_INTERVAL_MS,
   type AuthorizeRequest
 } from './authorize'
-import { firestoreSweepable, sweepExpired } from '../sweep'
+import { storeSweepable, sweepExpired } from '../sweep'
+import { firestoreStore } from '../firestore-store'
 import { decideMint, hashToken, newTokenSecret } from './token'
 import { consentPage } from './consent-page'
 import { fail, noStore } from '../errors'
@@ -130,7 +131,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
       }
       // Starting is anonymous, so it cleans up after itself (sweep.ts): the
       // same rule as install proposals, best effort.
-      await sweepExpired(firestoreSweepable(requests()), Date.now(), (e) =>
+      await sweepExpired(storeSweepable(firestoreStore, AUTHORIZE_COLLECTION), Date.now(), (e) =>
         functions.logger.warn('authorize: sweeping expired requests failed', e)
       )
       const ref = requests().doc()

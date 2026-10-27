@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { SWEEP_BATCH, SWEEP_GRACE_MS, isSweepable, memorySweepable, sweepCutoff, sweepExpired, type Sweepable } from './sweep'
+import { SWEEP_BATCH, SWEEP_GRACE_MS, isSweepable, memorySweepable, storeSweepable, sweepCutoff, sweepExpired, type Sweepable } from './sweep'
+import { MemoryStore } from './collections/store'
 
 const NOW = Date.parse('2026-10-07T12:00:00Z')
 const iso = (ms: number) => new Date(ms).toJSON()
@@ -60,5 +61,27 @@ describe('sweepExpired', () => {
     }
     expect(await sweepExpired(cannotDelete, NOW, (e) => errors.push(e))).toBe(0)
     expect(errors).toHaveLength(2)
+  })
+})
+
+describe('storeSweepable (any store; Firestore and MemoryStore by the port)', () => {
+  test('deletes what is long expired, keeps the rest, and leaves other collections alone', async () => {
+    const store = new MemoryStore({
+      'req/old': { expiresAt: iso(NOW - 2 * SWEEP_GRACE_MS), body: 'x' },
+      'req/just-expired': { expiresAt: iso(NOW - 1000) },
+      'req/live': { expiresAt: iso(NOW + 60_000) },
+      'req/no-expiry': {}, // never matched by the store's pre-filter, as in Firestore
+      'other/old': { expiresAt: iso(NOW - 2 * SWEEP_GRACE_MS) },
+    })
+    expect(await sweepExpired(storeSweepable(store, 'req'), NOW)).toBe(1)
+    expect(store.paths().sort()).toEqual(['other/old', 'req/just-expired', 'req/live', 'req/no-expiry'])
+  })
+
+  test('one batch at a time', async () => {
+    const seed: Record<string, Record<string, unknown>> = {}
+    for (let i = 0; i < SWEEP_BATCH + 7; i++) seed[`req/r${String(i).padStart(3, '0')}`] = { expiresAt: iso(NOW - 2 * SWEEP_GRACE_MS) }
+    const store = new MemoryStore(seed)
+    expect(await sweepExpired(storeSweepable(store, 'req'), NOW)).toBe(SWEEP_BATCH)
+    expect(await sweepExpired(storeSweepable(store, 'req'), NOW)).toBe(7)
   })
 })

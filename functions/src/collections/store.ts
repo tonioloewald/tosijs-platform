@@ -52,6 +52,8 @@ export interface QueryOptions {
   equals?: { field: string; value: unknown }
   /** Restrict to documents whose `field` is strictly greater (the `_seq` cursor). */
   greaterThan?: { field: string; value: number | string }
+  /** The mirror of `greaterThan` (Firestore `<`), same-type only. */
+  lessThan?: { field: string; value: number | string }
   /**
    * Return only these fields. A pushdown, so a caller that must FILTER on other
    * fields fetches whole documents and projects afterwards (D7, docs.ts).
@@ -300,6 +302,14 @@ export class MemoryStore implements Store {
         (r) =>
           typeof r.data[field] === typeof value &&
           compareValues(r.data[field], value) > 0
+      )
+    }
+    if (options.lessThan) {
+      const { field, value } = options.lessThan
+      rows = rows.filter(
+        (r) =>
+          typeof r.data[field] === typeof value &&
+          compareValues(r.data[field], value) < 0
       )
     }
 
