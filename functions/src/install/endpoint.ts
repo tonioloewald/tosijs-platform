@@ -59,8 +59,8 @@ import {
   type CapabilityDeclaration,
 } from './manifest'
 import { ManifestConflict } from './manifest-identity'
-import { commitInstall, createDocument, updateProposalIf } from './install-store'
-import { newDocId } from '../collections/store'
+import { commitInstall, updateProposalIf } from './install-store'
+import { createDocument, newDocId } from '../collections/store'
 import { firestoreStore } from '../firestore-store'
 import { fail, noStore } from '../errors'
 

@@ -9,12 +9,11 @@
  */
 import { describe, test, expect } from 'bun:test'
 
-import { MemoryStore } from '../collections/store'
+import { MemoryStore, createDocument, newDocId } from '../collections/store'
 import type { InstallRecords } from './apply'
 import type { Proposal } from './proposal'
 import { ManifestConflict } from './manifest-identity'
-import { commitInstall, createDocument, readEpoch, updateProposalIf, EPOCH_DOC } from './install-store'
-import { newDocId } from '../collections/store'
+import { commitInstall, readEpoch, updateProposalIf, EPOCH_DOC } from './install-store'
 
 const NOW = '2026-10-24T12:00:00.000Z'
 const manifest = { name: 'lib', version: '1.0.0', collections: { 'lib:thing': { access: {} } } }

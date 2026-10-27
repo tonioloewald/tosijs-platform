@@ -293,8 +293,10 @@ describe('capability tokens are actually wired (B2, #6)', () => {
   })
 
   test('revoking tombstones — provenance outlives the credential', () => {
-    expect(endpoint).toMatch(/revokedAt: new Date\(\)\.toJSON\(\)/)
-    expect(endpoint).not.toMatch(/ref\.delete\(\)/)
+    // A conditional merge of `revokedAt` (only the caller's own token), never
+    // a delete.
+    expect(endpoint).toMatch(/updateDocumentIf\([\s\S]{0,120}\(t\) => t\?\.principalUid === uid,\s*\{ revokedAt: nowIso/)
+    expect(endpoint).not.toMatch(/\.delete\(/)
   })
 
   test('a token may not mint another token, at the endpoint too', () => {
@@ -318,16 +320,14 @@ describe('/authorize never hands the browser a credential (B2, #6)', () => {
     expect(approve).not.toMatch(/decideMint\(/)
   })
 
-  test('minting happens at exchange, from LIVE roles', () => {
-    expect(authz).toMatch(/const principal = await rolesOf\(decision\.principalUid\)/)
-    expect(authz).toMatch(/principalRoles: principal/)
-  })
-
-  test('the request is consumed in the SAME batch as the token', () => {
-    // A crash between them would leave a request still exchangeable for a
-    // second credential.
-    expect(authz).toMatch(/batch\.update\(ref, \{ usedAt/)
-    expect(authz).toMatch(/await batch\.commit\(\)/)
+  test('exchange, approval and denial go through the transactional kernel', () => {
+    // What they do — live roles at exchange, single use under a race, the token
+    // and the consumption in one commit — is tested by behaviour in
+    // auth/authorize-store.test.ts.
+    expect(authz).toMatch(/exchangeRequest\(firestoreStore, id, verifier, \{ rolesOf \}\)/)
+    expect(authz).toMatch(/approveRequest\(\s*firestoreStore,/)
+    expect(authz).toMatch(/denyRequest\(firestoreStore, id\)/)
+    expect(authz).not.toMatch(/batch\(\)|\.update\(/)
   })
 
   test('a token may not approve an authorization', () => {

@@ -4,7 +4,7 @@
  * `decideInstall` (apply.ts) decides; this commits what it decided. Moved from
  * `endpoint.ts`, which is now the Firebase binding.
  */
-import type { Store } from '../collections/store'
+import { updateDocumentIf, type Store } from '../collections/store'
 import type { InstallRecords } from './apply'
 import type { Proposal } from './proposal'
 import { sameManifest, ManifestConflict } from './manifest-identity'
@@ -75,21 +75,6 @@ export async function commitInstall(
 }
 
 /**
- * Store `data` at `path` only if nothing is there yet — Firestore `create`.
- * Throws when the document exists, so an id can never be overwritten.
- */
-export async function createDocument(
-  store: Pick<Store, 'transaction'>,
-  path: string,
-  data: Record<string, unknown>
-): Promise<void> {
-  await store.transaction(async (tx) => {
-    if ((await tx.get(path)).exists) throw new Error(`${path} already exists`)
-    tx.set(path, data)
-  })
-}
-
-/**
  * Read the current epoch.
  *
  * A missing document reads as 0, which is correct for a host that has never
@@ -114,12 +99,10 @@ export function updateProposalIf(
   allow: (current: Proposal | null) => boolean,
   change: Partial<Proposal>
 ): Promise<boolean> {
-  return store.transaction(async (tx) => {
-    const snapshot = await tx.get(path)
-    if (!allow(snapshot.exists ? (snapshot.data as unknown as Proposal) : null)) return false
-    // Never creates: a proposal that is not on file is not approved into being.
-    if (!snapshot.exists) return false
-    tx.set(path, change as Record<string, unknown>, { merge: true })
-    return true
-  })
+  return updateDocumentIf(
+    store,
+    path,
+    (current) => allow(current as unknown as Proposal | null),
+    change as Record<string, unknown>
+  )
 }

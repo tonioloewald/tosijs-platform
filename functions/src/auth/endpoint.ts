@@ -27,7 +27,6 @@ expose every principal's tokens to that role. The filter therefore lives here.
 
 import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
-import * as admin from 'firebase-admin'
 import * as functions from 'firebase-functions'
 
 import {
@@ -47,11 +46,12 @@ import {
 import { fail, noStore } from '../errors'
 import { credentialName } from '../collections/join-roles'
 import { principalIdentity } from '../collections/roles'
+import { createDocument, newDocId, updateDocumentIf } from '../collections/store'
+import { firestoreStore } from '../firestore-store'
 
 const TOKENS = 'token'
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-const db = () => admin.firestore()
 
 export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
   // A platform API response is about the caller who asked — never shared
@@ -89,15 +89,15 @@ export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
   try {
     switch (req.method) {
       case 'GET': {
-        const snapshot = await db()
-          .collection(TOKENS)
-          .where('principalUid', '==', uid)
-          .get()
+        const rows = await firestoreStore.query(TOKENS, {
+          equals: { field: 'principalUid', value: uid },
+          orderBy: '~',
+        })
         response.json({
-          tokens: snapshot.docs.map((d) => {
-            const t = d.data() as TokenRecord
+          tokens: rows.map((d) => {
+            const t = d.data as unknown as TokenRecord
             return {
-              id: d.id,
+              id: d.path.split('/').pop(),
               label: t.label,
               caveats: t.caveats,
               expiresAt: t.expiresAt,
@@ -130,11 +130,11 @@ export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
         }
 
         const secret = newTokenSecret()
-        const ref = db().collection(TOKENS).doc()
+        const tokenId = newDocId()
         // The minting human's own name, so the agent's writes read as theirs
         // (#28). A token cannot mint, so `user` is the human's credential.
         const principalName = user ? credentialName(user) : undefined
-        await ref.set({
+        await createDocument(firestoreStore, `${TOKENS}/${tokenId}`, {
           ...decision.record,
           ...(principalName ? { principalName } : {}),
           hash: hashToken(secret),
@@ -150,7 +150,7 @@ export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
         )
         response.json({
           status: 'minted',
-          id: ref.id,
+          id: tokenId,
           // The only time this value exists anywhere outside the caller's
           // process. Not recoverable — only a hash is stored.
           secret,
@@ -164,25 +164,27 @@ export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
 
       case 'DELETE': {
         const id = String(req.query.id ?? '')
-        if (!id) {
+        // One path segment only: an id with `/` would address a nested path.
+        if (!id || id.includes('/')) {
           fail(response, 400, 'bad-request', 'expected ?id=<tokenId>')
           return
         }
-        const ref = db().collection(TOKENS).doc(id)
-        const existing = await ref.get()
         // Scoped to the caller's own, and OPAQUE about anyone else's: a 403
         // for a token belonging to somebody else would confirm the id exists.
-        if (!existing.exists || (existing.data() as TokenRecord).principalUid !== uid) {
-          fail(response, 404, 'not-found', 'no such token')
-          return
-        }
         // Tombstoned, not deleted — the record of which agent made which
         // writes has to outlive the credential, or the provenance a token
         // carries (#6) becomes unresolvable the moment it is revoked.
-        await ref.update({
-          revokedAt: new Date().toJSON(),
-          _modified: new Date().toJSON(),
-        })
+        const nowIso = new Date().toJSON()
+        const revoked = await updateDocumentIf(
+          firestoreStore,
+          `${TOKENS}/${id}`,
+          (t) => t?.principalUid === uid,
+          { revokedAt: nowIso, _modified: nowIso }
+        )
+        if (!revoked) {
+          fail(response, 404, 'not-found', 'no such token')
+          return
+        }
         functions.logger.info(`token ${id} revoked by ${uid}`)
         response.json({ status: 'revoked', id })
         return

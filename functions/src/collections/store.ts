@@ -193,6 +193,42 @@ function compareValues(a: unknown, b: unknown): number {
 const clone = <T>(v: T): T =>
   v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T)
 
+/**
+ * Store `data` at `path` only if nothing is there yet — Firestore `create`.
+ * Throws when the document exists, so an id can never be overwritten.
+ */
+export async function createDocument(
+  store: Pick<Store, 'transaction'>,
+  path: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  await store.transaction(async (tx) => {
+    if ((await tx.get(path)).exists) throw new Error(`${path} already exists`)
+    tx.set(path, data)
+  })
+}
+
+/**
+ * Merge `change` into the document at `path` if `allow` says so for what is
+ * stored NOW, atomically; returns whether it did. Never creates: a missing
+ * document is `allow(null)` and then no write. The check-and-set that makes an
+ * approval, a denial or a revocation single-use under concurrency.
+ */
+export function updateDocumentIf(
+  store: Pick<Store, 'transaction'>,
+  path: string,
+  allow: (current: Record<string, unknown> | null) => boolean,
+  change: Record<string, unknown>
+): Promise<boolean> {
+  return store.transaction(async (tx) => {
+    const snapshot = await tx.get(path)
+    if (!allow(snapshot.exists ? snapshot.data : null)) return false
+    if (!snapshot.exists) return false
+    tx.set(path, change, { merge: true })
+    return true
+  })
+}
+
 const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 
 /**

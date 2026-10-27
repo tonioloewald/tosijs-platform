@@ -46,22 +46,18 @@ import {
 import { Response } from 'express'
 import {
   decideStart,
-  decideApprove,
-  decideExchange,
   loopbackRedirect,
   AUTHORIZE_COLLECTION,
   POLL_INTERVAL_MS,
-  type AuthorizeRequest
 } from './authorize'
 import { storeSweepable, sweepExpired } from '../sweep'
 import { firestoreStore } from '../firestore-store'
-import { decideMint, hashToken, newTokenSecret } from './token'
+import { approveRequest, denyRequest, exchangeRequest, readRequest } from './authorize-store'
+import { createDocument, newDocId } from '../collections/store'
 import { consentPage } from './consent-page'
 import { fail, noStore } from '../errors'
 import { credentialName } from '../collections/join-roles'
 
-const db = () => admin.firestore()
-const requests = () => db().collection(AUTHORIZE_COLLECTION)
 
 const selfUrl = (req: AuthenticatedRequest): string => {
   const host = req.headers['x-forwarded-host'] ?? req.headers.host
@@ -100,10 +96,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
     // answers any GET at all and would otherwise swallow it.
     if (req.method === 'GET') {
       const id = String(req.query.request ?? '')
-      const snapshot = id ? await requests().doc(id).get() : null
-      const record = snapshot?.exists
-        ? ({ ...snapshot.data(), _id: snapshot.id } as AuthorizeRequest)
-        : null
+      const record = await readRequest(firestoreStore, id)
 
       response.set(PAGE_HEADERS)
       // Never cached: it renders a live, expiring authorization request.
@@ -134,15 +127,19 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
       await sweepExpired(storeSweepable(firestoreStore, AUTHORIZE_COLLECTION), Date.now(), (e) =>
         functions.logger.warn('authorize: sweeping expired requests failed', e)
       )
-      const ref = requests().doc()
-      await ref.set(decision.record)
+      const requestId = newDocId()
+      await createDocument(
+        firestoreStore,
+        `${AUTHORIZE_COLLECTION}/${requestId}`,
+        decision.record as unknown as Record<string, unknown>
+      )
       functions.logger.info(
-        `authorize: started ${ref.id} (${decision.record.mode}) for "${decision.record.label}"`
+        `authorize: started ${requestId} (${decision.record.mode}) for "${decision.record.label}"`
       )
       response.json({
         status: 'started',
-        requestId: ref.id,
-        consentUrl: `${selfUrl(req)}?request=${ref.id}`,
+        requestId,
+        consentUrl: `${selfUrl(req)}?request=${requestId}`,
         expiresAt: decision.record.expiresAt,
         pollIntervalMs: POLL_INTERVAL_MS,
       })
@@ -162,25 +159,22 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
       }
 
       const id = String(req.body?.requestId ?? '')
-      const ref = requests().doc(id)
-      const snapshot = id ? await ref.get() : null
-      const record = snapshot?.exists
-        ? ({ ...snapshot.data(), _id: snapshot.id } as AuthorizeRequest)
-        : null
 
       if (req.body?.approve === false) {
-        if (record?.status === 'pending') await ref.update({ status: 'denied' })
+        // Only while still pending (authorize-store.ts): a denial must not
+        // overwrite an approval that landed first.
+        await denyRequest(firestoreStore, id)
         response.json({ status: 'denied' })
         return
       }
 
-      const now = new Date()
-      const decision = decideApprove(
-        record,
-        user.uid,
-        now.getTime(),
-        now.toJSON(),
-        credentialName(user)
+      // Decided on the request as stored at commit, so two approvals (or an
+      // approval racing a denial) cannot both land.
+      const { decision, record } = await approveRequest(
+        firestoreStore,
+        id,
+        { uid: user.uid, name: credentialName(user) },
+        new Date()
       )
       if (decision.status === 'refused') {
         functions.logger.warn(`authorize: approve refused (${decision.reason})`)
@@ -189,7 +183,6 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
         })
         return
       }
-      await ref.update(decision.patch)
       functions.logger.info(`authorize: ${id} approved by ${user.uid}`)
       response.json({
         status: 'approved',
@@ -207,73 +200,39 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
     if (action === 'exchange') {
       const id = String(req.body?.requestId ?? '')
       const verifier = String(req.body?.verifier ?? '')
-      const ref = requests().doc(id)
-      const snapshot = id ? await ref.get() : null
-      const record = snapshot?.exists
-        ? ({ ...snapshot.data(), _id: snapshot.id } as AuthorizeRequest)
-        : null
-
-      const decision = decideExchange(record, verifier, Date.now())
-      if (decision.status === 'pending') {
+      // Mints from the approver's LIVE roles, and consumes the request in the
+      // same transaction as the mint — at most one token per request, even
+      // when two exchanges race (authorize-store.ts).
+      const outcome = await exchangeRequest(firestoreStore, id, verifier, { rolesOf })
+      if (outcome.status === 'pending') {
         response.json({ status: 'pending', pollIntervalMs: POLL_INTERVAL_MS })
         return
       }
-      if (decision.status === 'refused') {
-        functions.logger.warn(`authorize: exchange refused (${decision.reason})`)
-        // Specific in the log, generic on the wire — the four reasons together
+      if (outcome.status === 'refused') {
+        functions.logger.warn(`authorize: exchange refused (${outcome.reason})`)
+        // Specific in the log, generic on the wire — the reasons together
         // describe the state of a request to somebody who does not hold the
         // verifier for it.
         fail(response, 403, 'refused', 'refused')
         return
       }
-
-      // Mint HERE, from the approver's live roles — not at approval time. A
-      // revocation between approving and collecting therefore takes effect.
-      const principal = await rolesOf(decision.principalUid)
-      const mint = decideMint({
-        principalUid: decision.principalUid,
-        principalRoles: principal,
-        viaToken: false,
-        label: decision.label,
-        caveats: decision.caveats,
-        ttlMs: decision.ttlMs,
-        nowIso: new Date().toJSON(),
-      })
-      if (mint.status === 'refused') {
+      if (outcome.status === 'mint-refused') {
         response
           .status(403)
-          .json({ error: 'refused', message: 'the mint was refused', problems: mint.problems })
+          .json({ error: 'refused', message: 'the mint was refused', problems: outcome.problems })
         return
       }
 
-      const secret = newTokenSecret()
-      const tokenRef = db().collection('token').doc()
-      const createdAt = mint.record.createdAt
-      // Consume the request in the same batch that creates the token, so a
-      // crash cannot leave a request that is still exchangeable for a second
-      // credential.
-      const batch = db().batch()
-      batch.set(tokenRef, {
-        ...mint.record,
-        // The approver's name, captured when they approved (#28).
-        ...(decision.principalName ? { principalName: decision.principalName } : {}),
-        hash: hashToken(secret),
-        _created: createdAt,
-        _modified: createdAt,
-      })
-      batch.update(ref, { usedAt: createdAt })
-      await batch.commit()
-
       functions.logger.info(
-        `authorize: ${id} exchanged — token ${tokenRef.id} for ${decision.principalUid}`
+        `authorize: ${id} exchanged — token ${outcome.tokenId} for ${outcome.principalUid}`
       )
       response.json({
         status: 'ready',
-        id: tokenRef.id,
-        secret,
-        label: mint.record.label,
-        caveats: mint.record.caveats,
-        expiresAt: mint.record.expiresAt,
+        id: outcome.tokenId,
+        secret: outcome.secret,
+        label: outcome.record.label,
+        caveats: outcome.record.caveats,
+        expiresAt: outcome.record.expiresAt,
       })
       return
     }
