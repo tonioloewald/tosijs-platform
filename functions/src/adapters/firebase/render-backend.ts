@@ -10,7 +10,7 @@
  * (`dependents`) — so a sovereign host implements the interface on its own
  * store rather than over `Store`.
  */
-import * as admin from 'firebase-admin'
+import { firebaseAdmin } from './app'
 // Modular imports, not `admin.firestore.FieldValue`: the functions emulator
 // wraps the `admin.firestore` namespace WITHOUT its static members, so the
 // namespace form threw there (found 2026-10-22) while working in production.
@@ -29,9 +29,9 @@ const versionOf = (snap: FirebaseFirestore.DocumentSnapshot): string | null =>
 
 /** Values in `collection`, one document per key; invalidations logged in `logCollection`. */
 export function firestoreComputedBackend(collection: string, logCollection: string): ComputedBackend {
-  const docRef = (key: string) => admin.firestore().collection(collection).doc(encodeURIComponent(key))
+  const docRef = (key: string) => firebaseAdmin().firestore().collection(collection).doc(encodeURIComponent(key))
   const logRef = (dep: string) =>
-    admin.firestore().collection(logCollection).doc(encodeURIComponent(dep).slice(0, 1400))
+    firebaseAdmin().firestore().collection(logCollection).doc(encodeURIComponent(dep).slice(0, 1400))
 
   return {
     async read(key) {
@@ -40,7 +40,7 @@ export function firestoreComputedBackend(collection: string, logCollection: stri
     },
     async readMany(keys) {
       if (!keys.length) return []
-      const snaps = await admin.firestore().getAll(...keys.map(docRef))
+      const snaps = await firebaseAdmin().firestore().getAll(...keys.map(docRef))
       return snaps.map((s) => ({ entry: s.exists ? (s.data() as Entry) : undefined, version: versionOf(s) }))
     },
     async writeIfUnchanged(key, entry, expected) {
@@ -65,7 +65,7 @@ export function firestoreComputedBackend(collection: string, logCollection: stri
     },
     async writeAll(entries) {
       // Merge: a stale marker keeps the recorded deps, so cascades still find it.
-      const writer = admin.firestore().bulkWriter()
+      const writer = firebaseAdmin().firestore().bulkWriter()
       let failed = 0
       writer.onWriteError((err) => {
         if (err.failedAttempts < 3) return true // retry
@@ -79,8 +79,7 @@ export function firestoreComputedBackend(collection: string, logCollection: stri
     async dependents(deps) {
       const out = new Set<string>()
       for (let i = 0; i < deps.length; i += 30) {
-        const snap = await admin
-          .firestore()
+        const snap = await firebaseAdmin().firestore()
           .collection(collection)
           .where('deps', 'array-contains-any', deps.slice(i, i + 30))
           .select('key')
@@ -92,14 +91,14 @@ export function firestoreComputedBackend(collection: string, logCollection: stri
     async logInvalidation(deps) {
       // Chunked, never truncated: an unlogged dep would reopen the first-fill race.
       for (let i = 0; i < deps.length; i += 450) {
-        const batch = admin.firestore().batch()
+        const batch = firebaseAdmin().firestore().batch()
         for (const dep of deps.slice(i, i + 450)) batch.set(logRef(dep), { dep, at: FieldValue.serverTimestamp() })
         await batch.commit()
       }
     },
     async invalidatedSince(deps, sinceMs) {
       if (!deps.length) return false
-      const snaps = await admin.firestore().getAll(...deps.map(logRef))
+      const snaps = await firebaseAdmin().firestore().getAll(...deps.map(logRef))
       return snaps.some((s) => {
         const at = s.exists ? (s.data()?.at as Timestamp | undefined) : undefined
         return Boolean(at && at.toMillis() >= sinceMs)

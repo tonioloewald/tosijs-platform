@@ -14,7 +14,7 @@ import { optionsResponse, getUserRoles, type AuthenticatedRequest } from './util
 import { fail, noStore } from './errors'
 import { collectionsFor } from './install/installed'
 import { hasPrivilegedRole } from './collections/access'
-import { firestoreStore } from './firestore-store'
+import { firestoreStore } from './adapters/firebase/firestore-store'
 import { cloudStorageObjects } from './adapters/firebase/cloud-storage'
 import { commitTransactionally } from './commit'
 import { handleBlob, type BlobDeps } from './blob-handler'

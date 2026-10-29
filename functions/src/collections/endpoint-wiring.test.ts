@@ -44,7 +44,10 @@ describe('getUserRoles: the B1 defects stay fixed (#6)', () => {
   test('tokens are checked for revocation', () => {
     // Without the second argument a revoked or disabled session keeps full
     // access for the remaining life of an issued ID token, ~1h.
-    expect(utilities).toMatch(/verifyIdToken\(idToken, true\)/)
+    // The check lives in the Firebase identity adapter; utilities must go
+    // through the port to it.
+    expect(src('adapters/firebase/identity.ts')).toMatch(/verifyIdToken\(idToken, true\)/)
+    expect(utilities).toMatch(/identity\(\)\.verifyIdToken\(idToken\)/)
   })
 
   test('the read path no longer WRITES', () => {

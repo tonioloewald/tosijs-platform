@@ -1,14 +1,16 @@
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
+import { secret } from './secrets'
 import { log } from './log'
-import { defineSecret } from 'firebase-functions/params'
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
 import compression from 'compression'
 import { optionsResponse, getUserRoles } from './utilities'
 import { validate as schemaValidate } from 'tosijs-schema'
 
-const geminiApiKey = defineSecret('gemini-api-key')
-const chatgptApiKey = defineSecret('chatgpt-api-key')
+const GEMINI_API_KEY = 'gemini-api-key'
+const CHATGPT_API_KEY = 'chatgpt-api-key'
+
+/** The secrets /gen reads; its binding declares them (index.ts). */
+export const GEN_SECRETS = [GEMINI_API_KEY, CHATGPT_API_KEY] as const
 
 const compressResponse = compression()
 
@@ -154,92 +156,89 @@ interface GenParams {
   schema?: any // JSON Schema for structured output
 }
 
-export const gen = onRequest(
-  { ...PUBLIC_ENDPOINT, secrets: [geminiApiKey, chatgptApiKey] },
-  async (req, res) => {
-    if (optionsResponse(req, res, ['GET', 'POST'])) {
-      return
-    }
+export const handleGen: Handler = async (req, res) => {
+  if (optionsResponse(req, res, ['GET', 'POST'])) {
+    return
+  }
 
-    const userRoles = await getUserRoles(req)
+  const userRoles = await getUserRoles(req)
 
-    if (userRoles.roles.filter((role) => role !== 'public').length === 0) {
-      res.status(403).send('forbidden')
-      return
-    }
+  if (userRoles.roles.filter((role) => role !== 'public').length === 0) {
+    res.status(403).send('forbidden')
+    return
+  }
 
-    const { query, body } = req
-    const source: GenParams = req.method === 'GET' ? query : body
-    const { modelId, prompt, schema } = Object.assign(
-      { modelId: 'gemini-2.5-pro' },
-      source
-    )
+  const { query, body } = req
+  const source: GenParams = req.method === 'GET' ? query : body
+  const { modelId, prompt, schema } = Object.assign(
+    { modelId: 'gemini-2.5-pro' },
+    source
+  )
 
-    if (!prompt) {
-      res.status(400).send('prompt required!')
-      return
-    }
+  if (!prompt) {
+    res.status(400).send('prompt required!')
+    return
+  }
 
-    try {
-      let result: string | object
+  try {
+    let result: string | object
 
-      if (modelId.startsWith('gemini-')) {
-        const apiKey = geminiApiKey.value()
-        if (!apiKey) {
-          res
-            .status(503)
-            .send(
-              'Gemini API key not configured. Run: firebase functions:secrets:set gemini-api-key'
-            )
-          return
-        }
-        result = await geminiCompletion(apiKey, modelId, prompt, schema)
-      } else if (modelId.startsWith('gpt-')) {
-        const apiKey = chatgptApiKey.value()
-        if (!apiKey) {
-          res
-            .status(503)
-            .send(
-              'ChatGPT API key not configured. Run: firebase functions:secrets:set chatgpt-api-key'
-            )
-          return
-        }
-        result = await chatgptCompletion(apiKey, modelId, prompt, schema)
-      } else {
-        res.status(400).send('unrecognized modelId')
+    if (modelId.startsWith('gemini-')) {
+      const apiKey = secret(GEMINI_API_KEY)
+      if (!apiKey) {
+        res
+          .status(503)
+          .send(
+            'Gemini API key not configured. Run: firebase functions:secrets:set gemini-api-key'
+          )
         return
       }
-
-      // If schema was provided, validate the response
-      if (schema && typeof result === 'object') {
-        const errors: Array<{ path: string; message: string }> = []
-        const valid = schemaValidate(result, schema, (path, message) => {
-          errors.push({ path, message })
-        })
-
-        compressResponse(req, res, () => {
-          res.json({
-            modelId,
-            prompt,
-            data: result,
-            valid,
-            ...(errors.length > 0 ? { errors } : {}),
-          })
-        })
-      } else {
-        // Text response (no schema)
-        compressResponse(req, res, () => {
-          res.json({
-            modelId,
-            prompt,
-            text: result as string,
-          })
-        })
+      result = await geminiCompletion(apiKey, modelId, prompt, schema)
+    } else if (modelId.startsWith('gpt-')) {
+      const apiKey = secret(CHATGPT_API_KEY)
+      if (!apiKey) {
+        res
+          .status(503)
+          .send(
+            'ChatGPT API key not configured. Run: firebase functions:secrets:set chatgpt-api-key'
+          )
+        return
       }
-    } catch (e) {
-      log.error('Generation failed:', e)
-      const detail = e instanceof Error ? e.message : String(e)
-      res.status(500).send(`Generation failed: ${detail}`)
+      result = await chatgptCompletion(apiKey, modelId, prompt, schema)
+    } else {
+      res.status(400).send('unrecognized modelId')
+      return
     }
+
+    // If schema was provided, validate the response
+    if (schema && typeof result === 'object') {
+      const errors: Array<{ path: string; message: string }> = []
+      const valid = schemaValidate(result, schema, (path, message) => {
+        errors.push({ path, message })
+      })
+
+      compressResponse(req, res, () => {
+        res.json({
+          modelId,
+          prompt,
+          data: result,
+          valid,
+          ...(errors.length > 0 ? { errors } : {}),
+        })
+      })
+    } else {
+      // Text response (no schema)
+      compressResponse(req, res, () => {
+        res.json({
+          modelId,
+          prompt,
+          text: result as string,
+        })
+      })
+    }
+  } catch (e) {
+    log.error('Generation failed:', e)
+    const detail = e instanceof Error ? e.message : String(e)
+    res.status(500).send(`Generation failed: ${detail}`)
   }
-)
+}

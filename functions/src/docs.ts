@@ -33,7 +33,7 @@ import {
   type CollectionMap,
 } from './collections/access'
 import { collectionsFor } from './install/installed'
-import { storeFor } from './doc'
+import { firestoreStoreFor as storeFor } from './adapters/firebase/firestore-store'
 import { listRecords, sequencedDelta } from './collections/list'
 import { Response } from 'express'
 import { validateWriteSet } from './collections/write-set'

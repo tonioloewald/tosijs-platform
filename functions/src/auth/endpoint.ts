@@ -46,7 +46,7 @@ import { fail, noStore } from '../errors'
 import { credentialName } from '../collections/join-roles'
 import { principalIdentity } from '../collections/roles'
 import { createDocument, newDocId, updateDocumentIf } from '../collections/store'
-import { firestoreStore } from '../firestore-store'
+import { firestoreStore } from '../adapters/firebase/firestore-store'
 
 const TOKENS = 'token'
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000

@@ -47,12 +47,17 @@ import './page'
 // Render on store (D23): re-render after writes to post/page/config. LAST, so it
 // wraps the hooks the modules above registered.
 import './render/hooks'
+import { firebaseAdmin } from './adapters/firebase/app'
 import { setLogSink } from './log'
 import { firebaseLogger } from './adapters/firebase/logger'
+import { setIdentityProvider } from './identity'
+import { firebaseIdentity } from './adapters/firebase/identity'
 
-// The kernel logs through the logger port so it carries no vendor dependency.
-// Deployed, the sink is Cloud Logging's structured logger.
+// The kernel reaches the vendor only through ports. Deployed, the log sink is
+// Cloud Logging's structured logger and identities are Firebase Auth's.
+firebaseAdmin() // initialise the default app before any request
 setLogSink(firebaseLogger)
+setIdentityProvider(firebaseIdentity)
 
 import { firebaseEndpoint } from './adapters/firebase/http'
 import { handleDoc } from './doc'
@@ -89,4 +94,5 @@ export const token = firebaseEndpoint(handleToken)
 export const authorize = firebaseEndpoint(handleAuthorize)
 export const blob = firebaseEndpoint(handleBlobEndpoint)
 
-export { gen } from './gen'
+import { handleGen, GEN_SECRETS } from './gen'
+export const gen = firebaseEndpoint(handleGen, { secrets: GEN_SECRETS })

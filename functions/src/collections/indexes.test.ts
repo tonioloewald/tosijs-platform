@@ -55,7 +55,7 @@ const utilities = readFileSync(
 // through `firestoreQuery`, which keeps getRecords' query shape.
 const principal = readFileSync(join(__dirname, 'principal.ts'), 'utf-8')
 const firestoreStore = readFileSync(
-  join(__dirname, '..', 'firestore-store.ts'),
+  join(__dirname, '..', 'adapters', 'firebase', 'firestore-store.ts'),
   'utf-8'
 )
 
@@ -78,7 +78,9 @@ describe('firestore.indexes.json covers the queries the code actually makes', ()
     // If this stops being true the requirement may have gone away; check before
     // deleting the index declaration.
     expect(utilities).toMatch(/orderBy\s*=\s*['"]_created desc['"]/)
-    expect(utilities).toMatch(/ref\.orderBy\(/)
+    // ...and hands it to the store port, whose Firestore query orders by it.
+    expect(utilities).toMatch(/const options: QueryOptions = \{ limit: maxRecords, orderBy \}/)
+    expect(firestoreStore).toMatch(/ref\.orderBy\(/)
   })
 
   test('firestoreQuery orders by _created desc by default, as getRecords does', () => {

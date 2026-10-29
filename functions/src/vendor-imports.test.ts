@@ -24,15 +24,11 @@ const SRC = new URL('.', import.meta.url).pathname
 /** Modules only an adapter may import. */
 const VENDOR = /^(firebase-admin|firebase-functions|@google-cloud\/|@firebase\/|firebase$|firebase\/)/
 
-/** Files outside `adapters/` that still import a vendor SDK (started 2026-10-22, 22 files). */
-const NOT_YET_PORTED = [
-  'auth/authorize-endpoint.ts',
-  'doc.ts',
-  'firestore-store.ts',
-  'gen.ts',
-  'stored.ts',
-  'utilities.ts',
-]
+/**
+ * Files outside `adapters/` that still import a vendor SDK. Started 2026-10-22
+ * with 22 files; empty since 2026-10-30 (Phase 1). Keep it empty.
+ */
+const NOT_YET_PORTED: string[] = []
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
@@ -51,6 +47,8 @@ function vendorImports(file: string): string[] {
     ...text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g),
     ...text.matchAll(/\brequire\(\s*['"]([^'"]+)['"]\s*\)/g),
     ...text.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g),
+    // A bare side-effect import (`import 'firebase-admin'`) has no `from`.
+    ...text.matchAll(/^\s*import\s+['"]([^'"]+)['"]/gm),
   ].map((m) => m[1])
   return specifiers.filter((s) => VENDOR.test(s))
 }
@@ -64,7 +62,9 @@ describe('vendor SDKs are imported only by adapters (a ratchet)', () => {
 
   test('the scan sees the tree (it is looking at something)', () => {
     expect(files.length).toBeGreaterThan(50)
-    expect(importing.length).toBeGreaterThan(0)
+    // The adapters DO import vendor SDKs, so the scan can see one.
+    const adapters = files.filter((f) => f.startsWith('adapters/'))
+    expect(adapters.filter((f) => vendorImports(join(SRC, f)).length > 0).length).toBeGreaterThan(0)
   })
 
   test('no file outside adapters/ newly imports a vendor SDK', () => {
@@ -75,5 +75,15 @@ describe('vendor SDKs are imported only by adapters (a ratchet)', () => {
     // If this fails, delete the named entries from NOT_YET_PORTED: the ratchet
     // only turns one way.
     expect(NOT_YET_PORTED.filter((f) => !importing.includes(f))).toEqual([])
+  })
+
+  test('no file outside adapters/ takes the raw SDK handle from adapters/<vendor>/app', () => {
+    // `app.ts` re-exports the initialised firebase-admin; importing it from the
+    // kernel is a vendor import by another name, and would slip past the scan.
+    // index.ts is the composition root: it initialises the app at startup.
+    const viaApp = files
+      .filter((f) => !f.startsWith('adapters/') && f !== 'index.ts')
+      .filter((f) => /from\s+['"][./]*adapters\/[^/'"]+\/app['"]/.test(readFileSync(join(SRC, f), 'utf-8')))
+    expect(viaApp).toEqual([])
   })
 })

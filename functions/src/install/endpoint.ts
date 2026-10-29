@@ -60,7 +60,7 @@ import {
 import { ManifestConflict } from './manifest-identity'
 import { commitInstall, updateProposalIf } from './install-store'
 import { createDocument, newDocId } from '../collections/store'
-import { firestoreStore } from '../firestore-store'
+import { firestoreStore } from '../adapters/firebase/firestore-store'
 import { fail, noStore } from '../errors'
 
 const MANIFESTS = 'manifest'

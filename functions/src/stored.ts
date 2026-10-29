@@ -24,7 +24,7 @@
 import { deliveryHeaders } from './blob-handler'
 import { storedObjectPath } from './legacy-storage'
 import type { Handler } from './http'
-import * as admin from 'firebase-admin'
+import { cloudStorageLegacyFiles } from './adapters/firebase/cloud-storage'
 
 import { optionsResponse } from './utilities'
 import { getMimeType } from '../shared/mime-types'
@@ -37,6 +37,8 @@ const URL_EXPIRATION_MS = 60 * 60 * 1000
 
 // Cache duration slightly less than URL expiration to ensure valid URLs
 const CACHE_MAX_AGE_SECONDS = 55 * 60 // 55 minutes
+
+const files = cloudStorageLegacyFiles()
 
 export const handleStored: Handler = async (req, res) => {
   if (optionsResponse(req, res)) {
@@ -62,26 +64,15 @@ export const handleStored: Handler = async (req, res) => {
   }
 
   try {
-    // The project's DEFAULT bucket — the one the client SDK uploads to and
-    // /blob writes to. It was hardcoded as `<project>.appspot.com`, which is
-    // wrong for newer projects (`.firebasestorage.app`).
-    const bucket = admin.storage().bucket()
-    const file = bucket.file(filePath)
-
     // Check if file exists
-    const [exists] = await file.exists()
-    if (!exists) {
+    if (!(await files.exists(filePath))) {
       res.status(404).send('File not found')
       return
     }
 
     // Try to generate signed URL (works in production, fails in emulator)
     try {
-      const [signedUrl] = await file.getSignedUrl({
-        version: 'v4',
-        action: 'read',
-        expires: Date.now() + URL_EXPIRATION_MS,
-      })
+      const signedUrl = await files.signedReadUrl(filePath, URL_EXPIRATION_MS)
 
       // Set cache headers to match URL expiration
       res.set('Cache-Control', `public, max-age=${CACHE_MAX_AGE_SECONDS}`)
@@ -91,12 +82,11 @@ export const handleStored: Handler = async (req, res) => {
       res.redirect(302, signedUrl)
     } catch (signedUrlError) {
       // Fallback for emulator: stream the file directly
-      const [metadata] = await file.getMetadata()
+      const stored = await files.contentType(filePath)
       // Use extension-based MIME type if metadata is missing or generic
       const contentType =
-        metadata.contentType &&
-        metadata.contentType !== 'application/octet-stream'
-          ? metadata.contentType
+        stored && stored !== 'application/octet-stream'
+          ? stored
           : getMimeType(filePath)
 
       res.set('Content-Type', contentType)
@@ -108,7 +98,7 @@ export const handleStored: Handler = async (req, res) => {
       // content role straight through the Storage SDK).
       res.set(deliveryHeaders(contentType))
 
-      const stream = file.createReadStream()
+      const stream = files.read(filePath)
       stream.on('error', () => {
         if (!res.headersSent) {
           res.status(500).send('Error reading file')

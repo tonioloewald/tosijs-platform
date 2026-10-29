@@ -1,9 +1,9 @@
 /**
  * The Firestore implementation of the substrate port (tosijs-platform#7).
  *
- * Lives OUTSIDE `collections/` on purpose: `collections/` is the portable
+ * An adapter (SOVEREIGN-PLAN.md Phase 1): `collections/` is the portable
  * decision kernel (it is what `service-compris` publishes) and imports nothing
- * from firebase. The vendor binding belongs here.
+ * from firebase. The vendor binding belongs here, under `adapters/firebase/`.
  *
  * ## Identical by construction
  *
@@ -14,16 +14,16 @@
  * the SDK would be a second chance to get them wrong for no benefit. The port
  * is about who the endpoint TALKS TO, not about rewriting what it says.
  *
- * Injection also keeps the dependency acyclic: `doc.ts` owns those primitives
- * and constructs the store, so this module never imports `doc.ts`. Moving them
- * here would be tidier and is worth doing when the read path lands, at which
- * point `doc.ts` stops needing them directly.
+ * They used to live in `doc.ts`; with the read path on the store too, nothing
+ * outside this file needs them, so they moved here (end of this file) and
+ * `firestoreStoreFor(collections)` builds the store with them.
  */
-import * as admin from 'firebase-admin'
+import { firebaseAdmin } from './app'
 import { FieldPath } from 'firebase-admin/firestore'
 
-import type { Store, StoredDoc, QueryOptions, Tx } from './collections/store'
-import { physicalPath } from './collections/namespace'
+import type { Store, StoredDoc, QueryOptions, Tx } from '../../collections/store'
+import { physicalPath } from '../../collections/namespace'
+import type { CollectionMap } from '../../collections/access'
 
 type DocRef = FirebaseFirestore.DocumentReference
 type AnyRef = DocRef | FirebaseFirestore.Query
@@ -67,7 +67,7 @@ export class FirestoreStore implements Store {
     // else. See tosijs-platform#7.
     const parts = physicalPath(path).split('/')
     let ref: FirebaseFirestore.Firestore | DocRef =
-      admin.firestore() as FirebaseFirestore.Firestore
+      firebaseAdmin().firestore() as FirebaseFirestore.Firestore
     while (parts.length) {
       const collection = parts.shift() as string
       const id = parts.shift() as string
@@ -150,8 +150,7 @@ function buildQuery(
   collection: string,
   options: QueryOptions
 ): FirebaseFirestore.Query {
-  let ref: FirebaseFirestore.Query = admin
-    .firestore()
+  let ref: FirebaseFirestore.Query = firebaseAdmin().firestore()
     .collection(physicalPath(collection))
   if (options.equals) {
     ref = ref.where(options.equals.field, '==', options.equals.value)
@@ -210,14 +209,14 @@ export async function* firestoreScan(
   }
 }
 
-const docRef = (path: string): DocRef => admin.firestore().doc(physicalPath(path))
+const docRef = (path: string): DocRef => firebaseAdmin().firestore().doc(physicalPath(path))
 
 /**
  * `Store.transaction` against Firestore: `runTransaction`, which retries the
  * body on contention — hence the port's retry-safe rule.
  */
 export function firestoreTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
-  return admin.firestore().runTransaction(async (t) => {
+  return firebaseAdmin().firestore().runTransaction(async (t) => {
     const tx: Tx = {
       get: async (path) => {
         const snapshot = await t.get(docRef(path))
@@ -258,11 +257,154 @@ export async function firestoreDelete(path: string): Promise<void> {
   await docRef(path).delete()
 }
 
+/** `Store.set` against Firestore: a whole-document write (merge is the transaction's). */
+export async function firestoreSet(path: string, data: Record<string, unknown>): Promise<void> {
+  await docRef(path).set(data)
+}
+
 /** Firestore for kernel code that needs no `field=value` path resolution (that needs the per-request collection map; see `storeFor` in doc.ts). */
-export const firestoreStore: Pick<Store, 'get' | 'query' | 'scan' | 'transaction' | 'delete'> = {
+export const firestoreStore: Pick<Store, 'get' | 'query' | 'scan' | 'transaction' | 'delete'> & {
+  set: (path: string, data: Record<string, unknown>) => Promise<void>
+} = {
   get: firestoreGet,
+  set: firestoreSet,
   query: firestoreQuery,
   delete: firestoreDelete,
   scan: firestoreScan,
   transaction: firestoreTransaction,
 }
+
+// ── path resolution and uniqueness (moved from doc.ts) ──────────────────
+
+type FirestoreRef = AnyRef
+
+const getRef = async (
+  path: string,
+  isCollection = false,
+  // Which configs to resolve `field=value` against. Defaults to the compiled
+  // platform map; a namespaced request passes the merged map so an installed
+  // collection's own `unique`/`tagFields` are honoured. NOT a global read: see
+  // REQUIRED, with no default (0.2.0-beta.5 review): a silent default to the
+  // compiled map meant a call site that forgot to pass the request's map
+  // resolved `field=value` against rules that, with the registry switch on,
+  // are no longer the ones in force. A forgotten site now fails to compile.
+  collections: CollectionMap
+): Promise<FirestoreRef | Error> => {
+  const pathParts = path.split('/')
+
+  // Use any internally for the building phase, then return typed result
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ref: any = firebaseAdmin().firestore()
+  const collectionStack: string[] = []
+  while (pathParts.length) {
+    const collection = pathParts.shift()
+    if (collection) collectionStack.push(collection)
+    const docSpecifier = pathParts.shift()
+
+    if (!collection) {
+      // should never happen because we have an even number of parts
+      throw new Error('expected collection')
+    }
+
+    if (!docSpecifier) {
+      if (!isCollection || pathParts.length) {
+        throw new Error('expected docSpecifier')
+      }
+      ref = ref.collection(collection)
+    } else if (!docSpecifier.includes('=')) {
+      ref = ref.collection(collection).doc(docSpecifier)
+    } else {
+      const [field, value] = docSpecifier.split('=', 2)
+      const config = collections[collectionStack.join('/')]
+      const isUnique = config?.unique?.includes(field)
+      const isTagField = config?.tagFields?.includes(field)
+      if (!isUnique && !isTagField) {
+        return new Error(
+          `${path} is not allowed; ${field} is not an allowed key`
+        )
+      }
+      const operator = isTagField ? 'array-contains' : '=='
+
+      // For collection queries, return the query reference instead of resolving to a single doc
+      const collRef = ref.collection(collection)
+      if (isCollection) {
+        ref = collRef.where(
+          field,
+          operator as FirebaseFirestore.WhereFilterOp,
+          value
+        )
+      } else {
+        const snapshot = await collRef
+          .where(field, operator as FirebaseFirestore.WhereFilterOp, value)
+          .limit(1)
+          .get()
+        let id: string | null = null
+        if (!snapshot.empty) {
+          snapshot.forEach((doc: FirebaseFirestore.QueryDocumentSnapshot) => {
+            id = doc.id
+          })
+        }
+        if (id === null) {
+          return new Error(`record not found ${path}`)
+        }
+
+        ref = collRef.doc(id)
+      }
+    }
+  }
+
+  return ref as FirestoreRef
+}
+
+const isUnique = async (
+  collections: CollectionMap,
+  path: string,
+  field: string,
+  value: unknown,
+  existing: FirebaseFirestore.DocumentReference
+): Promise<boolean> => {
+  if (!['string', 'number'].includes(typeof value)) {
+    return false
+  }
+  const parts = path.split('/')
+  parts.pop()
+  const ref = await getRef(parts.join('/'), true, collections)
+  if (ref instanceof Error) {
+    return false
+  }
+  let duplicate = false
+  const snapshot = await (ref as FirebaseFirestore.Query)
+    .where(field, '==', value)
+    .limit(2)
+    .get()
+  if (!snapshot.empty) {
+    snapshot.forEach((doc) => {
+      if (doc.id !== existing.id) {
+        duplicate = true
+      }
+    })
+  }
+
+  return !duplicate
+}
+
+/**
+ * The substrate `/doc` (mutations) and `/docs` (lists) go through (tosijs-platform#7).
+ *
+ * `getRef`/`isUnique` (above, moved here from doc.ts unchanged) are injected
+ * into the store, so the ported code runs the exact same resolution and
+ * uniqueness logic it did before. The port changes who the endpoint talks to,
+ * not what it says.
+ *
+ * Built PER REQUEST rather than once at module load, because `getRef` now has
+ * to resolve `field=value` against the collection map for that request — and a
+ * module-level store would silently resolve an installed collection's unique
+ * key against the platform map, which has no entry for it, and reject every
+ * such path as "not an allowed key".
+ */
+export const firestoreStoreFor = (collections: CollectionMap) =>
+  new FirestoreStore({
+    getRef: (path, isCollection) => getRef(path, isCollection, collections),
+    isUnique: (path, field, value, existing) =>
+      isUnique(collections, path, field, value, existing),
+  })

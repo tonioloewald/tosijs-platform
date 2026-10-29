@@ -6,7 +6,7 @@
  * (vendor-imports.test.ts) lets import a vendor SDK. A sovereign host swaps
  * this for a filesystem or S3-compatible store and nothing above it changes.
  */
-import * as admin from 'firebase-admin'
+import { firebaseAdmin } from './app'
 import { createHash } from 'crypto'
 import type { ObjectStore } from '../../blob-handler'
 
@@ -19,7 +19,7 @@ export function cloudStorageObjects(deps: {
   /** Told once per instance that URLs cannot be signed (the handler then streams). */
   onCannotSign: (error: unknown) => void
 }): StreamingObjectStore {
-  const bucket = () => admin.storage().bucket()
+  const bucket = () => firebaseAdmin().storage().bucket()
   let signingWarned = false
   return {
     put: async (key, bytes, contentType) => {
@@ -68,5 +68,32 @@ export function cloudStorageObjects(deps: {
       }
     },
     read: (key) => bucket().file(key).createReadStream(),
+  }
+}
+
+/**
+ * What `/stored` (the LEGACY reader, stored.ts) needs from the default bucket,
+ * moved out of it unchanged: v4 signed read URLs, without a response type.
+ */
+export interface LegacyStoredFiles {
+  exists(key: string): Promise<boolean>
+  /** Rejects where URLs cannot be signed (the emulator); the caller then streams. */
+  signedReadUrl(key: string, ttlMs: number): Promise<string>
+  /** The stored content type, if the object has one. */
+  contentType(key: string): Promise<string | undefined>
+  read(key: string): NodeJS.ReadableStream
+}
+
+export function cloudStorageLegacyFiles(): LegacyStoredFiles {
+  // The project's DEFAULT bucket — the one the client SDK uploads to and
+  // /blob writes to. It was hardcoded as `<project>.appspot.com`, which is
+  // wrong for newer projects (`.firebasestorage.app`).
+  const file = (key: string) => firebaseAdmin().storage().bucket().file(key)
+  return {
+    exists: async (key) => (await file(key).exists())[0],
+    signedReadUrl: async (key, ttlMs) =>
+      (await file(key).getSignedUrl({ version: 'v4', action: 'read', expires: Date.now() + ttlMs }))[0],
+    contentType: async (key) => (await file(key).getMetadata())[0].contentType as string | undefined,
+    read: (key) => file(key).createReadStream(),
   }
 }

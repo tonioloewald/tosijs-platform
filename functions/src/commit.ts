@@ -13,7 +13,7 @@ import {
   type CommitOutcome,
   type TransactionalWrite,
 } from './collections/commit'
-import { firestoreStore } from './firestore-store'
+import { firestoreStore } from './adapters/firebase/firestore-store'
 
 export type { CommitOutcome, Refusal, TransactionalWrite } from './collections/commit'
 

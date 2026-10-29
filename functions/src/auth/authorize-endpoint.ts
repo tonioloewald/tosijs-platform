@@ -33,7 +33,7 @@ collecting takes effect, and the "no secret is ever stored" property survives.
 
 import { PAGE_HEADERS } from '../page-csp'
 import type { Handler } from '../http'
-import * as admin from 'firebase-admin'
+import { identity } from '../identity'
 import { log } from '../log'
 
 import {
@@ -50,7 +50,7 @@ import {
   POLL_INTERVAL_MS,
 } from './authorize'
 import { storeSweepable, sweepExpired } from '../sweep'
-import { firestoreStore } from '../firestore-store'
+import { firestoreStore } from '../adapters/firebase/firestore-store'
 import { approveRequest, denyRequest, exchangeRequest, readRequest } from './authorize-store'
 import { createDocument, newDocId } from '../collections/store'
 import { consentPage } from './consent-page'
@@ -85,7 +85,7 @@ export const handleAuthorize: Handler = async (request, response: Response) => {
     // host with nothing configured — which is the whole premise of #5.
     if (action === 'config') {
       response.set('Cache-Control', 'public, max-age=3600')
-      response.json(await webConfig())
+      response.json(await identity().webConfig())
       return
     }
 
@@ -241,26 +241,6 @@ export const handleAuthorize: Handler = async (request, response: Response) => {
     log.error(`authorize: ${req.method} failed`, e)
     fail(response, 500, 'internal', 'authorization failed')
   }
-}
-
-let cachedConfig: Record<string, unknown> | null = null
-
-/** The Firebase web config for this project, from the Firebase Management API. */
-async function webConfig(): Promise<Record<string, unknown>> {
-  if (cachedConfig) return cachedConfig
-  const projectId =
-    process.env.GCLOUD_PROJECT ?? process.env.GOOGLE_CLOUD_PROJECT ?? ''
-  const credential = admin.app().options.credential
-  const accessToken = await credential?.getAccessToken()
-  const res = await fetch(
-    `https://firebase.googleapis.com/v1beta1/projects/${projectId}/webApps/-/config`,
-    { headers: { Authorization: `Bearer ${accessToken?.access_token}` } }
-  )
-  if (!res.ok) {
-    throw new Error(`could not read the web config: ${res.status}`)
-  }
-  cachedConfig = (await res.json()) as Record<string, unknown>
-  return cachedConfig
 }
 
 /** The principal's roles, read live. Same shape `getUserRoles` uses. */

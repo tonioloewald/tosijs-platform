@@ -12,7 +12,6 @@
 */
 
 import type { Handler } from './http'
-import * as admin from 'firebase-admin'
 import compression from 'compression'
 
 import { log } from './log'
@@ -30,7 +29,6 @@ import {
   ALL,
   hasPrivilegedRole,
   opaqueStatus,
-  type CollectionMap,
 } from './collections/access'
 import { collectionsFor } from './install/installed'
 import { UserRoles } from './collections/roles'
@@ -38,7 +36,8 @@ import {
   runWritePipeline,
   type WriteMethod,
 } from './collections/write-pipeline'
-import { FirestoreStore } from './firestore-store'
+import { firestoreStoreFor as storeFor } from './adapters/firebase/firestore-store'
+export { storeFor }
 import {
   fail,
   notFound,
@@ -95,146 +94,6 @@ const opaqueError = (
   status: opaqueStatus(userRoles, status),
 })
 
-type FirestoreDocRef = FirebaseFirestore.DocumentReference
-type FirestoreQuery = FirebaseFirestore.Query
-type FirestoreRef = FirestoreDocRef | FirestoreQuery
-
-// Helper type guard for document references
-function isDocRef(ref: FirestoreRef): ref is FirestoreDocRef {
-  return 'id' in ref && 'set' in ref
-}
-
-export const getRef = async (
-  path: string,
-  isCollection = false,
-  // Which configs to resolve `field=value` against. Defaults to the compiled
-  // platform map; a namespaced request passes the merged map so an installed
-  // collection's own `unique`/`tagFields` are honoured. NOT a global read: see
-  // REQUIRED, with no default (0.2.0-beta.5 review): a silent default to the
-  // compiled map meant a call site that forgot to pass the request's map
-  // resolved `field=value` against rules that, with the registry switch on,
-  // are no longer the ones in force. A forgotten site now fails to compile.
-  collections: CollectionMap
-): Promise<FirestoreRef | Error> => {
-  const pathParts = path.split('/')
-
-  // Use any internally for the building phase, then return typed result
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let ref: any = admin.firestore()
-  const collectionStack: string[] = []
-  while (pathParts.length) {
-    const collection = pathParts.shift()
-    if (collection) collectionStack.push(collection)
-    const docSpecifier = pathParts.shift()
-
-    if (!collection) {
-      // should never happen because we have an even number of parts
-      throw new Error('expected collection')
-    }
-
-    if (!docSpecifier) {
-      if (!isCollection || pathParts.length) {
-        throw new Error('expected docSpecifier')
-      }
-      ref = ref.collection(collection)
-    } else if (!docSpecifier.includes('=')) {
-      ref = ref.collection(collection).doc(docSpecifier)
-    } else {
-      const [field, value] = docSpecifier.split('=', 2)
-      const config = collections[collectionStack.join('/')]
-      const isUnique = config?.unique?.includes(field)
-      const isTagField = config?.tagFields?.includes(field)
-      if (!isUnique && !isTagField) {
-        return new Error(
-          `${path} is not allowed; ${field} is not an allowed key`
-        )
-      }
-      const operator = isTagField ? 'array-contains' : '=='
-
-      // For collection queries, return the query reference instead of resolving to a single doc
-      const collRef = ref.collection(collection)
-      if (isCollection) {
-        ref = collRef.where(
-          field,
-          operator as FirebaseFirestore.WhereFilterOp,
-          value
-        )
-      } else {
-        const snapshot = await collRef
-          .where(field, operator as FirebaseFirestore.WhereFilterOp, value)
-          .limit(1)
-          .get()
-        let id: string | null = null
-        if (!snapshot.empty) {
-          snapshot.forEach((doc: FirebaseFirestore.QueryDocumentSnapshot) => {
-            id = doc.id
-          })
-        }
-        if (id === null) {
-          return new Error(`record not found ${path}`)
-        }
-
-        ref = collRef.doc(id)
-      }
-    }
-  }
-
-  return ref as FirestoreRef
-}
-
-const isUnique = async (
-  collections: CollectionMap,
-  path: string,
-  field: string,
-  value: unknown,
-  existing: FirebaseFirestore.DocumentReference
-): Promise<boolean> => {
-  if (!['string', 'number'].includes(typeof value)) {
-    return false
-  }
-  const parts = path.split('/')
-  parts.pop()
-  const ref = await getRef(parts.join('/'), true, collections)
-  if (ref instanceof Error) {
-    return false
-  }
-  let duplicate = false
-  const snapshot = await (ref as FirebaseFirestore.Query)
-    .where(field, '==', value)
-    .limit(2)
-    .get()
-  if (!snapshot.empty) {
-    snapshot.forEach((doc) => {
-      if (doc.id !== existing.id) {
-        duplicate = true
-      }
-    })
-  }
-
-  return !duplicate
-}
-
-/**
- * The substrate `/doc` (mutations) and `/docs` (lists) go through (tosijs-platform#7).
- *
- * `getRef`/`isUnique` are injected rather than imported by the store, which
- * keeps the dependency acyclic and — more importantly — means the ported code
- * runs the exact same resolution and uniqueness logic it did before. The port
- * changes who the endpoint talks to, not what it says.
- *
- * Built PER REQUEST rather than once at module load, because `getRef` now has
- * to resolve `field=value` against the collection map for that request — and a
- * module-level store would silently resolve an installed collection's unique
- * key against the platform map, which has no entry for it, and reject every
- * such path as "not an allowed key".
- */
-export const storeFor = (collections: CollectionMap) =>
-  new FirestoreStore({
-    getRef: (path, isCollection) => getRef(path, isCollection, collections),
-    isUnique: (path, field, value, existing) =>
-      isUnique(collections, path, field, value, existing),
-  })
-
 export const getDoc = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -274,21 +133,19 @@ export const getDoc = async (
       }
     }
 
-    const ref = await getRef(path, false, collections)
-    if (ref instanceof Error) {
-      return opaqueError(userRoles, ref.message, 404)
-    }
-    if (!isDocRef(ref)) {
-      return opaqueError(userRoles, 'invalid path for document', 400)
+    const store = storeFor(collections)
+    const canonicalPath = await store.resolve(path)
+    if (canonicalPath instanceof Error) {
+      return opaqueError(userRoles, canonicalPath.message, 404)
     }
 
-    const doc = await ref.get()
+    const doc = await store.get(canonicalPath)
     if (!doc.exists) {
       return { ok: false, reason: 'not found', status: 404 }
     }
 
-    let data = doc.data() as Record<string, unknown> | undefined
-    const _path = documentPath(path, doc.id)
+    let data = doc.data as Record<string, unknown> | undefined
+    const _path = documentPath(path, canonicalPath.split('/').pop() as string)
     if (access === ALL) {
       data = { ...data, _path }
     } else if (typeof access === 'function') {
@@ -384,23 +241,12 @@ export const handleDoc: Handler = async (req, res) => {
   // `collection/id` once, so the round-trip count is unchanged and every later
   // call takes an unambiguous path.
   //
-  // GET still uses `getRef` below — `docs.ts` and the read path are the
-  // remaining half of #7, and porting them together with the query semantics
-  // (filter-before-limit, D7) is a separate change.
+  // GET reads through the same store (its second `getRef` used to repeat the
+  // `field=value` query that `resolve` had just answered).
   const store = storeFor(collections)
   const canonicalPath = await store.resolve(path)
   if (canonicalPath instanceof Error) {
     notFound(res)
-    return
-  }
-
-  const ref = await getRef(path, false, collections)
-  if (ref instanceof Error) {
-    notFound(res)
-    return
-  }
-  if (!isDocRef(ref)) {
-    fail(res, 400, 'bad-request', 'invalid path')
     return
   }
   const doc = await store.get(canonicalPath)

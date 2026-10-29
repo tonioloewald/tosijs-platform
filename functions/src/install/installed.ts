@@ -40,7 +40,7 @@
 
 import { log } from '../log'
 import type { Store } from '../collections/store'
-import { firestoreStore } from '../firestore-store'
+import { firestoreStore } from '../adapters/firebase/firestore-store'
 
 import {
   CollectionRegistry,

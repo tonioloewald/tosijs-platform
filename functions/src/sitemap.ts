@@ -2,10 +2,10 @@ import type { Handler } from './http'
 import { log } from './log'
 import compression from 'compression'
 
-import { getDoc, getRef } from './doc'
+import { getDoc } from './doc'
+import { firestoreStore } from './adapters/firebase/firestore-store'
 import { isPublished } from '../shared/post'
 import { optionsResponse } from './utilities'
-import { collectionsFor } from './install/installed'
 import { serveSitemap } from './render/store'
 
 const compressResponse = compression()
@@ -41,55 +41,49 @@ export const handleSitemap: Handler = async (req, res) => {
 
   const staticUrls = [`https://${host}/`, `https://${host}/blog/`]
 
-  const postsRef = await getRef('post', true, await collectionsFor('post'))
-  if (postsRef instanceof Error) {
-    res.status(500).send('Error loading posts')
-    return
-  }
   const postUrls: string[] = []
-  const stream = (postsRef as FirebaseFirestore.Query).orderBy('date').stream()
+  try {
+    // Every post, oldest first, a page at a time (the store port's scan; this
+    // was a Firestore stream over the same `orderBy('date')`).
+    for await (const page of firestoreStore.scan('post', { orderBy: 'date asc' }, 500)) {
+      for (const { data: post } of page) {
+        // Drafts must not reach the sitemap. Unpublished posts are deliberately
+        // READABLE by direct link (so a draft can be shared for comment) — the
+        // property that matters is that they are not findable by ACCIDENT, and
+        // handing them to crawlers is the most direct way to break that.
+        // Ordering by `date` does not filter them out: Firestore only skips
+        // documents where the field is ABSENT, and `unpublish()` writes `''`.
+        if (!isPublished(post)) continue
 
-  stream.on('error', (error) => {
+        const date = new Date(post.date as string)
+        if (isNaN(date.valueOf())) continue // never emit /blog/NaN/NaN/NaN/...
+
+        postUrls.push(
+          // getMonth() is 0-based; the client's own linkFromRef adds 1, and these
+          // URLs were off by a month against every link the site itself generates.
+          `https://${host}/blog/${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}/${
+            post.path
+          }`
+        )
+      }
+    }
+  } catch (error) {
     log.error('Sitemap stream error:', error)
     if (!res.headersSent) {
       res.status(500).send('Error generating sitemap')
     }
-  })
+    return
+  }
 
-  stream.on('data', (docSnap: FirebaseFirestore.QueryDocumentSnapshot) => {
-    const post = docSnap.data()
+  const xml =
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
+    `<!-- last updated ${new Date().toISOString()} -->` +
+    staticUrls.map(xmlUrl).join('') +
+    postUrls.map(xmlUrl).join('') +
+    '</urlset>'
 
-    // Drafts must not reach the sitemap. Unpublished posts are deliberately
-    // READABLE by direct link (so a draft can be shared for comment) — the
-    // property that matters is that they are not findable by ACCIDENT, and
-    // handing them to crawlers is the most direct way to break that.
-    // `.orderBy('date')` does not filter them out: Firestore only skips
-    // documents where the field is ABSENT, and `unpublish()` writes `''`.
-    if (!isPublished(post)) return
-
-    const date = new Date(post.date)
-    if (isNaN(date.valueOf())) return // never emit /blog/NaN/NaN/NaN/...
-
-    postUrls.push(
-      // getMonth() is 0-based; the client's own linkFromRef adds 1, and these
-      // URLs were off by a month against every link the site itself generates.
-      `https://${host}/blog/${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}/${
-        post.path
-      }`
-    )
-  })
-
-  stream.on('end', () => {
-    const xml =
-      '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' +
-      `<!-- last updated ${new Date().toISOString()} -->` +
-      staticUrls.map(xmlUrl).join('') +
-      postUrls.map(xmlUrl).join('') +
-      '</urlset>'
-
-    compressResponse(req, res, () => {
-      res.header('Content-Type', 'application/xml')
-      res.send(xml).status(200)
-    })
+  compressResponse(req, res, () => {
+    res.header('Content-Type', 'application/xml')
+    res.send(xml).status(200)
   })
 }

@@ -1,23 +1,21 @@
 import { fail, noStore } from './errors'
-import * as admin from 'firebase-admin'
 import { log } from './log'
 import * as crypto from 'crypto'
 import type { HttpRequest as Request } from './http'
 import { Response } from 'express'
-import { DecodedIdToken } from 'firebase-admin/auth'
+import { identity, type VerifiedIdentity } from './identity'
 
 import { UserRoles } from './collections/roles'
 import { resolvePrincipal } from './collections/principal'
-import { firestoreQuery } from './firestore-store'
-
-admin.initializeApp()
+import { firestoreQuery, firestoreStore } from './adapters/firebase/firestore-store'
+import { newDocId, type QueryOptions } from './collections/store'
 
 // Re-export types for use in other modules
 export type { Request, Response }
 
 // Extended request with optional user property set after auth
 export interface AuthenticatedRequest extends Request {
-  user?: DecodedIdToken
+  user?: VerifiedIdentity
 }
 
 // Base interface for Firestore documents with common metadata fields
@@ -200,7 +198,7 @@ function optionsResponse(
 
 async function getUser(
   req: AuthenticatedRequest
-): Promise<DecodedIdToken | false> {
+): Promise<VerifiedIdentity | false> {
   const authorization = req.headers.authorization
   if (authorization == null) {
     return false
@@ -219,7 +217,7 @@ async function getUser(
  */
 async function verifyFirebaseIdToken(
   idToken: string
-): Promise<DecodedIdToken | false> {
+): Promise<VerifiedIdentity | false> {
   try {
     // `checkRevoked` costs one extra Auth lookup, and buys the difference
     // between "signed out everywhere" meaning it and meaning it in an hour.
@@ -229,7 +227,7 @@ async function verifyFirebaseIdToken(
     //
     // Unauthenticated requests never reach here (no header, early return), so
     // public and SSR traffic pays nothing.
-    return await admin.auth().verifyIdToken(idToken, true)
+    return await identity().verifyIdToken(idToken)
   } catch (error) {
     // Fails CLOSED in every case, including a transient Auth outage: an
     // unverifiable token is anonymous, never trusted-by-default. Revocation is
@@ -252,13 +250,12 @@ async function syncRolesToCustomClaims(
 ): Promise<void> {
   try {
     // Get current custom claims
-    const userRecord = await admin.auth().getUser(uid)
-    const currentClaims = userRecord.customClaims || {}
-    const currentRoles = currentClaims.roles || []
+    const currentClaims = await identity().customClaims(uid)
+    const currentRoles = (currentClaims.roles as string[] | undefined) || []
 
     // Only update if roles have changed
     if (JSON.stringify(currentRoles.sort()) !== JSON.stringify(roles.sort())) {
-      await admin.auth().setCustomUserClaims(uid, {
+      await identity().setCustomClaims(uid, {
         ...currentClaims,
         roles,
       })
@@ -314,15 +311,8 @@ async function getVersion<T extends FirestoreDoc = FirestoreDoc>(
   id: string,
   version: string
 ): Promise<T | undefined> {
-  const ref = await admin
-    .firestore()
-    .collection(collection)
-    .doc(id)
-    .collection('versions')
-    .doc(version)
-    .get()
-
-  return ref.exists ? (ref.data() as T) : undefined
+  const doc = await firestoreStore.get(`${collection}/${id}/versions/${version}`)
+  return doc.exists ? (doc.data as T) : undefined
 }
 
 async function getRecord<T extends FirestoreDoc = FirestoreDoc>(
@@ -339,63 +329,43 @@ async function getRecord<T extends FirestoreDoc = FirestoreDoc>(
   if (id === null) {
     return undefined
   }
-  const ref = await admin
-    .firestore()
-    .collection(collectionName)
-    .doc(String(id))
-    .get()
-  if (!ref.exists) {
+  const doc = await firestoreStore.get(`${collectionName}/${String(id)}`)
+  if (!doc.exists) {
     return undefined
   }
-  const data = ref.data() as T | undefined
-  return data === undefined || data._deleted === true
+  const data = doc.data as T
+  return data._deleted === true
     ? undefined
     : { ...data, _id: id, _collection: collectionName }
 }
 
-type WhereFilterOp = FirebaseFirestore.WhereFilterOp
-type OrderByDirection = FirebaseFirestore.OrderByDirection
-
+/**
+ * Records matching one optional condition, over the store port. The query
+ * shape (one where, then the order, then the limit) is the one the composite
+ * indexes cover (firestore-store.ts, buildQuery).
+ */
 async function getRecords<T extends FirestoreDoc = FirestoreDoc>(
   collectionName: string,
   field?: string,
-  operator?: WhereFilterOp,
+  operator?: '==' | 'array-contains',
   value?: unknown,
   maxRecords = 10000,
   since?: string,
   orderBy = '_created desc'
 ): Promise<T[]> {
-  let ref: FirebaseFirestore.Query = admin
-    .firestore()
-    .collection(collectionName)
-    .limit(maxRecords)
+  const options: QueryOptions = { limit: maxRecords, orderBy }
   if (value !== undefined && field && operator) {
-    ref = ref.where(field, operator, value)
+    if (operator === '==') options.equals = { field, value }
+    else options.arrayContains = { field, value }
   }
   if (since !== undefined) {
-    ref = ref.orderBy('_modified', 'desc')
-    ref = ref.where('_modified', '>', since)
-  } else {
-    const [orderField, direction] = orderBy.split(' ')
-    if (orderField !== '~') {
-      ref = ref.orderBy(orderField, (direction as OrderByDirection) || 'asc')
-    }
+    options.orderBy = '_modified desc'
+    options.greaterThan = { field: '_modified', value: since }
   }
-  const snapshot = await ref.get()
-  const records: T[] = []
-  if (!snapshot.empty) {
-    snapshot.forEach((doc) => {
-      const data = doc.data() as T
-      if (data._deleted !== true) {
-        records.push({
-          ...data,
-          _id: doc.id,
-          _collection: collectionName,
-        })
-      }
-    })
-  }
-  return records
+  const docs = await firestoreStore.query(collectionName, options)
+  return docs
+    .map((doc) => ({ ...(doc.data as T), _id: doc.path.split('/').pop(), _collection: collectionName }))
+    .filter((record) => record._deleted !== true)
 }
 
 async function setRecord<T extends FirestoreDoc>(
@@ -434,22 +404,15 @@ async function setRecord<T extends FirestoreDoc>(
         _timestamp: new Date().valueOf(),
         _version_note_: versionNote,
       }
-      await admin
-        .firestore()
-        .collection(collectionName)
-        .doc(id)
-        .collection('versions')
-        .doc()
-        .set(versionRecord)
+      await firestoreStore.set(`${collectionName}/${id}/versions/${newDocId()}`, versionRecord as unknown as Record<string, unknown>)
     }
     if (publish) {
-      await admin.firestore().collection(collectionName).doc(id).set(record)
+      await firestoreStore.set(`${collectionName}/${id}`, record as Record<string, unknown>)
     }
   } else {
-    const docRef = admin.firestore().collection(collectionName).doc()
     delete record._collection
-    record._id = id = docRef.id
-    await docRef.set(record)
+    record._id = id = newDocId()
+    await firestoreStore.set(`${collectionName}/${id}`, record as Record<string, unknown>)
   }
   return returnRecord ? record : (id as string)
 }
