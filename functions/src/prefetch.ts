@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import compression from 'compression'
 import { optionsResponse } from './utilities'
 import { asPublicRequest } from './public-request'
@@ -60,7 +60,7 @@ export const getPrefetchData = async (
   const prefetched = await Promise.all(
     prefetches.map((f) =>
       f(publicReq, res, url, options).catch((error) => {
-        functions.logger.warn('Prefetch handler failed:', error)
+        log.warn('Prefetch handler failed:', error)
         return {}
       })
     )
@@ -130,7 +130,7 @@ export const prefetch = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
       return
     } catch (e) {
       // Never a broken page: fall back to the old path, and say so.
-      functions.logger.error('render-on-store serve failed; falling back to the per-request path', e)
+      log.error('render-on-store serve failed; falling back to the per-request path', e)
     }
   }
 

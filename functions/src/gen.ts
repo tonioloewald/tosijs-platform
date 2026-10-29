@@ -1,6 +1,6 @@
 import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import { defineSecret } from 'firebase-functions/params'
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
 import compression from 'compression'
@@ -237,7 +237,7 @@ export const gen = onRequest(
         })
       }
     } catch (e) {
-      functions.logger.error('Generation failed:', e)
+      log.error('Generation failed:', e)
       const detail = e instanceof Error ? e.message : String(e)
       res.status(500).send(`Generation failed: ${detail}`)
     }

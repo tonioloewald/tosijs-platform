@@ -1,4 +1,4 @@
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import { COLLECTIONS } from './collections'
 import { PLATFORM_HOOKS } from './collections/hooks'
 import { ALL } from './collections/access'
@@ -44,7 +44,7 @@ export async function clearBlogCache(): Promise<void> {
     await setRecord('config', clearRecord as BlogCache, 'blog-cache')
   } catch (e) {
     // Cache clear failed - cache will expire naturally; log for debugging
-    functions.logger.warn('Failed to clear blog cache:', e)
+    log.warn('Failed to clear blog cache:', e)
   }
 }
 

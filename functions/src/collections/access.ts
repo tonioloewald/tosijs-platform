@@ -134,22 +134,19 @@ COLLECTIONS['post/comment'] = {
 
 import { ROLES, UserRoles } from './roles.js'
 import { caveatsAllow } from '../auth/caveats.js'
+import { log } from '../log.js'
 import type { Base } from 'tosijs-schema'
 
 /**
- * Where this module reports refusals.
- *
- * Injectable, with a `console` default, so the decision layer carries **no
- * vendor dependency** — it previously imported `firebase-functions` solely for
- * `logger`, which coupled the one genuinely portable part of the service layer
- * to Firebase. The deployed functions call `setAccessLogger(functions.logger)`
- * at startup so structured Cloud Logging still applies there.
+ * Where this module reports refusals: the logger port (`log.ts`) by default,
+ * which the deployed functions point at Cloud Logging. Still injectable on its
+ * own, so a test can capture refusals without replacing the global sink.
  */
 export interface AccessLogger {
   error: (message: string) => void
 }
 
-let accessLogger: AccessLogger = console
+let accessLogger: AccessLogger = log
 
 export const setAccessLogger = (logger: AccessLogger): void => {
   accessLogger = logger

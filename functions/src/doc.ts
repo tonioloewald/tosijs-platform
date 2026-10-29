@@ -16,7 +16,7 @@ import { PUBLIC_ENDPOINT } from './endpoint-options'
 import * as admin from 'firebase-admin'
 import compression from 'compression'
 
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import {
   optionsResponse,
   getUserRoles,
@@ -456,12 +456,12 @@ export const doc = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
             try {
               await config.afterWrite(deleted, userRoles, { path: canonicalPath, before: deleted })
             } catch (e) {
-              functions.logger.warn(`afterWrite failed for ${path}:`, e)
+              log.warn(`afterWrite failed for ${path}:`, e)
             }
           }
           res.status(200).send('')
         } catch (e) {
-          functions.logger.error(`Error deleting ${path}:`, e)
+          log.error(`Error deleting ${path}:`, e)
           fail(res, 500, 'internal', 'delete failed')
         }
       } else {
@@ -523,7 +523,7 @@ export const doc = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
             userRoles
           )
         } catch (e) {
-          functions.logger.error(`Error saving ${path}:`, e)
+          log.error(`Error saving ${path}:`, e)
           fail(res, 500, 'internal', 'save failed')
           break
         }
@@ -613,14 +613,14 @@ export const doc = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
               after: data,
             })
           } catch (e) {
-            functions.logger.warn(`afterWrite failed for ${path}:`, e)
+            log.warn(`afterWrite failed for ${path}:`, e)
           }
         }
         res
           .status(200)
           .send(`${req.method === 'POST' ? 'created' : 'updated'} ${path}`)
       } catch (e) {
-        functions.logger.error(`Error saving ${path}:`, e)
+        log.error(`Error saving ${path}:`, e)
         fail(res, 500, 'internal', 'save failed')
       }
       break

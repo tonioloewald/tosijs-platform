@@ -1,6 +1,6 @@
 import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import compression from 'compression'
 
 import { getDoc, getRef } from './doc'
@@ -51,7 +51,7 @@ export const sitemap = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   const stream = (postsRef as FirebaseFirestore.Query).orderBy('date').stream()
 
   stream.on('error', (error) => {
-    functions.logger.error('Sitemap stream error:', error)
+    log.error('Sitemap stream error:', error)
     if (!res.headersSent) {
       res.status(500).send('Error generating sitemap')
     }

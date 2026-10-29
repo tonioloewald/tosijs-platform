@@ -1,6 +1,6 @@
 import { fail, noStore } from './errors'
 import * as admin from 'firebase-admin'
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import * as crypto from 'crypto'
 import { Request } from 'firebase-functions/v2/https'
 import { Response } from 'express'
@@ -60,7 +60,7 @@ async function logError(topic: string, message: string): Promise<void> {
     await setRecord<ErrorLogDoc>('error-log', { topic, message }, id)
   } catch (e) {
     // Fallback to console if Firestore logging fails
-    functions.logger.error(`[${topic}] ${message}`, e)
+    log.error(`[${topic}] ${message}`, e)
   }
 }
 
@@ -237,9 +237,9 @@ async function verifyFirebaseIdToken(
     // and burying it in generic errors makes it unfindable.
     const code = (error as { code?: string })?.code
     if (code === 'auth/id-token-revoked') {
-      functions.logger.info('Rejected a revoked ID token')
+      log.info('Rejected a revoked ID token')
     } else {
-      functions.logger.error('Error while verifying Firebase ID token:', error)
+      log.error('Error while verifying Firebase ID token:', error)
     }
     return false
   }
@@ -265,7 +265,7 @@ async function syncRolesToCustomClaims(
     }
   } catch (e) {
     // Custom claims are a nice-to-have for storage rules; log but don't fail
-    functions.logger.warn(
+    log.warn(
       `Failed to sync roles to custom claims for ${uid}:`,
       e
     )
@@ -287,8 +287,8 @@ async function getUserRoles(req: AuthenticatedRequest): Promise<UserRoles> {
       return decoded
     },
     log: {
-      warn: (m) => functions.logger.warn(m),
-      error: (m) => functions.logger.error(m),
+      warn: (m) => log.warn(m),
+      error: (m) => log.error(m),
     },
     // Sync roles to custom claims for Storage rules enforcement.
     //

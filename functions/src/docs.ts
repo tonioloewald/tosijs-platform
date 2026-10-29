@@ -18,7 +18,7 @@
 
 import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import compression from 'compression'
 
 import {
@@ -77,7 +77,7 @@ export async function getRecords(
     filter,
     collections,
     onScanBound: (detail) =>
-      functions.logger.warn('[docs] filter scan bound hit — result may be short', detail),
+      log.warn('[docs] filter scan bound hit — result may be short', detail),
   })
 }
 
@@ -203,7 +203,7 @@ async function commitWriteSet(
       results: outcome.out,
     })
   } catch (e) {
-    functions.logger.error('batch commit failed', e)
+    log.error('batch commit failed', e)
     fail(res, 500, 'internal', 'commit failed')
   }
 }

@@ -5,7 +5,7 @@
  * binds it to Firestore transactions and Cloud Logging, with the signature its
  * callers (`/doc`, `/docs`, `/blob`) already use.
  */
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import type { CollectionMap } from './collections/access'
 import type { UserRoles } from './collections/roles'
 import {
@@ -23,6 +23,6 @@ export function commitTransactionally(
   userRoles: UserRoles
 ): Promise<CommitOutcome> {
   return commitWrites(firestoreStore, writes, collections, userRoles, {
-    warn: (message, error) => functions.logger.warn(message, error),
+    warn: (message, error) => log.warn(message, error),
   })
 }

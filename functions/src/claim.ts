@@ -36,7 +36,7 @@ somebody who should not be able to observe it at all.
 import { onRequest } from 'firebase-functions/v2/https'
 import { PAGE_HEADERS } from './page-csp'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import { randomUUID } from 'crypto'
 
 import { optionsResponse, getUser, AuthenticatedRequest } from './utilities'
@@ -107,7 +107,7 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
           `to make that write is the proof; the nonce itself is public.`,
       })
     } catch (e) {
-      functions.logger.error('claim: failed to publish nonce', e)
+      log.error('claim: failed to publish nonce', e)
       fail(response, 500, 'internal', 'claim unavailable')
     }
     return
@@ -125,14 +125,14 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
 
     if (outcome.status === 'refused') {
       // Specific in the log, generic on the wire. See the header.
-      functions.logger.warn(
+      log.warn(
         `claim refused for ${user.uid}: ${outcome.reason}`
       )
       fail(response, 403, 'refused', 'claim refused')
       return
     }
 
-    functions.logger.info(
+    log.info(
       `claim granted to ${user.uid}${outcome.reclaim ? ' (re-claim)' : ''}`
     )
     response.json({
@@ -143,7 +143,7 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
       note: 'the next authenticated request already carries this role',
     })
   } catch (e) {
-    functions.logger.error('claim: transaction failed', e)
+    log.error('claim: transaction failed', e)
     fail(response, 500, 'internal', 'claim unavailable')
   }
 })

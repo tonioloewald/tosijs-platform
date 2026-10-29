@@ -38,7 +38,7 @@
  * through; two independent defences, because this one is worth two.
  */
 
-import * as functions from 'firebase-functions'
+import { log } from '../log'
 import type { Store } from '../collections/store'
 import { firestoreStore } from '../firestore-store'
 
@@ -184,8 +184,8 @@ export class InstalledConfigSource implements ConfigSource {
 }
 
 export const installedRegistry = new CollectionRegistry(
-  new InstalledConfigSource({ store: firestoreStore, log: functions.logger }),
-  { onError: (message) => functions.logger.warn(message) }
+  new InstalledConfigSource({ store: firestoreStore, log }),
+  { onError: (message) => log.warn(message) }
 )
 
 /**

@@ -30,7 +30,7 @@ rather than for a few seconds.
 import { onRequest } from 'firebase-functions/v2/https'
 import { PAGE_HEADERS } from '../page-csp'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
-import * as functions from 'firebase-functions'
+import { log } from '../log'
 import { randomBytes } from 'crypto'
 import { unenforcedKeywords } from 'tosijs-schema'
 import { denied, proposalState, type Proposal } from './proposal'
@@ -153,7 +153,7 @@ export async function runInstall(input: {
   if (decision.status === 'needs-approval') {
     if (!dryRun) {
       await commit(decision.records)
-      functions.logger.info(
+      log.info(
         `install: ${name} parked pending approval of ${decision.added.length} capability request(s)`
       )
     }
@@ -180,7 +180,7 @@ export async function runInstall(input: {
 
   if (!dryRun) {
     await commit(decision.records)
-    functions.logger.info(
+    log.info(
       `install: ${decision.status} ${name}@${(manifest as Manifest).version} by ${principal.uid}`
     )
   }
@@ -201,7 +201,7 @@ const PROPOSALS = 'system:install-proposal'
 
 const VALID_ID = /^[A-Za-z0-9-]{8,64}$/
 
-const logFailure = (what: string, e: unknown) => functions.logger.error(`install: ${what} failed`, e)
+const logFailure = (what: string, e: unknown) => log.error(`install: ${what} failed`, e)
 
 /** Install proposals in Firestore (the flow that uses this is proposal-handler.ts). */
 const proposalStore = (): ProposalStore => ({
@@ -470,7 +470,7 @@ export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Resp
         }
 
         await commit(decision.records)
-        functions.logger.info(`install: revoked ${name} by ${uid}`)
+        log.info(`install: revoked ${name} by ${uid}`)
         // Says what it did NOT do, because "uninstall" reads as "delete my
         // data" and this deliberately is not that.
         response.json({
@@ -486,11 +486,11 @@ export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Resp
     }
   } catch (e) {
     if (e instanceof ManifestConflict) {
-      functions.logger.warn(`install: ${e.message}`)
+      log.warn(`install: ${e.message}`)
       fail(response, 409, 'conflict', e.message)
       return
     }
-    functions.logger.error(`install: ${req.method} failed`, e)
+    log.error(`install: ${req.method} failed`, e)
     fail(response, 500, 'internal', 'install failed')
   }
 })

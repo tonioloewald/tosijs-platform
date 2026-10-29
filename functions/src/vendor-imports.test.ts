@@ -24,26 +24,21 @@ const SRC = new URL('.', import.meta.url).pathname
 /** Modules only an adapter may import. */
 const VENDOR = /^(firebase-admin|firebase-functions|@google-cloud\/|@firebase\/|firebase$|firebase\/)/
 
-/** Files outside `adapters/` that still import a vendor SDK, 2026-10-22. */
+/** Files outside `adapters/` that still import a vendor SDK (started 2026-10-22, 22 files). */
 const NOT_YET_PORTED = [
   'auth/authorize-endpoint.ts',
   'auth/endpoint.ts',
   'blob-endpoint.ts',
-  'blog.ts',
   'cached-query.ts',
   'claim.ts',
-  'commit.ts',
   'doc.ts',
   'docs.ts',
   'esm.ts',
   'firestore-store.ts',
   'gen.ts',
   'hello.ts',
-  'index.ts',
   'install/endpoint.ts',
-  'install/installed.ts',
   'prefetch.ts',
-  'render/store.ts',
   'sitemap.ts',
   'stored.ts',
   'user.ts',

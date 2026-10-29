@@ -47,12 +47,12 @@ import './page'
 // Render on store (D23): re-render after writes to post/page/config. LAST, so it
 // wraps the hooks the modules above registered.
 import './render/hooks'
-import * as functions from 'firebase-functions'
-import { setAccessLogger } from './collections/access'
+import { setLogSink } from './log'
+import { firebaseLogger } from './adapters/firebase/logger'
 
-// The decision layer logs through an injected sink so it carries no vendor
-// dependency (it is the portable kernel). Deployed, that sink is Cloud Logging.
-setAccessLogger(functions.logger)
+// The kernel logs through the logger port so it carries no vendor dependency.
+// Deployed, the sink is Cloud Logging's structured logger.
+setLogSink(firebaseLogger)
 
 export { doc } from './doc'
 export { docs } from './docs'

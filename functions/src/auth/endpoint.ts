@@ -27,7 +27,7 @@ expose every principal's tokens to that role. The filter therefore lives here.
 
 import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
-import * as functions from 'firebase-functions'
+import { log } from '../log'
 
 import {
   optionsResponse,
@@ -144,7 +144,7 @@ export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
           _modified: decision.record.createdAt,
         })
 
-        functions.logger.info(
+        log.info(
           `token minted for ${uid}: "${decision.record.label}" ` +
             `roles=${decision.record.caveats.roles.join(',')}`
         )
@@ -185,7 +185,7 @@ export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
           fail(response, 404, 'not-found', 'no such token')
           return
         }
-        functions.logger.info(`token ${id} revoked by ${uid}`)
+        log.info(`token ${id} revoked by ${uid}`)
         response.json({ status: 'revoked', id })
         return
       }
@@ -194,7 +194,7 @@ export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
         fail(response, 400, 'bad-request', 'bad request type')
     }
   } catch (e) {
-    functions.logger.error(`token: ${req.method} failed`, e)
+    log.error(`token: ${req.method} failed`, e)
     fail(response, 500, 'internal', 'token request failed')
   }
 })

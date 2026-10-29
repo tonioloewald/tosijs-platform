@@ -157,7 +157,7 @@ describe('/claim discloses nothing an anonymous caller should not see', () => {
     // ceremony to somebody who should not be able to observe it.
     expect(claimTs).toMatch(/fail\(response, 403, 'refused', 'claim refused'\)/)
     expect(claimTs).not.toMatch(/send\(.*outcome\.reason/)
-    expect(claimTs).toMatch(/logger\.warn\([\s\S]{0,120}outcome\.reason/)
+    expect(claimTs).toMatch(/log\.warn\([\s\S]{0,120}outcome\.reason/)
   })
 })
 

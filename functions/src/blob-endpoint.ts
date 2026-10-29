@@ -9,7 +9,7 @@
  */
 import { onRequest } from 'firebase-functions/v2/https'
 import { PUBLIC_ENDPOINT } from './endpoint-options'
-import * as functions from 'firebase-functions'
+import { log } from './log'
 import { createHash } from 'crypto'
 import { optionsResponse, getUserRoles, type AuthenticatedRequest } from './utilities'
 import { fail, noStore } from './errors'
@@ -23,7 +23,7 @@ import type { BlobMeta } from './collections/blob'
 
 const objects = cloudStorageObjects({
   onCannotSign: (e) =>
-    functions.logger.warn(
+    log.warn(
       'blob: cannot sign URLs — streaming files through the function instead. ' +
         'Grant the functions service account "Service Account Token Creator" on itself to enable redirects.',
       e
@@ -93,7 +93,7 @@ export const blob = onRequest(PUBLIC_ENDPOINT, async (request, response) => {
         return
     }
   } catch (e) {
-    functions.logger.error('blob failed', e)
+    log.error('blob failed', e)
     fail(response, 500, 'internal', 'blob operation failed')
   }
 })

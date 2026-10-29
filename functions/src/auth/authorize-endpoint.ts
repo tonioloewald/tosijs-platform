@@ -35,7 +35,7 @@ import { onRequest } from 'firebase-functions/v2/https'
 import { PAGE_HEADERS } from '../page-csp'
 import { PUBLIC_ENDPOINT } from '../endpoint-options'
 import * as admin from 'firebase-admin'
-import * as functions from 'firebase-functions'
+import { log } from '../log'
 
 import {
   optionsResponse,
@@ -125,7 +125,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
       // Starting is anonymous, so it cleans up after itself (sweep.ts): the
       // same rule as install proposals, best effort.
       await sweepExpired(storeSweepable(firestoreStore, AUTHORIZE_COLLECTION), Date.now(), (e) =>
-        functions.logger.warn('authorize: sweeping expired requests failed', e)
+        log.warn('authorize: sweeping expired requests failed', e)
       )
       const requestId = newDocId()
       await createDocument(
@@ -133,7 +133,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
         `${AUTHORIZE_COLLECTION}/${requestId}`,
         decision.record as unknown as Record<string, unknown>
       )
-      functions.logger.info(
+      log.info(
         `authorize: started ${requestId} (${decision.record.mode}) for "${decision.record.label}"`
       )
       response.json({
@@ -177,13 +177,13 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
         new Date()
       )
       if (decision.status === 'refused') {
-        functions.logger.warn(`authorize: approve refused (${decision.reason})`)
+        log.warn(`authorize: approve refused (${decision.reason})`)
         fail(response, 400, 'refused', `authorization ${decision.reason}`, {
           reason: decision.reason,
         })
         return
       }
-      functions.logger.info(`authorize: ${id} approved by ${user.uid}`)
+      log.info(`authorize: ${id} approved by ${user.uid}`)
       response.json({
         status: 'approved',
         // The page needs this to close the loopback loop; it carries no
@@ -209,7 +209,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
         return
       }
       if (outcome.status === 'refused') {
-        functions.logger.warn(`authorize: exchange refused (${outcome.reason})`)
+        log.warn(`authorize: exchange refused (${outcome.reason})`)
         // Specific in the log, generic on the wire — the reasons together
         // describe the state of a request to somebody who does not hold the
         // verifier for it.
@@ -223,7 +223,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
         return
       }
 
-      functions.logger.info(
+      log.info(
         `authorize: ${id} exchanged — token ${outcome.tokenId} for ${outcome.principalUid}`
       )
       response.json({
@@ -239,7 +239,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
 
     fail(response, 400, 'bad-request', 'unknown action')
   } catch (e) {
-    functions.logger.error(`authorize: ${req.method} failed`, e)
+    log.error(`authorize: ${req.method} failed`, e)
     fail(response, 500, 'internal', 'authorization failed')
   }
 })
