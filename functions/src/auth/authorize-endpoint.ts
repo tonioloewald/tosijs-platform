@@ -31,9 +31,8 @@ the secret straight to the CLI. So a revocation between approving and
 collecting takes effect, and the "no secret is ever stored" property survives.
 */
 
-import { onRequest } from 'firebase-functions/v2/https'
 import { PAGE_HEADERS } from '../page-csp'
-import { PUBLIC_ENDPOINT } from '../endpoint-options'
+import type { Handler } from '../http'
 import * as admin from 'firebase-admin'
 import { log } from '../log'
 
@@ -64,7 +63,7 @@ const selfUrl = (req: AuthenticatedRequest): string => {
   return `https://${host}/authorize`
 }
 
-export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
+export const handleAuthorize: Handler = async (request, response: Response) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is
@@ -242,7 +241,7 @@ export const authorize = onRequest(PUBLIC_ENDPOINT, async (request, response: Re
     log.error(`authorize: ${req.method} failed`, e)
     fail(response, 500, 'internal', 'authorization failed')
   }
-})
+}
 
 let cachedConfig: Record<string, unknown> | null = null
 

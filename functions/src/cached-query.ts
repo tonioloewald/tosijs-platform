@@ -10,8 +10,7 @@ await fb.service.cachedQuery.get({url: 'https://itunes.apple.com/search?term=jac
 This returns JSON from the url provided. Queries are cached for 24h. This both solves issues with content-security-policies and CORS and allows easy access to rate-limited services.
 */
 
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import compression from 'compression'
 import crypto from 'crypto'
 import {
@@ -41,7 +40,7 @@ export function simpleUrlHash(url: string, algorithm = 'sha1') {
 
 const compressResponse = compression()
 
-export const cachedQuery = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
+export const handleCachedQuery: Handler = async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }
@@ -107,4 +106,4 @@ export const cachedQuery = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   compressResponse(req, res, () => {
     res.json(doc.data)
   })
-})
+}

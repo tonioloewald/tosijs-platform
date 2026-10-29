@@ -27,9 +27,8 @@ without an epoch bump means warm instances enforce the old rules indefinitely
 rather than for a few seconds.
 */
 
-import { onRequest } from 'firebase-functions/v2/https'
 import { PAGE_HEADERS } from '../page-csp'
-import { PUBLIC_ENDPOINT } from '../endpoint-options'
+import type { Handler } from '../http'
 import { log } from '../log'
 import { randomBytes } from 'crypto'
 import { unenforcedKeywords } from 'tosijs-schema'
@@ -338,7 +337,7 @@ async function handleProposal(
   return true
 }
 
-export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
+export const handleInstall: Handler = async (request, response: Response) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is
@@ -493,4 +492,4 @@ export const install = onRequest(PUBLIC_ENDPOINT, async (request, response: Resp
     log.error(`install: ${req.method} failed`, e)
     fail(response, 500, 'internal', 'install failed')
   }
-})
+}

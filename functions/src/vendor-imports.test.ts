@@ -27,21 +27,10 @@ const VENDOR = /^(firebase-admin|firebase-functions|@google-cloud\/|@firebase\/|
 /** Files outside `adapters/` that still import a vendor SDK (started 2026-10-22, 22 files). */
 const NOT_YET_PORTED = [
   'auth/authorize-endpoint.ts',
-  'auth/endpoint.ts',
-  'blob-endpoint.ts',
-  'cached-query.ts',
-  'claim.ts',
   'doc.ts',
-  'docs.ts',
-  'esm.ts',
   'firestore-store.ts',
   'gen.ts',
-  'hello.ts',
-  'install/endpoint.ts',
-  'prefetch.ts',
-  'sitemap.ts',
   'stored.ts',
-  'user.ts',
   'utilities.ts',
 ]
 

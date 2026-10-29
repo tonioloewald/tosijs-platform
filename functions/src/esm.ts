@@ -21,8 +21,7 @@
  *       (run most recent test whose version does not exceed module version)
  */
 
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import compression from 'compression'
 
 import { optionsResponse } from './utilities'
@@ -34,7 +33,7 @@ const compressResponse = compression()
 // Match module name, stripping optional .js/.jsx/.mjs extension
 const MODULE_PATH_REGEX = /\/esm\/([^/]+?)(?:\.m?jsx?)?\/?$/
 
-export const esm = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
+export const handleEsm: Handler = async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }
@@ -62,4 +61,4 @@ export const esm = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
     res.type('text/javascript')
     res.send(mod.source)
   })
-})
+}

@@ -11,8 +11,7 @@
 - `DELETE` removes the document at `p`
 */
 
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import * as admin from 'firebase-admin'
 import compression from 'compression'
 
@@ -327,7 +326,7 @@ export const getDocData = async (
   return result.ok ? result.data : undefined
 }
 
-export const doc = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
+export const handleDoc: Handler = async (req, res) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is
@@ -628,4 +627,4 @@ export const doc = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
     default:
       fail(res, 400, 'bad-request', 'bad request type')
   }
-})
+}

@@ -7,8 +7,7 @@
  * /doc, so they carry `_by` and pass the area's schema), the Cloud Storage
  * adapter (`adapters/firebase/cloud-storage.ts`) for the bytes, the host's role resolution, and the shared error shape.
  */
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import { log } from './log'
 import { createHash } from 'crypto'
 import { optionsResponse, getUserRoles, type AuthenticatedRequest } from './utilities'
@@ -49,7 +48,7 @@ const deps: BlobDeps = {
   isPrivileged: hasPrivilegedRole,
 }
 
-export const blob = onRequest(PUBLIC_ENDPOINT, async (request, response) => {
+export const handleBlobEndpoint: Handler = async (request, response) => {
   const req = request as AuthenticatedRequest
   noStore(response)
   if (optionsResponse(req, response, ['OPTIONS', 'GET', 'PUT', 'DELETE', 'POST'])) return
@@ -96,4 +95,4 @@ export const blob = onRequest(PUBLIC_ENDPOINT, async (request, response) => {
     log.error('blob failed', e)
     fail(response, 500, 'internal', 'blob operation failed')
   }
-})
+}

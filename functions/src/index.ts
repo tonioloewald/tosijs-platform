@@ -54,20 +54,39 @@ import { firebaseLogger } from './adapters/firebase/logger'
 // Deployed, the sink is Cloud Logging's structured logger.
 setLogSink(firebaseLogger)
 
-export { doc } from './doc'
-export { docs } from './docs'
+import { firebaseEndpoint } from './adapters/firebase/http'
+import { handleDoc } from './doc'
+import { handleDocs } from './docs'
+import { handleHello } from './hello'
+import { handlePrefetch, handlePrefetchData } from './prefetch'
+import { handleSitemap } from './sitemap'
+import { handleUser } from './user'
+import { handleEsm } from './esm'
+import { handleCachedQuery } from './cached-query'
+import { handleStored } from './stored'
+import { handleClaim } from './claim'
+import { handleInstall } from './install/endpoint'
+import { handleToken } from './auth/endpoint'
+import { handleAuthorize } from './auth/authorize-endpoint'
+import { handleBlobEndpoint } from './blob-endpoint'
+
+// Each endpoint is a plain handler (the HTTP port, http.ts), bound to Cloud
+// Functions here. The export NAME is the deployed function's name.
+export const doc = firebaseEndpoint(handleDoc)
+export const docs = firebaseEndpoint(handleDocs)
 // gen is exported separately - see bottom of file
-export { hello } from './hello'
-export { prefetch, prefetchData } from './prefetch'
-export { sitemap } from './sitemap'
-export { user } from './user'
-export { esm } from './esm'
-export { cachedQuery } from './cached-query'
-export { stored } from './stored'
-export { claim } from './claim'
-export { install } from './install/endpoint'
-export { token } from './auth/endpoint'
-export { authorize } from './auth/authorize-endpoint'
-export { blob } from './blob-endpoint'
+export const hello = firebaseEndpoint(handleHello)
+export const prefetch = firebaseEndpoint(handlePrefetch)
+export const prefetchData = firebaseEndpoint(handlePrefetchData)
+export const sitemap = firebaseEndpoint(handleSitemap)
+export const user = firebaseEndpoint(handleUser)
+export const esm = firebaseEndpoint(handleEsm)
+export const cachedQuery = firebaseEndpoint(handleCachedQuery)
+export const stored = firebaseEndpoint(handleStored)
+export const claim = firebaseEndpoint(handleClaim)
+export const install = firebaseEndpoint(handleInstall)
+export const token = firebaseEndpoint(handleToken)
+export const authorize = firebaseEndpoint(handleAuthorize)
+export const blob = firebaseEndpoint(handleBlobEndpoint)
 
 export { gen } from './gen'

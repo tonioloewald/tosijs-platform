@@ -1,6 +1,5 @@
 import crypto from 'crypto'
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import { log } from './log'
 import compression from 'compression'
 import { optionsResponse } from './utilities'
@@ -101,7 +100,7 @@ export const redirected = (url: string, req: any, res: any): boolean => {
   return false
 }
 
-export const prefetch = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
+export const handlePrefetch: Handler = async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }
@@ -153,10 +152,10 @@ export const prefetch = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
     */
     res.status(200).send(html)
   })
-})
+}
 
 // Endpoint to get prefetch data as JSON (for dev https environment)
-export const prefetchData = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
+export const handlePrefetchData: Handler = async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }
@@ -186,4 +185,4 @@ export const prefetchData = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
     res.header('Content-Type', 'application/json')
     res.status(200).json(data)
   })
-})
+}

@@ -371,7 +371,7 @@ describe('platform API responses are never CDN-cached (#27)', () => {
   for (const file of PLATFORM) {
     test(`${file} sets no-store before anything else`, () => {
       const text = src(file)
-      const handler = text.slice(text.indexOf('onRequest('))
+      const handler = text.slice(text.indexOf(': Handler = '))
       const store = handler.indexOf('noStore(')
       expect(store).toBeGreaterThan(-1)
       expect(store).toBeLessThan(handler.indexOf('optionsResponse('))
@@ -452,7 +452,7 @@ describe('storage areas are written ONLY through /blob (#1136)', () => {
     expect(ep).toMatch(/objects\.read\(result\.key\)/)
   })
   test('the endpoint is exported, marks responses no-store first, and ships in the platform profile', () => {
-    expect(src('index.ts')).toContain("export { blob } from './blob-endpoint'")
+    expect(src('index.ts')).toContain('export const blob = firebaseEndpoint(handleBlobEndpoint)')
     const ep = src('blob-endpoint.ts')
     expect(ep.indexOf('noStore(response)')).toBeLessThan(ep.indexOf('optionsResponse('))
     const lib = readFileSync(join(__dirname, '..', '..', '..', 'scripts', 'sandbox-lib.js'), 'utf8')

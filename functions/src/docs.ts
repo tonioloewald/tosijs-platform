@@ -16,8 +16,7 @@
   useful error if a required index is missing
 */
 
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import { log } from './log'
 import compression from 'compression'
 
@@ -208,7 +207,7 @@ async function commitWriteSet(
   }
 }
 
-export const docs = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
+export const handleDocs: Handler = async (req, res) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is
@@ -322,4 +321,4 @@ export const docs = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
       notFound(res)
     }
   }
-})
+}

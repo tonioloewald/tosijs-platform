@@ -1,5 +1,4 @@
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import { log } from './log'
 import compression from 'compression'
 
@@ -13,7 +12,7 @@ const compressResponse = compression()
 
 const xmlUrl = (url: string) => `<url><loc>${url}</loc></url>`
 
-export const sitemap = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
+export const handleSitemap: Handler = async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }
@@ -93,4 +92,4 @@ export const sitemap = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
       res.send(xml).status(200)
     })
   })
-})
+}

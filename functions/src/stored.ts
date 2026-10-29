@@ -23,8 +23,7 @@
 
 import { deliveryHeaders } from './blob-handler'
 import { storedObjectPath } from './legacy-storage'
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import * as admin from 'firebase-admin'
 
 import { optionsResponse } from './utilities'
@@ -39,7 +38,7 @@ const URL_EXPIRATION_MS = 60 * 60 * 1000
 // Cache duration slightly less than URL expiration to ensure valid URLs
 const CACHE_MAX_AGE_SECONDS = 55 * 60 // 55 minutes
 
-export const stored = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
+export const handleStored: Handler = async (req, res) => {
   if (optionsResponse(req, res)) {
     return
   }
@@ -122,4 +121,4 @@ export const stored = onRequest(PUBLIC_ENDPOINT, async (req, res) => {
   } catch {
     res.status(500).send('Error fetching file')
   }
-})
+}

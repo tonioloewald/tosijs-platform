@@ -25,8 +25,7 @@ and the correct literal differs per caller — so a `read` grant to any role wou
 expose every principal's tokens to that role. The filter therefore lives here.
 */
 
-import { onRequest } from 'firebase-functions/v2/https'
-import { PUBLIC_ENDPOINT } from '../endpoint-options'
+import type { Handler } from '../http'
 import { log } from '../log'
 
 import {
@@ -53,7 +52,7 @@ const TOKENS = 'token'
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 
-export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
+export const handleToken: Handler = async (request, response: Response) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is
@@ -197,6 +196,6 @@ export const token = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
     log.error(`token: ${req.method} failed`, e)
     fail(response, 500, 'internal', 'token request failed')
   }
-})
+}
 
 export { MAX_TTL_MS }

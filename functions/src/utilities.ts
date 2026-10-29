@@ -2,7 +2,7 @@ import { fail, noStore } from './errors'
 import * as admin from 'firebase-admin'
 import { log } from './log'
 import * as crypto from 'crypto'
-import { Request } from 'firebase-functions/v2/https'
+import type { HttpRequest as Request } from './http'
 import { Response } from 'express'
 import { DecodedIdToken } from 'firebase-admin/auth'
 

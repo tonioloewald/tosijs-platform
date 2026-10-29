@@ -33,9 +33,8 @@ together those four responses narrate the exact state of the ceremony to
 somebody who should not be able to observe it at all.
 */
 
-import { onRequest } from 'firebase-functions/v2/https'
 import { PAGE_HEADERS } from './page-csp'
-import { PUBLIC_ENDPOINT } from './endpoint-options'
+import type { Handler } from './http'
 import { log } from './log'
 import { randomUUID } from 'crypto'
 
@@ -63,7 +62,7 @@ const ceremonyDeps = {
   newId: () => newDocId(),
 }
 
-export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Response) => {
+export const handleClaim: Handler = async (request, response: Response) => {
   // A platform API response is about the caller who asked — never shared
   // by a CDN (#27). Set FIRST, so it also covers an uncaught throw and the
   // rate-limit / method refusals inside optionsResponse. A handler that is
@@ -146,4 +145,4 @@ export const claim = onRequest(PUBLIC_ENDPOINT, async (request, response: Respon
     log.error('claim: transaction failed', e)
     fail(response, 500, 'internal', 'claim unavailable')
   }
-})
+}

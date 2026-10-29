@@ -217,8 +217,8 @@ describe('/doc and /docs resolve through the registry', () => {
 
 describe('both endpoints are actually exported', () => {
   test('index.ts exports them, or they do not deploy at all', () => {
-    expect(indexTs).toMatch(/export \{ claim \} from '\.\/claim'/)
-    expect(indexTs).toMatch(/export \{ install \} from '\.\/install\/endpoint'/)
+    expect(indexTs).toMatch(/export const claim = firebaseEndpoint\(handleClaim\)/)
+    expect(indexTs).toMatch(/export const install = firebaseEndpoint\(handleInstall\)/)
   })
 })
 
