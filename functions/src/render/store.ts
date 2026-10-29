@@ -15,21 +15,18 @@
  * is the namespace: bump it when a renderer or the page template changes, and
  * every value misses and recomputes on its next read.
  */
-import * as admin from 'firebase-admin'
-// Modular imports, not `admin.firestore.FieldValue`: the functions emulator
-// wraps the `admin.firestore` namespace WITHOUT its static members, so the
-// namespace form threw there (found 2026-10-22) while working in production.
-import { FieldValue, Timestamp } from 'firebase-admin/firestore'
-import * as functions from 'firebase-functions'
+import { log } from '../log'
 import type { Response } from 'express'
 import { getDoc } from '../doc'
 import { getDocs } from '../docs'
+import { firestoreStore } from '../firestore-store'
+import { firestoreComputedBackend } from '../adapters/firebase/render-backend'
 import type { AuthenticatedRequest } from '../utilities'
 import type { WriteChange } from '../collections/access'
 import { config as siteConfig } from '../config'
 import { isPublished } from '../../shared/post'
 import { collectionsFor } from '../install/installed'
-import { ComputedStore, Deps, depsOfWrite, type ComputedBackend, type Entry } from './computed'
+import { ComputedStore, Deps, depsOfWrite } from './computed'
 import { INVALIDATING_COLLECTIONS, isInvalidatedDep } from './rules'
 export { INVALIDATING_COLLECTIONS }
 import {
@@ -68,101 +65,10 @@ const LOG_COLLECTION = 'system:render-log'
  */
 const BACKSTOP_MAX_AGE_SECONDS = 24 * 3600
 
-// ── the Firestore backend ────────────────────────────────────────────────
-
-const docRef = (key: string) =>
-  admin.firestore().collection(RENDER_COLLECTION).doc(encodeURIComponent(key))
-const logRef = (dep: string) =>
-  admin.firestore().collection(LOG_COLLECTION).doc(encodeURIComponent(dep).slice(0, 1400))
-
-/** A lost race, as Firestore reports it: anything else is a real failure. */
-const isLostRace = (e: unknown) => {
-  const code = (e as { code?: number | string })?.code
-  // 6 ALREADY_EXISTS, 9 FAILED_PRECONDITION; 5 NOT_FOUND (purged mid-fill) and
-  // 10 ABORTED mean the same thing here: someone else changed the key.
-  return [5, 6, 9, 10, 'not-found', 'already-exists', 'failed-precondition', 'aborted'].includes(code as never)
-}
-const versionOf = (snap: FirebaseFirestore.DocumentSnapshot): string | null =>
-  snap.exists && snap.updateTime ? `${snap.updateTime.seconds}.${snap.updateTime.nanoseconds}` : null
-
-export const firestoreBackend: ComputedBackend = {
-  async read(key) {
-    const snap = await docRef(key).get()
-    return { entry: snap.exists ? (snap.data() as Entry) : undefined, version: versionOf(snap) }
-  },
-  async readMany(keys) {
-    if (!keys.length) return []
-    const snaps = await admin.firestore().getAll(...keys.map(docRef))
-    return snaps.map((s) => ({ entry: s.exists ? (s.data() as Entry) : undefined, version: versionOf(s) }))
-  },
-  async writeIfUnchanged(key, entry, expected) {
-    const ref = docRef(key)
-    // Every field written, so a recompute never inherits an old `check`.
-    const full = { key, value: entry.value, deps: entry.deps ?? [], computedAt: entry.computedAt, check: entry.check ?? null }
-    try {
-      if (expected === null) {
-        await ref.create(full) // fails if someone created it meanwhile
-      } else {
-        const [s, n] = expected.split('.').map(Number)
-        await ref.update(
-          { ...full, stale: FieldValue.delete() },
-          { lastUpdateTime: new Timestamp(s, n) }
-        )
-      }
-      return true
-    } catch (e) {
-      if (isLostRace(e)) return false // invalidated or filled since we read it
-      throw e // too large, quota, permission…: a real failure, reported by the store
-    }
-  },
-  async writeAll(entries) {
-    // Merge: a stale marker keeps the recorded deps, so cascades still find it.
-    const writer = admin.firestore().bulkWriter()
-    let failed = 0
-    writer.onWriteError((err) => {
-      if (err.failedAttempts < 3) return true // retry
-      failed++
-      return false
-    })
-    for (const [key, entry] of entries) writer.set(docRef(key), { ...entry, key }, { merge: true }).catch(() => undefined)
-    await writer.close()
-    if (failed) throw new Error(`${failed} stale marker(s) could not be written`)
-  },
-  async dependents(deps) {
-    const out = new Set<string>()
-    for (let i = 0; i < deps.length; i += 30) {
-      const snap = await admin
-        .firestore()
-        .collection(RENDER_COLLECTION)
-        .where('deps', 'array-contains-any', deps.slice(i, i + 30))
-        .select('key')
-        .get()
-      for (const d of snap.docs) out.add(d.data().key as string)
-    }
-    return [...out]
-  },
-  async logInvalidation(deps) {
-    // Chunked, never truncated: an unlogged dep would reopen the first-fill race.
-    for (let i = 0; i < deps.length; i += 450) {
-      const batch = admin.firestore().batch()
-      for (const dep of deps.slice(i, i + 450)) batch.set(logRef(dep), { dep, at: FieldValue.serverTimestamp() })
-      await batch.commit()
-    }
-  },
-  async invalidatedSince(deps, sinceMs) {
-    if (!deps.length) return false
-    const snaps = await admin.firestore().getAll(...deps.map(logRef))
-    return snaps.some((s) => {
-      const at = s.exists ? (s.data()?.at as Timestamp | undefined) : undefined
-      return Boolean(at && at.toMillis() >= sinceMs)
-    })
-  },
-}
-
-export const renderStore = new ComputedStore(firestoreBackend, RENDER_VERSION, {
+export const renderStore = new ComputedStore(firestoreComputedBackend(RENDER_COLLECTION, LOG_COLLECTION), RENDER_VERSION, {
   defaultPolicy: { maxAgeSeconds: BACKSTOP_MAX_AGE_SECONDS },
   isInvalidatedDep,
-  onError: (what, e) => functions.logger.error(`render store: ${what} failed`, e),
+  onError: (what, e) => log.error(`render store: ${what} failed`, e),
 })
 
 // ── public reads that record what they read ──────────────────────────────
@@ -246,8 +152,8 @@ const routeTable = (parent?: Deps) =>
     'route-table',
     async (deps) => {
       deps.add('list:page')
-      const paths = (await admin.firestore().collection('page').select('path').get()).docs
-        .map((d) => d.data().path as string | undefined)
+      const paths = (await firestoreStore.query('page', { fields: ['path'], orderBy: '~' }))
+        .map((d) => d.data.path as string | undefined)
         .filter((p): p is string => typeof p === 'string')
       const pages = (await Promise.all(paths.map((p) => readPublic(`page/path=${p}`, deps)))).filter(
         (p): p is Record<string, any> => Boolean(p)
@@ -362,6 +268,6 @@ export const invalidateAfterWrite = (collection: string) =>
       await renderStore.invalidateDependents(depsOfWrite(collection, id, change.before, change.after, lookupFields))
     } catch (e) {
       // Loud: a missed invalidation leaves a value stale until the backstop max age.
-      functions.logger.error(`render: invalidation after a ${collection} write failed; values may be stale for up to ${BACKSTOP_MAX_AGE_SECONDS}s`, e)
+      log.error(`render: invalidation after a ${collection} write failed; values may be stale for up to ${BACKSTOP_MAX_AGE_SECONDS}s`, e)
     }
   }
