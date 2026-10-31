@@ -78,12 +78,15 @@ if (!running) {
     {
       async make(seed = {}, { unique = {}, tagFields = {} } = {}) {
         const collections: CollectionMap = {}
-        for (const [c, fields] of Object.entries(unique))
+        for (const [c, fields] of Object.entries(unique)) {
           collections[c] = { access: {}, ...collections[c], unique: fields }
-        for (const [c, fields] of Object.entries(tagFields))
+        }
+        for (const [c, fields] of Object.entries(tagFields)) {
           collections[c] = { access: {}, ...collections[c], tagFields: fields }
-        for (const [path, data] of Object.entries(seed))
+        }
+        for (const [path, data] of Object.entries(seed)) {
           await firestoreSet(path, data)
+        }
         return firestoreStoreFor(collections)
       },
     },
