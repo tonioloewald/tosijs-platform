@@ -176,7 +176,7 @@ function sameValue(a: unknown, b: unknown): boolean {
 /**
  * Firestore's cross-type order, as far as JSON values go: null < boolean <
  * number < string < array < object. Within a type, numbers numerically and
- * strings by code unit (Firestore compares UTF-8 bytes, NOT locale order).
+ * strings by UTF-8 bytes (as Firestore does: NOT locale or UTF-16 order).
  */
 function compareValues(a: unknown, b: unknown): number {
   const rank = (v: unknown) =>
@@ -186,7 +186,9 @@ function compareValues(a: unknown, b: unknown): number {
   const rb = rank(b)
   if (ra !== rb) return ra - rb
   if (ra === 2 || ra === 1) return Number(a) - Number(b)
-  if (ra === 3) return a === b ? 0 : (a as string) < (b as string) ? -1 : 1
+  // UTF-8 bytes, not UTF-16 code units: the two disagree past U+FFFF, where
+  // `<` puts an emoji before U+FFFD and Firestore puts it after.
+  if (ra === 3) return Buffer.compare(Buffer.from(a as string), Buffer.from(b as string))
   return 0
 }
 
@@ -293,8 +295,10 @@ export class MemoryStore implements Store {
     }
     for (const [p, data] of this.docs) {
       if (MemoryStore.split(p).collection !== collection) continue
+      // The path's value is a string and compared strictly, as Firestore's
+      // `==` does: `num=5` does not find a stored 5 (the conformance suite).
       const held = data[field]
-      if (Array.isArray(held) ? held.includes(value) : String(held) === value) {
+      if (Array.isArray(held) ? held.includes(value) : held === value) {
         return p
       }
     }

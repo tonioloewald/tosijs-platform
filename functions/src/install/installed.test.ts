@@ -15,7 +15,7 @@
  */
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
-import { describe, test, expect } from 'bun:test'
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
 
 import {
   configsFromInstalled,
@@ -25,6 +25,7 @@ import {
   InstalledConfigSource,
 } from './installed'
 import { MemoryStore } from '../collections/store'
+import { firestoreStore } from '../adapters/firebase/firestore-store'
 import { EPOCH_DOC } from './install-store'
 import { PLATFORM_HOOKS } from '../collections/hooks'
 import { compileStored } from '../collections/registry'
@@ -196,7 +197,31 @@ describe('a broken install fails closed, and only for itself', () => {
   })
 })
 
+/**
+ * The registry load FAILS, on purpose. `installedRegistry` reads through
+ * `firestoreStore`; these tests used to rely on "no Firebase here" making that
+ * throw, which held only while the SDK could not start under bun. Now it can,
+ * and it would retry an absent emulator past the test timeout (or, before
+ * test-setup.ts, read gcloud's default project). So the store refuses, here.
+ */
+const failingLoad = () => {
+  const real = { get: firestoreStore.get, query: firestoreStore.query }
+  beforeAll(() => {
+    firestoreStore.get = async () => {
+      throw new Error('no datastore in unit tests')
+    }
+    firestoreStore.query = async () => {
+      throw new Error('no datastore in unit tests')
+    }
+  })
+  afterAll(() => {
+    Object.assign(firestoreStore, real)
+  })
+}
+
 describe('the platform hot path is untouched (switch OFF)', () => {
+  failingLoad()
+
   test('a bare name returns COLLECTIONS itself — same object, no read', async () => {
     // The whole safety argument for shipping this to a live blog. If this ever
     // returns a copy, every /doc request has started paying for a datastore
@@ -209,8 +234,8 @@ describe('the platform hot path is untouched (switch OFF)', () => {
   test('a namespaced name does NOT return COLLECTIONS', async () => {
     // Guards against the short-circuit swallowing everything, which would make
     // the test above pass while installed collections silently never resolve.
-    // (No Firebase here, so the registry load fails — and fails CLOSED, which
-    // is itself the documented behaviour.)
+    // (The registry load fails — `failingLoad` — and fails CLOSED, which is
+    // itself the documented behaviour.)
     const map = await collectionsFor('virta:task')
     expect(map).not.toBe(COLLECTIONS)
     expect(map['virta:task']).toBeUndefined()
@@ -220,6 +245,7 @@ describe('the platform hot path is untouched (switch OFF)', () => {
 })
 
 describe('the switch ON: bare names come from the registry (D19)', () => {
+  failingLoad()
   const withSwitch = async <T>(fn: () => Promise<T>): Promise<T> => {
     const before = process.env.PLATFORM_CONFIGS_FROM_REGISTRY
     process.env.PLATFORM_CONFIGS_FROM_REGISTRY = 'true'
@@ -233,8 +259,8 @@ describe('the switch ON: bare names come from the registry (D19)', () => {
 
   test('COLLECTIONS is no longer consulted — a failed load means NOTHING is served', async () => {
     // The owner's rule (2026-09-26): rules that do not load make their
-    // collections inaccessible; there is no compiled fallback. No Firebase
-    // here, so the load fails — and `role`, `post`, everything is absent.
+    // collections inaccessible; there is no compiled fallback. The load fails
+    // (`failingLoad`), and `role`, `post`, everything is absent.
     const map = await withSwitch(() => collectionsFor('post'))
     expect(map).not.toBe(COLLECTIONS)
     for (const name of ['post', 'page', 'role', 'config']) {

@@ -17,6 +17,7 @@
   "exclude": [
     "src/gen.ts",
     "src/**/*.test.ts",
-    "src/**/*.isolated.ts"
+    "src/**/*.isolated.ts",
+    "src/**/*.suite.ts"
   ]
 }
