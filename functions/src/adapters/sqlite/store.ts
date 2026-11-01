@@ -25,17 +25,21 @@
  *
  * ## Transactions
  *
- * One at a time, under `BEGIN IMMEDIATE` held for the whole body: SQLite has
- * one writer, so nothing can change between a transaction's reads and its
- * commit, and a second process on the same file waits (busy_timeout) rather
- * than interleaving. Plain `set`/`delete` queue behind transactions for the
- * same reason. Writes are buffered and applied at the end, so a throw leaves
- * nothing behind, and a read after a write is refused (the port's rule).
+ * One writer at a time, across processes too. A transaction takes SQLite's
+ * write lock (`BEGIN IMMEDIATE`) and holds it for the whole body, so nothing
+ * can change between its reads and its commit. Plain `set`/`delete` and
+ * transactions queue behind each other within a process. Writes are buffered
+ * and applied at the end, so a throw leaves nothing behind, and a read after a
+ * write is refused (the port's rule). Reads never wait: WAL lets them run
+ * while another process writes.
  *
- * ONE SqliteStore per database file per process. bun:sqlite is synchronous, so
- * a second connection in the same process would busy-wait for the lock on the
- * event loop that the first transaction needs to finish: a deadlock until
- * busy_timeout. Separate processes are fine; they wait for each other.
+ * Waiting for the lock never blocks the process. bun:sqlite is synchronous, so
+ * SQLite's own `busy_timeout` would stall the event loop (every request in
+ * this process, reads included) while another process holds the lock. Instead
+ * the timeout is 0, SQLITE_BUSY comes back at once, and the store sleeps
+ * asynchronously and retries with backoff (`untilFree`), up to `lockWaitMs`.
+ * That also means two connections to one file in one process cannot deadlock;
+ * still, one SqliteStore per file per process is the intended shape.
  *
  * Uniqueness is still `isUnique`, as on Firestore. The plan's partial unique
  * indexes (the index as the authority) come with registry-driven DDL.
@@ -111,16 +115,21 @@ export class SqliteStore implements Store {
   constructor(
     /** A file path, ':memory:', or an open Database. */
     db: string | Database = ':memory:',
-    private readonly keys: SqliteKeys = {}
+    private readonly keys: SqliteKeys = {},
+    /** How long a write waits for another process's lock before failing. */
+    private readonly lockWaitMs = 10_000
   ) {
     this.db = typeof db === 'string' ? new Database(db, { create: true }) : db
-    this.db.exec('PRAGMA journal_mode = WAL')
+    // Setup may block briefly (two processes opening one new file at once);
+    // from then on the store does its own waiting (see the header).
     this.db.exec('PRAGMA busy_timeout = 5000')
+    this.db.exec('PRAGMA journal_mode = WAL')
     this.db.exec(
       'CREATE TABLE IF NOT EXISTS documents (' +
         'collection TEXT NOT NULL, id TEXT NOT NULL, data TEXT NOT NULL, ' +
         'PRIMARY KEY (collection, id)) WITHOUT ROWID'
     )
+    this.db.exec('PRAGMA busy_timeout = 0')
   }
 
   close(): void {
@@ -340,12 +349,29 @@ later.push((d) => values.some((v) => sameValue(fieldValue(d, f), v)))
     return next
   }
 
+  /**
+   * Run `step` until it stops failing with SQLITE_BUSY: another process holds
+   * the write lock. Sleeps between tries (the event loop keeps running), with
+   * jittered backoff from 2ms to 100ms, and gives up after `lockWaitMs`.
+   */
+  private async untilFree<T>(step: () => T): Promise<T> {
+    const deadline = Date.now() + this.lockWaitMs
+    for (let wait = 2; ; wait = Math.min(wait * 2, 100)) {
+      try {
+        return step()
+      } catch (e) {
+        if ((e as { code?: string }).code !== 'SQLITE_BUSY' || Date.now() >= deadline) throw e
+        await new Promise((resolve) => setTimeout(resolve, wait / 2 + Math.random() * wait))
+      }
+    }
+  }
+
   set(path: string, data: Record<string, unknown>): Promise<void> {
-    return this.serial(async () => this.write(path, data))
+    return this.serial(() => this.untilFree(() => this.write(path, data)))
   }
 
   delete(path: string): Promise<void> {
-    return this.serial(async () => this.write(path, null))
+    return this.serial(() => this.untilFree(() => this.write(path, null)))
   }
 
   transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -370,7 +396,7 @@ later.push((d) => values.some((v) => sameValue(fieldValue(d, f), v)))
           ])
         },
       }
-      this.db.exec('BEGIN IMMEDIATE')
+      await this.untilFree(() => this.db.exec('BEGIN IMMEDIATE'))
       try {
         const result = await fn(tx)
         for (const [path, data, merge] of pending) {
