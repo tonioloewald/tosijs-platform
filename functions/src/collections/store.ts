@@ -157,7 +157,7 @@ export interface Store {
  * could never match in MemoryStore while matching in production — the kind of
  * substrate drift the conformance suite exists to catch.
  */
-function sameValue(a: unknown, b: unknown): boolean {
+export function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) {
     return false
@@ -171,6 +171,37 @@ function sameValue(a: unknown, b: unknown): boolean {
       sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])
     )
   )
+}
+
+/**
+ * A field in a query option (`equals`, `orderBy`, `fields`, …) or a key
+ * lookup is a Firestore field PATH: `meta.title` is `title` inside `meta`, as
+ * the SDK reads a dotted string (and as `/docs?f=meta.title` has always
+ * worked). Only the transaction's merge treats a key as one whole name.
+ */
+export function fieldValue(data: Record<string, unknown>, field: string): unknown {
+  let v: unknown = data
+  for (const key of field.split('.')) {
+    if (typeof v !== 'object' || v === null || Array.isArray(v)) return undefined
+    v = (v as Record<string, unknown>)[key]
+  }
+  return v
+}
+
+/** `fields` as Firestore's `select` returns them: present paths, nested as stored. */
+export function projectFields(data: Record<string, unknown>, fields: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const field of fields) {
+    const v = fieldValue(data, field)
+    if (v === undefined) continue
+    const keys = field.split('.')
+    let into = out
+    for (const key of keys.slice(0, -1)) {
+      into = (into[key] ??= {}) as Record<string, unknown>
+    }
+    into[keys[keys.length - 1]] = v
+  }
+  return out
 }
 
 /**
@@ -297,7 +328,7 @@ export class MemoryStore implements Store {
       if (MemoryStore.split(p).collection !== collection) continue
       // The path's value is a string and compared strictly, as Firestore's
       // `==` does: `num=5` does not find a stored 5 (the conformance suite).
-      const held = data[field]
+      const held = fieldValue(data, field)
       if (Array.isArray(held) ? held.includes(value) : held === value) {
         return p
       }
@@ -334,7 +365,7 @@ export class MemoryStore implements Store {
     for (const [p, data] of this.docs) {
       if (p === excludingPath) continue
       if (MemoryStore.split(p).collection !== collection) continue
-      if (data[field] === value) return false
+      if (fieldValue(data, field) === value) return false
     }
     return true
   }
@@ -349,12 +380,12 @@ export class MemoryStore implements Store {
 
     if (options.equals) {
       const { field, value } = options.equals
-      rows = rows.filter((r) => sameValue(r.data[field], value))
+      rows = rows.filter((r) => sameValue(fieldValue(r.data, field), value))
     }
     if (options.arrayContains) {
       const { field, value } = options.arrayContains
       rows = rows.filter((r) => {
-        const held = r.data[field]
+        const held = fieldValue(r.data, field)
         return Array.isArray(held) && held.some((h) => sameValue(h, value))
       })
     }
@@ -362,20 +393,20 @@ export class MemoryStore implements Store {
       const { field, value } = options.greaterThan
       rows = rows.filter(
         (r) =>
-          typeof r.data[field] === typeof value &&
-          compareValues(r.data[field], value) > 0
+          typeof fieldValue(r.data, field) === typeof value &&
+          compareValues(fieldValue(r.data, field), value) > 0
       )
     }
     if (options.oneOf) {
       const { field, values } = options.oneOf
-      rows = rows.filter((r) => values.some((v) => sameValue(r.data[field], v)))
+      rows = rows.filter((r) => values.some((v) => sameValue(fieldValue(r.data, field), v)))
     }
     if (options.lessThan) {
       const { field, value } = options.lessThan
       rows = rows.filter(
         (r) =>
-          typeof r.data[field] === typeof value &&
-          compareValues(r.data[field], value) < 0
+          typeof fieldValue(r.data, field) === typeof value &&
+          compareValues(fieldValue(r.data, field), value) < 0
       )
     }
 
@@ -386,10 +417,10 @@ export class MemoryStore implements Store {
       rows.sort(byId)
     } else {
       const sign = direction === 'desc' ? -1 : 1
-      rows = rows.filter((r) => r.data[field] !== undefined)
+      rows = rows.filter((r) => fieldValue(r.data, field) !== undefined)
       rows.sort(
         (a, b) =>
-          sign * (compareValues(a.data[field], b.data[field]) || byId(a, b))
+          sign * (compareValues(fieldValue(a.data, field), fieldValue(b.data, field)) || byId(a, b))
       )
     }
 
@@ -398,9 +429,7 @@ export class MemoryStore implements Store {
       const keep = options.fields
       rows = rows.map((r) => ({
         ...r,
-        data: Object.fromEntries(
-          keep.filter((f) => f in r.data).map((f) => [f, r.data[f]])
-        ),
+        data: projectFields(r.data, keep),
       }))
     }
     return rows

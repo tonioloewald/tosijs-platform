@@ -442,6 +442,104 @@ export function storeConformance(
       )
 
       test(
+        'equality is typed: true is not 1, "1" is not 1, 1 is 1.0, null is not missing',
+        async () => {
+          // SQLite binds `true` as the integer 1, so an untyped comparison would
+          // call them equal; Firestore never does. Integer and double ARE equal.
+          const c = fresh('n')
+          const store = await harness.make({
+            [`${c}/one`]: { k: 1 },
+            [`${c}/real`]: { k: 1.0000001 },
+            [`${c}/true`]: { k: true },
+            [`${c}/text`]: { k: '1' },
+            [`${c}/null`]: { k: null },
+            [`${c}/missing`]: {},
+            [`${c}/tags`]: { k: [1, true] },
+          })
+          const eq = (value: unknown) =>
+            ids(store, c, { orderBy: '~', equals: { field: 'k', value } })
+          expect(await eq(true)).toEqual(['true'])
+          expect(await eq(1)).toEqual(['one'])
+          expect(await eq(1.0)).toEqual(['one'])
+          expect(await eq('1')).toEqual(['text'])
+          expect(await eq(null)).toEqual(['null'])
+          expect(await eq(false)).toEqual([])
+          expect(
+            await ids(store, c, {
+              orderBy: '~',
+              arrayContains: { field: 'k', value: true },
+            })
+          ).toEqual(['tags'])
+          expect(
+            await ids(store, c, {
+              orderBy: '~',
+              arrayContains: { field: 'k', value: '1' },
+            })
+          ).toEqual([])
+          expect(
+            await ids(store, c, {
+              orderBy: '~',
+              oneOf: { field: 'k', values: [true, '1'] },
+            })
+          ).toEqual(['text', 'true'])
+        },
+        timeout
+      )
+
+      test(
+        'a dotted field is a PATH into a map, in every query option',
+        async () => {
+          // As the Firestore SDK reads a field string, and as `/docs?f=meta.title`
+          // has always behaved in production. (The transaction's merge is the
+          // exception: there a key is one whole name.)
+          const c = fresh('n')
+          const store = await harness.make({
+            [`${c}/flat`]: { 'x.y': 1 },
+            [`${c}/a`]: { x: { y: 2, z: 'drop' }, tags: { t: ['k'] } },
+            [`${c}/b`]: { x: { y: 1 } },
+          })
+          expect(
+            await ids(store, c, {
+              orderBy: '~',
+              equals: { field: 'x.y', value: 1 },
+            })
+          ).toEqual(['b'])
+          expect(await ids(store, c, { orderBy: 'x.y asc' })).toEqual([
+            'b',
+            'a',
+          ])
+          expect(
+            await ids(store, c, {
+              orderBy: '~',
+              greaterThan: { field: 'x.y', value: 1 },
+            })
+          ).toEqual(['a'])
+          expect(
+            await ids(store, c, {
+              orderBy: '~',
+              arrayContains: { field: 'tags.t', value: 'k' },
+            })
+          ).toEqual(['a'])
+          expect(
+            await ids(store, c, {
+              orderBy: '~',
+              oneOf: { field: 'x.y', values: [2] },
+            })
+          ).toEqual(['a'])
+          const projected = await store.query(c, {
+            orderBy: '~',
+            fields: ['x.y'],
+          })
+          expect(projected.map((r) => r.data)).toEqual([
+            { x: { y: 2 } },
+            { x: { y: 1 } },
+            {},
+          ])
+        },
+        timeout
+      )
+
+      test(
         'greaterThan and lessThan match the same type only',
         async () => {
           const c = fresh('n')

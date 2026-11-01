@@ -22,7 +22,8 @@ import { join } from 'path'
 const SRC = new URL('.', import.meta.url).pathname
 
 /** Modules only an adapter may import. */
-const VENDOR = /^(firebase-admin|firebase-functions|@google-cloud\/|@firebase\/|firebase$|firebase\/)/
+// `bun:` built-ins too (bar bun:test): the kernel also runs on Node, in Cloud Functions.
+const VENDOR = /^(firebase-admin|firebase-functions|@google-cloud\/|@firebase\/|firebase$|firebase\/|bun:(?!test$))/
 
 /**
  * Files outside `adapters/` that still import a vendor SDK. Started 2026-10-22

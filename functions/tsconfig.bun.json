@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "esnext",
+    "types": ["bun-types"],
+    "typeRoots": ["../node_modules"]
+  },
+  "include": ["src/adapters/sqlite"],
+  "exclude": ["src/**/*.test.ts"]
+}
