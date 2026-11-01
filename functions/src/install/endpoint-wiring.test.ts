@@ -94,7 +94,7 @@ describe('the commit is one transaction, epoch included', () => {
   // What the commit does — manifest append-only, content-checked, epoch bumped
   // in the same transaction — is tested by behaviour in install-store.test.ts.
   test('the endpoint commits through the kernel, over the Firestore store', () => {
-    expect(endpointTs).toMatch(/commitInstall\(firestoreStore, records,/)
+    expect(endpointTs).toMatch(/commitInstall\(dataStore, records,/)
     expect(endpointTs).not.toContain('batch()')
     expect(endpointTs).not.toContain('runTransaction')
   })
@@ -113,12 +113,12 @@ describe('/claim runs the whole ceremony in one transaction', () => {
   // claim-ceremony.test.ts (including the simultaneous-claim race); what is
   // left to pin here is that the endpoint is bound to them.
   test('the POST path is the transactional kernel, over the Firestore store', () => {
-    expect(claimTs).toMatch(/claimConfigurator\(firestoreStore, user, ceremonyDeps\)/)
+    expect(claimTs).toMatch(/claimConfigurator\(dataStore, user, ceremonyDeps\)/)
     expect(claimTs).not.toContain('runTransaction')
   })
 
   test('the GET path mints through the kernel too', () => {
-    expect(claimTs).toMatch(/publishNonce\(firestoreStore, ceremonyDeps\)/)
+    expect(claimTs).toMatch(/publishNonce\(dataStore, ceremonyDeps\)/)
   })
 
   test('the published location is the document the kernel uses', () => {
@@ -247,8 +247,8 @@ describe('the proposal flow and the cleanup are the tested ones (0.4.0 re-review
   })
 
   test('both anonymous request collections are swept by the shared rule', () => {
-    expect(endpointTs).toMatch(/storeSweepable\(firestoreStore, PROPOSALS\)/)
-    expect(authorizeTs).toMatch(/sweepExpired\(storeSweepable\(firestoreStore, AUTHORIZE_COLLECTION\)/)
+    expect(endpointTs).toMatch(/storeSweepable\(dataStore, PROPOSALS\)/)
+    expect(authorizeTs).toMatch(/sweepExpired\(storeSweepable\(dataStore, AUTHORIZE_COLLECTION\)/)
   })
 
   test('the authority pages are sent with the no-framing headers', () => {

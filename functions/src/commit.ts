@@ -13,7 +13,7 @@ import {
   type CommitOutcome,
   type TransactionalWrite,
 } from './collections/commit'
-import { firestoreStore } from './adapters/firebase/firestore-store'
+import { dataStore } from './datastore'
 
 export type { CommitOutcome, Refusal, TransactionalWrite } from './collections/commit'
 
@@ -22,7 +22,7 @@ export function commitTransactionally(
   collections: CollectionMap,
   userRoles: UserRoles
 ): Promise<CommitOutcome> {
-  return commitWrites(firestoreStore, writes, collections, userRoles, {
+  return commitWrites(dataStore, writes, collections, userRoles, {
     warn: (message, error) => log.warn(message, error),
   })
 }

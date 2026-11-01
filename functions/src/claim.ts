@@ -42,7 +42,7 @@ import { optionsResponse, getUser, AuthenticatedRequest } from './utilities'
 import { Response } from 'express'
 import { NONCE_TTL_MS } from './install/claim'
 import { claimConfigurator, publishNonce } from './install/claim-ceremony'
-import { firestoreStore } from './adapters/firebase/firestore-store'
+import { dataStore } from './datastore'
 import { newDocId } from './collections/store'
 import { ROLES } from './collections/roles'
 import { claimPage } from './claim-page'
@@ -85,7 +85,7 @@ export const handleClaim: Handler = async (request, response: Response) => {
 
   if (req.method === 'GET') {
     try {
-      const state = await publishNonce(firestoreStore, ceremonyDeps)
+      const state = await publishNonce(dataStore, ceremonyDeps)
       response.json({
         nonce: state.nonce,
         expiresAt: new Date(
@@ -120,7 +120,7 @@ export const handleClaim: Handler = async (request, response: Response) => {
   }
 
   try {
-    const outcome = await claimConfigurator(firestoreStore, user, ceremonyDeps)
+    const outcome = await claimConfigurator(dataStore, user, ceremonyDeps)
 
     if (outcome.status === 'refused') {
       // Specific in the log, generic on the wire. See the header.

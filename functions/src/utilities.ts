@@ -7,7 +7,7 @@ import { identity, type VerifiedIdentity } from './identity'
 
 import { UserRoles } from './collections/roles'
 import { resolvePrincipal } from './collections/principal'
-import { firestoreQuery, firestoreStore } from './adapters/firebase/firestore-store'
+import { dataStore } from './datastore'
 import { newDocId, type QueryOptions } from './collections/store'
 
 // Re-export types for use in other modules
@@ -276,7 +276,7 @@ async function syncRolesToCustomClaims(
  */
 async function getUserRoles(req: AuthenticatedRequest): Promise<UserRoles> {
   return resolvePrincipal(req.headers.authorization, {
-    store: { query: firestoreQuery },
+    store: { query: dataStore.query },
     verify: async (idToken) => {
       const decoded = await verifyFirebaseIdToken(idToken)
       if (!decoded) return null
@@ -311,7 +311,7 @@ async function getVersion<T extends FirestoreDoc = FirestoreDoc>(
   id: string,
   version: string
 ): Promise<T | undefined> {
-  const doc = await firestoreStore.get(`${collection}/${id}/versions/${version}`)
+  const doc = await dataStore.get(`${collection}/${id}/versions/${version}`)
   return doc.exists ? (doc.data as T) : undefined
 }
 
@@ -329,7 +329,7 @@ async function getRecord<T extends FirestoreDoc = FirestoreDoc>(
   if (id === null) {
     return undefined
   }
-  const doc = await firestoreStore.get(`${collectionName}/${String(id)}`)
+  const doc = await dataStore.get(`${collectionName}/${String(id)}`)
   if (!doc.exists) {
     return undefined
   }
@@ -362,7 +362,7 @@ async function getRecords<T extends FirestoreDoc = FirestoreDoc>(
     options.orderBy = '_modified desc'
     options.greaterThan = { field: '_modified', value: since }
   }
-  const docs = await firestoreStore.query(collectionName, options)
+  const docs = await dataStore.query(collectionName, options)
   return docs
     .map((doc) => ({ ...(doc.data as T), _id: doc.path.split('/').pop(), _collection: collectionName }))
     .filter((record) => record._deleted !== true)
@@ -404,15 +404,15 @@ async function setRecord<T extends FirestoreDoc>(
         _timestamp: new Date().valueOf(),
         _version_note_: versionNote,
       }
-      await firestoreStore.set(`${collectionName}/${id}/versions/${newDocId()}`, versionRecord as unknown as Record<string, unknown>)
+      await dataStore.set(`${collectionName}/${id}/versions/${newDocId()}`, versionRecord as unknown as Record<string, unknown>)
     }
     if (publish) {
-      await firestoreStore.set(`${collectionName}/${id}`, record as Record<string, unknown>)
+      await dataStore.set(`${collectionName}/${id}`, record as Record<string, unknown>)
     }
   } else {
     delete record._collection
     record._id = id = newDocId()
-    await firestoreStore.set(`${collectionName}/${id}`, record as Record<string, unknown>)
+    await dataStore.set(`${collectionName}/${id}`, record as Record<string, unknown>)
   }
   return returnRecord ? record : (id as string)
 }

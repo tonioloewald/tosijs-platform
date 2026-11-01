@@ -58,12 +58,12 @@ describe('getUserRoles: the B1 defects stay fixed (#6)', () => {
     expect(utilities).not.toMatch(/userIds\.push\(/)
   })
 
-  test('getUserRoles delegates to the kernel resolver, bound to Firebase', () => {
+  test('getUserRoles delegates to the kernel resolver, bound to the installed datastore', () => {
     // Joining (not [0]), verified-email lookup, token attenuation and #28
     // attribution are behaviour tests in principal.test.ts now. They only
     // protect production if production calls the resolver.
     expect(utilities).toMatch(/return resolvePrincipal\(req\.headers\.authorization, \{/)
-    expect(utilities).toMatch(/store: \{ query: firestoreQuery \}/)
+    expect(utilities).toMatch(/store: \{ query: dataStore.query \}/)
     expect(utilities).toMatch(/verifyFirebaseIdToken\(idToken\)/)
     // No second, inline resolution path left behind by a partial revert.
     expect(utilities).not.toMatch(/joinRoleDocs\(/)
@@ -327,9 +327,9 @@ describe('/authorize never hands the browser a credential (B2, #6)', () => {
     // What they do — live roles at exchange, single use under a race, the token
     // and the consumption in one commit — is tested by behaviour in
     // auth/authorize-store.test.ts.
-    expect(authz).toMatch(/exchangeRequest\(firestoreStore, id, verifier, \{ rolesOf \}\)/)
-    expect(authz).toMatch(/approveRequest\(\s*firestoreStore,/)
-    expect(authz).toMatch(/denyRequest\(firestoreStore, id\)/)
+    expect(authz).toMatch(/exchangeRequest\(dataStore, id, verifier, \{ rolesOf \}\)/)
+    expect(authz).toMatch(/approveRequest\(\s*dataStore,/)
+    expect(authz).toMatch(/denyRequest\(dataStore, id\)/)
     expect(authz).not.toMatch(/batch\(\)|\.update\(/)
   })
 
@@ -407,7 +407,7 @@ describe('rejectionStatus — the one refusal-to-status map (0.2.0 review)', () 
     // Behaviour: commit.test.ts ("afterWrite runs AFTER the commit"). Here:
     // the Firestore binding is the kernel commit, and /docs calls it.
     const commitTs = src('commit.ts')
-    expect(commitTs).toMatch(/return commitWrites\(firestoreStore, writes, collections, userRoles,/)
+    expect(commitTs).toMatch(/return commitWrites\(dataStore, writes, collections, userRoles,/)
     const kernel = src('collections/commit.ts')
     const afterTx = kernel.slice(kernel.indexOf('await store.transaction'))
     // Since D23 the change (before/after) is passed too, for render on store.
@@ -450,8 +450,8 @@ describe('storage areas are written ONLY through /blob (#1136)', () => {
     const ep = src('blob-endpoint.ts')
     expect(ep).not.toContain('firebase-admin')
     expect(ep).toMatch(/cloudStorageObjects\(/)
-    expect(ep).toMatch(/firestoreStore\.get\(docPath\)/)
-    expect(ep).toMatch(/firestoreStore\.delete\(docPath\)/)
+    expect(ep).toMatch(/dataStore\.get\(docPath\)/)
+    expect(ep).toMatch(/dataStore\.delete\(docPath\)/)
     expect(ep).toMatch(/objects\.read\(result\.key\)/)
   })
   test('the endpoint is exported, marks responses no-store first, and ships in the platform profile', () => {
@@ -460,5 +460,22 @@ describe('storage areas are written ONLY through /blob (#1136)', () => {
     expect(ep.indexOf('noStore(response)')).toBeLessThan(ep.indexOf('optionsResponse('))
     const lib = readFileSync(join(__dirname, '..', '..', '..', 'scripts', 'sandbox-lib.js'), 'utf8')
     expect(lib).toMatch(/PLATFORM_FUNCTIONS = \[[\s\S]*?'blob'/)
+  })
+})
+
+describe('the datastore is installed at the composition root (Phase 2)', () => {
+  const read = (f: string) => readFileSync(join(__dirname, '..', f), 'utf-8')
+
+  test('index.ts installs Firestore as the datastore', () => {
+    expect(read('index.ts')).toMatch(/setDataStoreProvider\(firebaseDataStore\)/)
+  })
+
+  test('no kernel file outside adapters/ and index.ts names the Firestore store', () => {
+    // Otherwise a SQLite host would still write to Firestore through it.
+    const kernel = ['doc.ts', 'docs.ts', 'commit.ts', 'claim.ts', 'sitemap.ts', 'utilities.ts', 'blob-endpoint.ts',
+      'auth/endpoint.ts', 'auth/authorize-endpoint.ts', 'install/endpoint.ts', 'install/installed.ts', 'render/store.ts']
+    for (const f of kernel) {
+      expect(`${f}: ${/from ['"][^'"]*(firestore-store|render-backend)['"]/.test(read(f))}`).toBe(`${f}: false`)
+    }
   })
 })

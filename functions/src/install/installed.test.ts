@@ -25,7 +25,7 @@ import {
   InstalledConfigSource,
 } from './installed'
 import { MemoryStore } from '../collections/store'
-import { firestoreStore } from '../adapters/firebase/firestore-store'
+import { setDataStoreProvider, type DataStoreProvider } from '../datastore'
 import { EPOCH_DOC } from './install-store'
 import { PLATFORM_HOOKS } from '../collections/hooks'
 import { compileStored } from '../collections/registry'
@@ -198,24 +198,18 @@ describe('a broken install fails closed, and only for itself', () => {
 })
 
 /**
- * The registry load FAILS, on purpose. `installedRegistry` reads through
- * `firestoreStore`; these tests used to rely on "no Firebase here" making that
- * throw, which held only while the SDK could not start under bun. Now it can,
- * and it would retry an absent emulator past the test timeout (or, before
- * test-setup.ts, read gcloud's default project). So the store refuses, here.
+ * The registry load FAILS, on purpose: no datastore is installed, so every
+ * read rejects (datastore.ts). These tests used to rely on "no Firebase here",
+ * which held only while the SDK could not start under bun; installing NO
+ * provider says what they mean. (Restores whatever was installed.)
  */
 const failingLoad = () => {
-  const real = { get: firestoreStore.get, query: firestoreStore.query }
+  let previous: DataStoreProvider
   beforeAll(() => {
-    firestoreStore.get = async () => {
-      throw new Error('no datastore in unit tests')
-    }
-    firestoreStore.query = async () => {
-      throw new Error('no datastore in unit tests')
-    }
+    previous = setDataStoreProvider(null)
   })
   afterAll(() => {
-    Object.assign(firestoreStore, real)
+    setDataStoreProvider(previous)
   })
 }
 

@@ -36,7 +36,7 @@ import {
   runWritePipeline,
   type WriteMethod,
 } from './collections/write-pipeline'
-import { firestoreStoreFor as storeFor } from './adapters/firebase/firestore-store'
+import { storeFor } from './datastore'
 export { storeFor }
 import {
   fail,

@@ -14,7 +14,7 @@ import { optionsResponse, getUserRoles, type AuthenticatedRequest } from './util
 import { fail, noStore } from './errors'
 import { collectionsFor } from './install/installed'
 import { hasPrivilegedRole } from './collections/access'
-import { firestoreStore } from './adapters/firebase/firestore-store'
+import { dataStore } from './datastore'
 import { cloudStorageObjects } from './adapters/firebase/cloud-storage'
 import { commitTransactionally } from './commit'
 import { handleBlob, type BlobDeps } from './blob-handler'
@@ -32,7 +32,7 @@ const objects = cloudStorageObjects({
 const deps: BlobDeps = {
   collectionsFor,
   getMeta: async (docPath) => {
-    const doc = await firestoreStore.get(docPath)
+    const doc = await dataStore.get(docPath)
     return doc.exists ? (doc.data as BlobMeta & Record<string, unknown>) : null
   },
   commitMeta: (docPath, meta, collections, userRoles, method) =>
@@ -42,7 +42,7 @@ const deps: BlobDeps = {
       collections,
       userRoles
     ),
-  deleteMeta: (docPath) => firestoreStore.delete(docPath),
+  deleteMeta: (docPath) => dataStore.delete(docPath),
   objects,
   sha256: (bytes) => createHash('sha256').update(bytes).digest('hex'),
   isPrivileged: hasPrivilegedRole,

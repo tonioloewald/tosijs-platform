@@ -50,7 +50,7 @@ import {
   POLL_INTERVAL_MS,
 } from './authorize'
 import { storeSweepable, sweepExpired } from '../sweep'
-import { firestoreStore } from '../adapters/firebase/firestore-store'
+import { dataStore } from '../datastore'
 import { approveRequest, denyRequest, exchangeRequest, readRequest } from './authorize-store'
 import { createDocument, newDocId } from '../collections/store'
 import { consentPage } from './consent-page'
@@ -95,7 +95,7 @@ export const handleAuthorize: Handler = async (request, response: Response) => {
     // answers any GET at all and would otherwise swallow it.
     if (req.method === 'GET') {
       const id = String(req.query.request ?? '')
-      const record = await readRequest(firestoreStore, id)
+      const record = await readRequest(dataStore, id)
 
       response.set(PAGE_HEADERS)
       // Never cached: it renders a live, expiring authorization request.
@@ -123,12 +123,12 @@ export const handleAuthorize: Handler = async (request, response: Response) => {
       }
       // Starting is anonymous, so it cleans up after itself (sweep.ts): the
       // same rule as install proposals, best effort.
-      await sweepExpired(storeSweepable(firestoreStore, AUTHORIZE_COLLECTION), Date.now(), (e) =>
+      await sweepExpired(storeSweepable(dataStore, AUTHORIZE_COLLECTION), Date.now(), (e) =>
         log.warn('authorize: sweeping expired requests failed', e)
       )
       const requestId = newDocId()
       await createDocument(
-        firestoreStore,
+        dataStore,
         `${AUTHORIZE_COLLECTION}/${requestId}`,
         decision.record as unknown as Record<string, unknown>
       )
@@ -162,7 +162,7 @@ export const handleAuthorize: Handler = async (request, response: Response) => {
       if (req.body?.approve === false) {
         // Only while still pending (authorize-store.ts): a denial must not
         // overwrite an approval that landed first.
-        await denyRequest(firestoreStore, id)
+        await denyRequest(dataStore, id)
         response.json({ status: 'denied' })
         return
       }
@@ -170,7 +170,7 @@ export const handleAuthorize: Handler = async (request, response: Response) => {
       // Decided on the request as stored at commit, so two approvals (or an
       // approval racing a denial) cannot both land.
       const { decision, record } = await approveRequest(
-        firestoreStore,
+        dataStore,
         id,
         { uid: user.uid, name: credentialName(user) },
         new Date()
@@ -202,7 +202,7 @@ export const handleAuthorize: Handler = async (request, response: Response) => {
       // Mints from the approver's LIVE roles, and consumes the request in the
       // same transaction as the mint — at most one token per request, even
       // when two exchanges race (authorize-store.ts).
-      const outcome = await exchangeRequest(firestoreStore, id, verifier, { rolesOf })
+      const outcome = await exchangeRequest(dataStore, id, verifier, { rolesOf })
       if (outcome.status === 'pending') {
         response.json({ status: 'pending', pollIntervalMs: POLL_INTERVAL_MS })
         return

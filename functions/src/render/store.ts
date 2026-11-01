@@ -19,8 +19,7 @@ import { log } from '../log'
 import type { Response } from 'express'
 import { getDoc } from '../doc'
 import { getDocs } from '../docs'
-import { firestoreStore } from '../adapters/firebase/firestore-store'
-import { firestoreComputedBackend } from '../adapters/firebase/render-backend'
+import { computedBackend, dataStore } from '../datastore'
 import type { AuthenticatedRequest } from '../utilities'
 import type { WriteChange } from '../collections/access'
 import { config as siteConfig } from '../config'
@@ -65,7 +64,7 @@ const LOG_COLLECTION = 'system:render-log'
  */
 const BACKSTOP_MAX_AGE_SECONDS = 24 * 3600
 
-export const renderStore = new ComputedStore(firestoreComputedBackend(RENDER_COLLECTION, LOG_COLLECTION), RENDER_VERSION, {
+export const renderStore = new ComputedStore(computedBackend(RENDER_COLLECTION, LOG_COLLECTION), RENDER_VERSION, {
   defaultPolicy: { maxAgeSeconds: BACKSTOP_MAX_AGE_SECONDS },
   isInvalidatedDep,
   onError: (what, e) => log.error(`render store: ${what} failed`, e),
@@ -152,7 +151,7 @@ const routeTable = (parent?: Deps) =>
     'route-table',
     async (deps) => {
       deps.add('list:page')
-      const paths = (await firestoreStore.query('page', { fields: ['path'], orderBy: '~' }))
+      const paths = (await dataStore.query('page', { fields: ['path'], orderBy: '~' }))
         .map((d) => d.data.path as string | undefined)
         .filter((p): p is string => typeof p === 'string')
       const pages = (await Promise.all(paths.map((p) => readPublic(`page/path=${p}`, deps)))).filter(

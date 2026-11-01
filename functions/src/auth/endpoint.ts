@@ -46,7 +46,7 @@ import { fail, noStore } from '../errors'
 import { credentialName } from '../collections/join-roles'
 import { principalIdentity } from '../collections/roles'
 import { createDocument, newDocId, updateDocumentIf } from '../collections/store'
-import { firestoreStore } from '../adapters/firebase/firestore-store'
+import { dataStore } from '../datastore'
 
 const TOKENS = 'token'
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000
@@ -88,7 +88,7 @@ export const handleToken: Handler = async (request, response: Response) => {
   try {
     switch (req.method) {
       case 'GET': {
-        const rows = await firestoreStore.query(TOKENS, {
+        const rows = await dataStore.query(TOKENS, {
           equals: { field: 'principalUid', value: uid },
           orderBy: '~',
         })
@@ -133,7 +133,7 @@ export const handleToken: Handler = async (request, response: Response) => {
         // The minting human's own name, so the agent's writes read as theirs
         // (#28). A token cannot mint, so `user` is the human's credential.
         const principalName = user ? credentialName(user) : undefined
-        await createDocument(firestoreStore, `${TOKENS}/${tokenId}`, {
+        await createDocument(dataStore, `${TOKENS}/${tokenId}`, {
           ...decision.record,
           ...(principalName ? { principalName } : {}),
           hash: hashToken(secret),
@@ -175,7 +175,7 @@ export const handleToken: Handler = async (request, response: Response) => {
         // carries (#6) becomes unresolvable the moment it is revoked.
         const nowIso = new Date().toJSON()
         const revoked = await updateDocumentIf(
-          firestoreStore,
+          dataStore,
           `${TOKENS}/${id}`,
           (t) => t?.principalUid === uid,
           { revokedAt: nowIso, _modified: nowIso }

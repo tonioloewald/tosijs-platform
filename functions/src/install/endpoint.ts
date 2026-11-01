@@ -60,7 +60,7 @@ import {
 import { ManifestConflict } from './manifest-identity'
 import { commitInstall, updateProposalIf } from './install-store'
 import { createDocument, newDocId } from '../collections/store'
-import { firestoreStore } from '../adapters/firebase/firestore-store'
+import { dataStore } from '../datastore'
 import { fail, noStore } from '../errors'
 
 const MANIFESTS = 'manifest'
@@ -73,7 +73,7 @@ const validateOptions = {
 }
 
 const readGrant = async (name: string): Promise<Grant | null> => {
-  const doc = await firestoreStore.get(`${GRANTS}/${name}`)
+  const doc = await dataStore.get(`${GRANTS}/${name}`)
   return doc.exists ? (doc.data as unknown as Grant) : null
 }
 
@@ -82,13 +82,13 @@ const readManifest = async (
   version: string | null
 ): Promise<Manifest | null> => {
   if (!version) return null
-  const doc = await firestoreStore.get(`${MANIFESTS}/${name}@${version}`)
+  const doc = await dataStore.get(`${MANIFESTS}/${name}@${version}`)
   return doc.exists ? (doc.data as unknown as Manifest) : null
 }
 
 /** The records, the manifest check and the epoch bump, in one transaction (install-store.ts). */
 const commit = (records: InstallRecords): Promise<void> =>
-  commitInstall(firestoreStore, records, new Date().toJSON())
+  commitInstall(dataStore, records, new Date().toJSON())
 
 /** Only present when there is something to say, so existing responses are unchanged. */
 const superseded = (m: Manifest) => {
@@ -204,21 +204,21 @@ const logFailure = (what: string, e: unknown) => log.error(`install: ${what} fai
 
 /** Install proposals in Firestore (the flow that uses this is proposal-handler.ts). */
 const proposalStore = (): ProposalStore => ({
-  ...storeSweepable(firestoreStore, PROPOSALS),
+  ...storeSweepable(dataStore, PROPOSALS),
   async create(proposal) {
     // create, never set: a proposal id can never be overwritten.
     const id = newDocId()
-    await createDocument(firestoreStore, `${PROPOSALS}/${id}`, proposal as unknown as Record<string, unknown>)
+    await createDocument(dataStore, `${PROPOSALS}/${id}`, proposal as unknown as Record<string, unknown>)
     return id
   },
   async read(id) {
     if (!VALID_ID.test(id)) return null
-    const doc = await firestoreStore.get(`${PROPOSALS}/${id}`)
+    const doc = await dataStore.get(`${PROPOSALS}/${id}`)
     return doc.exists ? (doc.data as unknown as Proposal) : null
   },
   async updateIf(id, allow, change) {
     if (!VALID_ID.test(id)) return false
-    return updateProposalIf(firestoreStore, `${PROPOSALS}/${id}`, allow, change)
+    return updateProposalIf(dataStore, `${PROPOSALS}/${id}`, allow, change)
   },
 })
 
@@ -410,7 +410,7 @@ export const handleInstall: Handler = async (request, response: Response) => {
   try {
     switch (req.method) {
       case 'GET': {
-        const grants = await firestoreStore.query(GRANTS, { orderBy: '~' })
+        const grants = await dataStore.query(GRANTS, { orderBy: '~' })
         response.json({
           installed: grants.map((d) => {
             const g = d.data as unknown as Grant

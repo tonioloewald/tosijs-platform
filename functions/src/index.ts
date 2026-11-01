@@ -52,12 +52,16 @@ import { setLogSink } from './log'
 import { firebaseLogger } from './adapters/firebase/logger'
 import { setIdentityProvider } from './identity'
 import { firebaseIdentity } from './adapters/firebase/identity'
+import { setDataStoreProvider } from './datastore'
+import { firebaseDataStore } from './adapters/firebase/datastore'
 
 // The kernel reaches the vendor only through ports. Deployed, the log sink is
-// Cloud Logging's structured logger and identities are Firebase Auth's.
+// Cloud Logging's structured logger, identities are Firebase Auth's, and the
+// datastore is Firestore.
 firebaseAdmin() // initialise the default app before any request
 setLogSink(firebaseLogger)
 setIdentityProvider(firebaseIdentity)
+setDataStoreProvider(firebaseDataStore)
 
 import { firebaseEndpoint } from './adapters/firebase/http'
 import { handleDoc } from './doc'

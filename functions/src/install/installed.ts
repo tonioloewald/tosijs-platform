@@ -40,7 +40,7 @@
 
 import { log } from '../log'
 import type { Store } from '../collections/store'
-import { firestoreStore } from '../adapters/firebase/firestore-store'
+import { dataStore } from '../datastore'
 
 import {
   CollectionRegistry,
@@ -184,7 +184,7 @@ export class InstalledConfigSource implements ConfigSource {
 }
 
 export const installedRegistry = new CollectionRegistry(
-  new InstalledConfigSource({ store: firestoreStore, log }),
+  new InstalledConfigSource({ store: dataStore, log }),
   { onError: (message) => log.warn(message) }
 )
 
