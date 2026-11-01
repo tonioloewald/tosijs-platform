@@ -46,7 +46,7 @@
  */
 import { Database } from 'bun:sqlite'
 
-import { fieldValue, projectFields, sameValue } from '../../collections/store'
+import { configKey, fieldValue, projectFields, sameValue } from '../../collections/store'
 import type {
   QueryOptions,
   Store,
@@ -132,6 +132,50 @@ export class SqliteStore implements Store {
     this.db.exec('PRAGMA busy_timeout = 0')
   }
 
+  /**
+   * This store with other `field=value` keys: the per-request view
+   * (`storeFor(collections)`), sharing the connection, queue and lock.
+   */
+  withKeys(keys: SqliteKeys): Store {
+    return {
+      resolve: (path) => this.resolveWith(path, keys),
+      get: (path) => this.get(path),
+      set: (path, data) => this.set(path, data),
+      delete: (path) => this.delete(path),
+      isUnique: (collection, field, value, excluding) => this.isUnique(collection, field, value, excluding),
+      query: (collection, options) => this.query(collection, options),
+      scan: (collection, options, pageSize) => this.scan(collection, options, pageSize),
+      transaction: (fn) => this.transaction(fn),
+    }
+  }
+
+  /**
+   * For another table on this connection (the render cache): run `step`
+   * atomically as ONE writer, queued behind this store's transactions and
+   * waiting for other processes without blocking (see the header). `step` is
+   * synchronous, so its reads and writes see no one else's.
+   */
+  exclusive<T>(step: (db: Database) => T): Promise<T> {
+    return this.serial(() =>
+      this.untilFree(() => {
+        this.db.exec('BEGIN IMMEDIATE')
+        try {
+          const result = step(this.db)
+          this.db.exec('COMMIT')
+          return result
+        } catch (e) {
+          this.db.exec('ROLLBACK')
+          throw e
+        }
+      })
+    )
+  }
+
+  /** For another table on this connection: a read, which never waits (WAL). */
+  reading<T>(step: (db: Database) => T): T {
+    return step(this.db)
+  }
+
   close(): void {
     this.db.close()
   }
@@ -151,13 +195,17 @@ export class SqliteStore implements Store {
   }
 
   async resolve(path: string): Promise<string | Error> {
+    return this.resolveWith(path, this.keys)
+  }
+
+  private async resolveWith(path: string, keys: SqliteKeys): Promise<string | Error> {
     const parts = path.split('/')
     if (parts.length % 2 !== 0) return new Error(`bad path ${path}`)
     const { collection, id } = split(path)
     if (!id.includes('=')) return path
     const [field, value] = id.split('=', 2)
-    const tag = (this.keys.tagFields?.[collection] ?? []).includes(field)
-    if (!tag && !(this.keys.unique?.[collection] ?? []).includes(field)) {
+    const tag = (keys.tagFields?.[configKey(collection)] ?? []).includes(field)
+    if (!tag && !(keys.unique?.[configKey(collection)] ?? []).includes(field)) {
       return new Error(`${path} is not allowed; ${field} is not an allowed key`)
     }
     // The path's value is a string, compared strictly (Firestore `==` and

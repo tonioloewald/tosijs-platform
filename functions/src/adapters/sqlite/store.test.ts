@@ -59,3 +59,17 @@ test('a file database keeps its documents across close and reopen', async () => 
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('the SQLite datastore resolves field=value with each request’s collection map', async () => {
+  const { sqliteDataStore } = await import('./datastore')
+  const host = sqliteDataStore(':memory:')
+  await host.store.set('post/a', { path: 'hello', tags: ['t'] })
+  await host.store.set('lib:task/b', { slug: 'x' })
+  const platform = host.storeFor({ post: { access: {}, unique: ['path'] } })
+  expect(await platform.resolve('post/path=hello')).toBe('post/a')
+  // An installed collection's keys exist only in a map that includes it.
+  expect(await platform.resolve('lib:task/slug=x')).toBeInstanceOf(Error)
+  const merged = host.storeFor({ 'lib:task': { access: {}, unique: ['slug'] } })
+  expect(await merged.resolve('lib:task/slug=x')).toBe('lib:task/b')
+  host.close()
+})

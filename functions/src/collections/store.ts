@@ -262,6 +262,17 @@ export function updateDocumentIf(
   })
 }
 
+/**
+ * The name a collection's CONFIG is keyed by: its collection segments without
+ * the document ids between them (`post/abc/comment` → `post/comment`), as
+ * getRef builds it. A sub-collection has one config, whichever parent it is under.
+ */
+export const configKey = (collectionPath: string): string =>
+  collectionPath
+    .split('/')
+    .filter((_, i) => i % 2 === 0)
+    .join('/')
+
 const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 
 /**
@@ -321,7 +332,7 @@ export class MemoryStore implements Store {
     const { collection, id } = MemoryStore.split(path)
     if (!id.includes('=')) return path
     const [field, value] = id.split('=', 2)
-    if (!(this.keyFields[collection] ?? []).includes(field)) {
+    if (!(this.keyFields[configKey(collection)] ?? []).includes(field)) {
       return new Error(`${path} is not allowed; ${field} is not an allowed key`)
     }
     for (const [p, data] of this.docs) {

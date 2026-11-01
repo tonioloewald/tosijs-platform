@@ -198,6 +198,18 @@ export function storeConformance(
         timeout
       )
 
+      test('a sub-collection’s keys are named by its collections, not its parent’s id', async () => {
+        // Config is keyed `post/comment`, whichever post the comment is under
+        // (getRef joins the collection segments).
+        const c = fresh('post')
+        const store = await harness.make(
+          { [`${c}/p/comment/c1`]: { slug: 'first' }, [`${c}/q/comment/c2`]: { slug: 'first' } },
+          { unique: { [`${c}/comment`]: ['slug'] } }
+        )
+        expect(await store.resolve(`${c}/p/comment/slug=first`)).toBe(`${c}/p/comment/c1`)
+        expect(await store.resolve(`${c}/q/comment/slug=first`)).toBe(`${c}/q/comment/c2`)
+      }, timeout)
+
       test(
         'the value is a STRING: it does not match a stored number',
         async () => {
