@@ -10,10 +10,10 @@
 import { onRequest } from 'firebase-functions/v2/https'
 import { defineSecret } from 'firebase-functions/params'
 import { PUBLIC_ENDPOINT } from '../../endpoint-options'
-import type { Handler } from '../../http'
+import type { Endpoint } from '../../kernel'
 
-export const firebaseEndpoint = (handler: Handler, options: { secrets?: readonly string[] } = {}) =>
+export const firebaseEndpoint = ({ handler, secrets }: Endpoint) =>
   onRequest(
-    { ...PUBLIC_ENDPOINT, ...(options.secrets?.length ? { secrets: options.secrets.map((name) => defineSecret(name)) } : {}) },
+    { ...PUBLIC_ENDPOINT, ...(secrets?.length ? { secrets: secrets.map((name) => defineSecret(name)) } : {}) },
     handler
   )

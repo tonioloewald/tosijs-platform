@@ -1,5 +1,5 @@
 /**
- * The Files port (SOVEREIGN-PLAN.md) on Cloud Storage: `blob-handler.ts`'s
+ * The Files port (files.ts) on Cloud Storage: `blob-handler.ts`'s
  * `ObjectStore`, moved out of `blob-endpoint.ts` unchanged.
  *
  * The first file under `adapters/` — the one directory the vendor ratchet
@@ -8,12 +8,8 @@
  */
 import { firebaseAdmin } from './app'
 import { createHash } from 'crypto'
-import type { ObjectStore } from '../../blob-handler'
-
-export interface StreamingObjectStore extends ObjectStore {
-  /** The object's bytes as a stream, for serving from this origin. Errors on a missing key. */
-  read(key: string): NodeJS.ReadableStream
-}
+import { log } from '../../log'
+import type { FilesProvider, LegacyStoredFiles, StreamingObjectStore } from '../../files'
 
 export function cloudStorageObjects(deps: {
   /** Told once per instance that URLs cannot be signed (the handler then streams). */
@@ -71,19 +67,7 @@ export function cloudStorageObjects(deps: {
   }
 }
 
-/**
- * What `/stored` (the LEGACY reader, stored.ts) needs from the default bucket,
- * moved out of it unchanged: v4 signed read URLs, without a response type.
- */
-export interface LegacyStoredFiles {
-  exists(key: string): Promise<boolean>
-  /** Rejects where URLs cannot be signed (the emulator); the caller then streams. */
-  signedReadUrl(key: string, ttlMs: number): Promise<string>
-  /** The stored content type, if the object has one. */
-  contentType(key: string): Promise<string | undefined>
-  read(key: string): NodeJS.ReadableStream
-}
-
+/** `/stored`'s legacy reader on the default bucket: v4 signed read URLs, without a response type. */
 export function cloudStorageLegacyFiles(): LegacyStoredFiles {
   // The project's DEFAULT bucket — the one the client SDK uploads to and
   // /blob writes to. It was hardcoded as `<project>.appspot.com`, which is
@@ -96,4 +80,17 @@ export function cloudStorageLegacyFiles(): LegacyStoredFiles {
     contentType: async (key) => (await file(key).getMetadata())[0].contentType as string | undefined,
     read: (key) => file(key).createReadStream(),
   }
+}
+
+/** Cloud Storage as the host's files (files.ts), installed by index.ts. */
+export const firebaseFiles: FilesProvider = {
+  objects: cloudStorageObjects({
+    onCannotSign: (e) =>
+      log.warn(
+        'blob: cannot sign URLs — streaming files through the function instead. ' +
+          'Grant the functions service account "Service Account Token Creator" on itself to enable redirects.',
+        e
+      ),
+  }),
+  legacy: cloudStorageLegacyFiles(),
 }

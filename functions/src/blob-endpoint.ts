@@ -4,8 +4,8 @@
  * Every decision and ordering lives in `blob-handler.ts` (tested against
  * in-memory fakes). This file only wires it to Firebase: the store port for the
  * metadata documents (committed through the same transactional write path as
- * /doc, so they carry `_by` and pass the area's schema), the Cloud Storage
- * adapter (`adapters/firebase/cloud-storage.ts`) for the bytes, the host's role resolution, and the shared error shape.
+ * /doc, so they carry `_by` and pass the area's schema), the Files port
+ * (`files.ts`; Cloud Storage when deployed) for the bytes, the host's role resolution, and the shared error shape.
  */
 import type { Handler } from './http'
 import { log } from './log'
@@ -15,19 +15,12 @@ import { fail, noStore } from './errors'
 import { collectionsFor } from './install/installed'
 import { hasPrivilegedRole } from './collections/access'
 import { dataStore } from './datastore'
-import { cloudStorageObjects } from './adapters/firebase/cloud-storage'
+import { files } from './files'
 import { commitTransactionally } from './commit'
 import { handleBlob, type BlobDeps } from './blob-handler'
 import type { BlobMeta } from './collections/blob'
 
-const objects = cloudStorageObjects({
-  onCannotSign: (e) =>
-    log.warn(
-      'blob: cannot sign URLs — streaming files through the function instead. ' +
-        'Grant the functions service account "Service Account Token Creator" on itself to enable redirects.',
-      e
-    ),
-})
+const objects = files.objects
 
 const deps: BlobDeps = {
   collectionsFor,

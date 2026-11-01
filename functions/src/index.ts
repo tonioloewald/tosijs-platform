@@ -36,17 +36,9 @@ export const helloWorld = onRequest((request, response) => {
 // `pullState` ≈ scripts/backup-firestore.js, seeding ≈ scripts/seed-*.js, both
 // of which write with admin credentials directly.
 
-// Collections
-import './collections/module'
-import './collections/config'
-import './collections/role'
-import './collections/install-records'
-import './collections/token-records'
-import './blog'
-import './page'
-// Render on store (D23): re-render after writes to post/page/config. LAST, so it
-// wraps the hooks the modules above registered.
-import './render/hooks'
+// Every collection config and endpoint handler (kernel.ts); this file only
+// binds them to Firebase.
+import { ENDPOINTS } from './kernel'
 import { firebaseAdmin } from './adapters/firebase/app'
 import { setLogSink } from './log'
 import { firebaseLogger } from './adapters/firebase/logger'
@@ -54,49 +46,36 @@ import { setIdentityProvider } from './identity'
 import { firebaseIdentity } from './adapters/firebase/identity'
 import { setDataStoreProvider } from './datastore'
 import { firebaseDataStore } from './adapters/firebase/datastore'
+import { setFilesProvider } from './files'
+import { firebaseFiles } from './adapters/firebase/cloud-storage'
 
 // The kernel reaches the vendor only through ports. Deployed, the log sink is
-// Cloud Logging's structured logger, identities are Firebase Auth's, and the
-// datastore is Firestore.
+// Cloud Logging's structured logger, identities are Firebase Auth's, the
+// datastore is Firestore and files are Cloud Storage.
 firebaseAdmin() // initialise the default app before any request
 setLogSink(firebaseLogger)
 setIdentityProvider(firebaseIdentity)
 setDataStoreProvider(firebaseDataStore)
+setFilesProvider(firebaseFiles)
 
 import { firebaseEndpoint } from './adapters/firebase/http'
-import { handleDoc } from './doc'
-import { handleDocs } from './docs'
-import { handleHello } from './hello'
-import { handlePrefetch, handlePrefetchData } from './prefetch'
-import { handleSitemap } from './sitemap'
-import { handleUser } from './user'
-import { handleEsm } from './esm'
-import { handleCachedQuery } from './cached-query'
-import { handleStored } from './stored'
-import { handleClaim } from './claim'
-import { handleInstall } from './install/endpoint'
-import { handleToken } from './auth/endpoint'
-import { handleAuthorize } from './auth/authorize-endpoint'
-import { handleBlobEndpoint } from './blob-endpoint'
 
 // Each endpoint is a plain handler (the HTTP port, http.ts), bound to Cloud
-// Functions here. The export NAME is the deployed function's name.
-export const doc = firebaseEndpoint(handleDoc)
-export const docs = firebaseEndpoint(handleDocs)
-// gen is exported separately - see bottom of file
-export const hello = firebaseEndpoint(handleHello)
-export const prefetch = firebaseEndpoint(handlePrefetch)
-export const prefetchData = firebaseEndpoint(handlePrefetchData)
-export const sitemap = firebaseEndpoint(handleSitemap)
-export const user = firebaseEndpoint(handleUser)
-export const esm = firebaseEndpoint(handleEsm)
-export const cachedQuery = firebaseEndpoint(handleCachedQuery)
-export const stored = firebaseEndpoint(handleStored)
-export const claim = firebaseEndpoint(handleClaim)
-export const install = firebaseEndpoint(handleInstall)
-export const token = firebaseEndpoint(handleToken)
-export const authorize = firebaseEndpoint(handleAuthorize)
-export const blob = firebaseEndpoint(handleBlobEndpoint)
-
-import { handleGen, GEN_SECRETS } from './gen'
-export const gen = firebaseEndpoint(handleGen, { secrets: GEN_SECRETS })
+// Functions here. The export NAME is the deployed function's name, and must be
+// the endpoint's key in ENDPOINTS (endpoint-options.test.ts checks).
+export const doc = firebaseEndpoint(ENDPOINTS.doc)
+export const docs = firebaseEndpoint(ENDPOINTS.docs)
+export const hello = firebaseEndpoint(ENDPOINTS.hello)
+export const prefetch = firebaseEndpoint(ENDPOINTS.prefetch)
+export const prefetchData = firebaseEndpoint(ENDPOINTS.prefetchData)
+export const sitemap = firebaseEndpoint(ENDPOINTS.sitemap)
+export const user = firebaseEndpoint(ENDPOINTS.user)
+export const esm = firebaseEndpoint(ENDPOINTS.esm)
+export const cachedQuery = firebaseEndpoint(ENDPOINTS.cachedQuery)
+export const stored = firebaseEndpoint(ENDPOINTS.stored)
+export const claim = firebaseEndpoint(ENDPOINTS.claim)
+export const install = firebaseEndpoint(ENDPOINTS.install)
+export const token = firebaseEndpoint(ENDPOINTS.token)
+export const authorize = firebaseEndpoint(ENDPOINTS.authorize)
+export const blob = firebaseEndpoint(ENDPOINTS.blob)
+export const gen = firebaseEndpoint(ENDPOINTS.gen)

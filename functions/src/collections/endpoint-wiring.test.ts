@@ -20,7 +20,7 @@
  * Run: cd functions && bun test src/collections/endpoint-wiring.test.ts
  */
 import { describe, test, expect } from 'bun:test'
-import { readFileSync, existsSync } from 'fs'
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 
 const src = (f: string) => readFileSync(join(__dirname, '..', f), 'utf-8')
@@ -446,16 +446,16 @@ describe('storage areas are written ONLY through /blob (#1136)', () => {
   test('a /docs batch refuses a write to an area', () => {
     expect(docsTs).toMatch(/collections\[cp\]\?\.blob[\s\S]*?'refused'/)
   })
-  test('the endpoint reaches storage only through ports: the store and the Files adapter', () => {
+  test('the endpoint reaches storage only through ports: the store and the Files port', () => {
     const ep = src('blob-endpoint.ts')
     expect(ep).not.toContain('firebase-admin')
-    expect(ep).toMatch(/cloudStorageObjects\(/)
+    expect(ep).toMatch(/const objects = files\.objects/)
     expect(ep).toMatch(/dataStore\.get\(docPath\)/)
     expect(ep).toMatch(/dataStore\.delete\(docPath\)/)
     expect(ep).toMatch(/objects\.read\(result\.key\)/)
   })
   test('the endpoint is exported, marks responses no-store first, and ships in the platform profile', () => {
-    expect(src('index.ts')).toContain('export const blob = firebaseEndpoint(handleBlobEndpoint)')
+    expect(src('index.ts')).toContain('export const blob = firebaseEndpoint(ENDPOINTS.blob)')
     const ep = src('blob-endpoint.ts')
     expect(ep.indexOf('noStore(response)')).toBeLessThan(ep.indexOf('optionsResponse('))
     const lib = readFileSync(join(__dirname, '..', '..', '..', 'scripts', 'sandbox-lib.js'), 'utf8')
@@ -466,8 +466,21 @@ describe('storage areas are written ONLY through /blob (#1136)', () => {
 describe('the datastore is installed at the composition root (Phase 2)', () => {
   const read = (f: string) => readFileSync(join(__dirname, '..', f), 'utf-8')
 
-  test('index.ts installs Firestore as the datastore', () => {
+  test('index.ts installs Firestore as the datastore and Cloud Storage as the files', () => {
     expect(read('index.ts')).toMatch(/setDataStoreProvider\(firebaseDataStore\)/)
+    expect(read('index.ts')).toMatch(/setFilesProvider\(firebaseFiles\)/)
+  })
+
+  test('no kernel file imports a vendor adapter: only index.ts binds them', () => {
+    // A Bun host must be able to load every endpoint without Firebase.
+    const walk = (dir: string): string[] =>
+      readdirSync(join(__dirname, '..', dir)).flatMap((name) => {
+        const rel = dir ? `${dir}/${name}` : name
+        if (statSync(join(__dirname, '..', rel)).isDirectory()) return rel === 'adapters' ? [] : walk(rel)
+        return rel.endsWith('.ts') && !rel.endsWith('.test.ts') && rel !== 'index.ts' ? [rel] : []
+      })
+    const offenders = walk('').filter((f) => /from ['"][^'"]*adapters\/firebase\//.test(read(f)))
+    expect(offenders).toEqual([])
   })
 
   test('no kernel file outside adapters/ and index.ts names the Firestore store', () => {

@@ -24,7 +24,7 @@
 import { deliveryHeaders } from './blob-handler'
 import { storedObjectPath } from './legacy-storage'
 import type { Handler } from './http'
-import { cloudStorageLegacyFiles } from './adapters/firebase/cloud-storage'
+import { files as hostFiles } from './files'
 
 import { optionsResponse } from './utilities'
 import { getMimeType } from '../shared/mime-types'
@@ -38,7 +38,7 @@ const URL_EXPIRATION_MS = 60 * 60 * 1000
 // Cache duration slightly less than URL expiration to ensure valid URLs
 const CACHE_MAX_AGE_SECONDS = 55 * 60 // 55 minutes
 
-const files = cloudStorageLegacyFiles()
+const files = hostFiles.legacy
 
 export const handleStored: Handler = async (req, res) => {
   if (optionsResponse(req, res)) {

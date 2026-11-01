@@ -22,11 +22,22 @@ describe('every HTTP endpoint is publicly invocable, declared in code', () => {
     return [...text.matchAll(/\bonRequest\(\s*([^,)]*(?:\{[^}]*\})?)/g)].map((m) => ({ file: file.slice(SRC.length), opts: m[1] }))
   })
   const indexTs = readFileSync(join(SRC, 'index.ts'), 'utf-8')
-  const bound = [...indexTs.matchAll(/^export const (\w+) = firebaseEndpoint\(\w+[,)]/gm)].map((m) => m[1])
+  const bound = [...indexTs.matchAll(/^export const (\w+) = firebaseEndpoint\(ENDPOINTS\.(\w+)\)/gm)].map((m) => m[1])
+  const boundAs = [...indexTs.matchAll(/^export const (\w+) = firebaseEndpoint\(ENDPOINTS\.(\w+)\)/gm)]
 
   test('the scan finds the endpoints (it is looking at something)', () => {
     // The HTTP port (http.ts): endpoints are handlers, bound in index.ts.
     expect(bound.length).toBeGreaterThanOrEqual(15)
+  })
+
+  test('index.ts binds every endpoint in kernel.ts, each under its own name', () => {
+    // The Bun server serves ENDPOINTS by name; Firebase must deploy the same set.
+    const kernel = readFileSync(join(SRC, 'kernel.ts'), 'utf-8')
+    const table = kernel.slice(kernel.indexOf('export const ENDPOINTS'))
+    const names = [...table.matchAll(/^ {2}(\w+): \{ handler:/gm)].map((m) => m[1])
+    expect(names.length).toBeGreaterThanOrEqual(15)
+    expect(boundAs.map((m) => m[1]).sort()).toEqual([...names].sort())
+    expect(boundAs.filter((m) => m[1] !== m[2])).toEqual([])
   })
 
   test('onRequest is called only by the Firebase HTTP adapter', () => {
