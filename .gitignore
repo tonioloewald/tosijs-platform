@@ -69,3 +69,4 @@ src/*.js
 
 # The publish workflow clones tosijs-coding-practices here (release-doctor reads it).
 /.practices/
+/.local/

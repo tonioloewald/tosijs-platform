@@ -19,6 +19,7 @@
     "src/**/*.test.ts",
     "src/**/*.isolated.ts",
     "src/**/*.suite.ts",
-    "src/adapters/sqlite"
+    "src/adapters/sqlite",
+    "src/adapters/bun"
   ]
 }
