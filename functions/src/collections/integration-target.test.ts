@@ -46,13 +46,19 @@ const PROJECT_ID = (() => {
 const EMULATOR_FUNCTIONS = `http://127.0.0.1:5001/${PROJECT_ID}/us-central1`
 const AUTH_URL = 'http://127.0.0.1:9099'
 
+/**
+ * The emulators answer on BOTH the functions and the Auth port. Functions
+ * alone is not enough: `serve:local` also answers on 5001, and taking it for
+ * the emulators sends token minting to an Auth emulator that is not there.
+ */
 async function emulatorsUp(): Promise<boolean> {
-  try {
-    await fetch(`${EMULATOR_FUNCTIONS}/hello`, { signal: AbortSignal.timeout(1500) })
-    return true
-  } catch {
-    return false
-  }
+  const answers = (url: string) =>
+    fetch(url, { signal: AbortSignal.timeout(1500) }).then(
+      () => true,
+      () => false
+    )
+  const [functions, auth] = await Promise.all([answers(`${EMULATOR_FUNCTIONS}/hello`), answers(`${AUTH_URL}/`)])
+  return functions && auth
 }
 
 const emulators: IntegrationTarget = {
