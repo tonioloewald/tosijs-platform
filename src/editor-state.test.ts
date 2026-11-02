@@ -105,3 +105,37 @@ describe('seeding the editor from a stored post', () => {
     }
   })
 })
+
+/**
+ * #3747: after saving a NEW post, Path in Metadata stayed blank until the
+ * editor was reopened. `tosiValue(proxy)` is the proxy's UNDERLYING object, not
+ * a copy, so `savePost` writing `data.path` on it changed the state silently;
+ * the `.value =` that followed saw no change and notified nothing.
+ */
+describe('tosiValue is the underlying object, not a copy (#3747)', () => {
+  test('writing to it changes the state without notifying observers', async () => {
+    const { tosiValue, observe } = await import('tosijs')
+    const { st3747 } = tosi({ st3747: { post: { path: '' } } as never }) as never as {
+      st3747: { post: { path: { value: string; valueOf(): string } } }
+    }
+    await new Promise((r) => setTimeout(r, 20)) // let creation's own notification pass
+    const seen: string[] = []
+    observe('st3747.post.path', () => seen.push('notified'))
+    const raw = tosiValue(st3747.post) as { path: string }
+    raw.path = 'silent'
+    expect(st3747.post.path.valueOf()).toBe('silent')
+    // Assigning the same value afterwards is "no change": still silent.
+    st3747.post.path.value = 'silent'
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seen).toEqual([])
+    // A real change through the proxy does notify (the test can see one).
+    st3747.post.path.value = 'changed'
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seen).toEqual(['notified'])
+  })
+
+  test('savePost works on a COPY, so its assignment is a change and repaints', () => {
+    const source = require('fs').readFileSync(require('path').join(__dirname, 'blog.ts'), 'utf8') as string
+    expect(source).toMatch(/const data = structuredClone\(tosiValue\(blog\.editorPost\)\)/)
+  })
+})

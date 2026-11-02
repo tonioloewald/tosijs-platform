@@ -1063,7 +1063,12 @@ export class XinPostEditor extends Component<PostEditorParts> {
     // "missing path". tosiValue() gives a clean plain object with primitive
     // leaves (undefined for a missing key), so resolve/generate the path from
     // that, remember it on the component for re-saves, and pass it explicitly.
-    const data = tosiValue(blog.editorPost) as any
+    //
+    // tosiValue() is NOT a copy: it is the proxy's underlying object. Writing
+    // `data.path` on it changed the editor's state with no notification, so the
+    // `.value =` below (and the reconcile after the save) saw "no change" and
+    // the Path input never repainted (#3747; reproduced on serve:local). Copy it.
+    const data = structuredClone(tosiValue(blog.editorPost)) as any
 
     // Resolve the doc path: an existing post's `_path`, one we created earlier
     // this session, else a fresh id for a brand-new post. (Scalars read off the
