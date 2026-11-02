@@ -29,6 +29,7 @@
     "start-emulated": "bun run kill-ports && bun run build && (cd functions && bun run build) && bun scripts/start-emulated.js",
     "seed": "bun scripts/seed-emulators.js",
     "serve:local": "bun functions/src/adapters/bun/serve.ts",
+    "import:local": "bun functions/src/adapters/bun/import-backup.ts",
     "seed-clear": "bun scripts/seed-emulators.js --clear",
     "seed-production": "bun scripts/seed-production.js",
     "backup": "bun scripts/backup-firestore.js",
