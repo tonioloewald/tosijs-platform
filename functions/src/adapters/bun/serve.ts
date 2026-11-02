@@ -7,7 +7,8 @@
  *
  * Ports installed: SQLite (`<data>/host.db`) for documents and the render
  * cache, a directory (`<data>/files`) for /blob and /stored, the console for
- * logs, and dev identities (adapters/local/identity.ts).
+ * logs, and dev identities (adapters/local/identity.ts), which a browser
+ * picks at /__dev/login (adapters/local/dev-login.ts).
  *
  * Dev identities are unsigned, so they are only ever installed on a loopback
  * address; on any other the server refuses to start with them. Without them
@@ -26,6 +27,7 @@ import { sqliteDataStore } from '../sqlite/datastore'
 import { directoryFiles } from '../local/files'
 import { devIdentities } from '../local/identity'
 import { localApp, readHosting } from '../local/http'
+import { mountDevLogin } from '../local/dev-login'
 
 export interface LocalHostOptions {
   /** Where host.db and files/ live. */
@@ -62,6 +64,8 @@ export async function serveLocal(options: LocalHostOptions): Promise<LocalHost> 
   const app = localApp({
     endpoints: ENDPOINTS,
     hosting: options.firebaseJson ? readHosting(options.firebaseJson) : undefined,
+    // The browser's way in to dev identities: only where they are installed.
+    extraRoutes: useDevIdentities ? mountDevLogin : undefined,
   })
   const server = createServer(app)
   const uninstall = () => {

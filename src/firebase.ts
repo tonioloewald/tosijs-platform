@@ -153,6 +153,31 @@ if (TEST_MODE) {
   console.warn('using local emulated services')
 }
 
+// `bun run serve:local`'s dev sign-in (/__dev/login, LOCAL hosts only): an
+// unsigned identity token kept in localStorage, sent in place of a Firebase ID
+// token. Read in TEST_MODE only; a production host would refuse it anyway.
+const DEV_IDENTITY_KEY = 'dev-identity-token'
+const DEV_LOGIN_PATH = '/__dev/login'
+const devIdentityToken = TEST_MODE
+  ? globalThis.localStorage.getItem(DEV_IDENTITY_KEY)
+  : null
+const devUser = (token: string) => {
+  let claims: Record<string, any> = {}
+  try {
+    const b64 = token.slice('dev.'.length).replace(/-/g, '+').replace(/_/g, '/')
+    claims = JSON.parse(atob(b64))
+  } catch {
+    // a malformed token: the server will treat the caller as anonymous
+  }
+  return {
+    uid: claims.sub,
+    email: claims.email ?? null,
+    displayName: claims.name || claims.email || claims.sub,
+    isDevIdentity: true,
+    getIdToken: async () => token,
+  }
+}
+
 export const isProd = (): boolean => !TEST_MODE
 
 export const getEnvironment = (): string => (TEST_MODE ? 'stage' : 'production')
@@ -208,7 +233,8 @@ setPersistence(auth, browserLocalPersistence).catch(() => {
   console.error('failed to set persistence')
 })
 onAuthStateChanged(auth, async (user) => {
-  firebaseUser = user
+  // A dev identity, when there is one, stands in for whoever Firebase has.
+  firebaseUser = devIdentityToken ? devUser(devIdentityToken) : user
   authStateChangeListeners.forEach((f) => f(firebaseUser))
 })
 
@@ -223,6 +249,10 @@ export function userAvailable(): Promise<User | null> {
 }
 
 export function userSignout(): void {
+  if (devIdentityToken) {
+    globalThis.location.href = `${DEV_LOGIN_PATH}?signout`
+    return
+  }
   signOut(auth).catch((error) => {
     console.error('signout failed', error)
     postNotification({ type: 'error', message: 'Signout failed?!' })
@@ -839,7 +869,7 @@ const blobFetch = async (
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   }
-  const user = getAuth().currentUser
+  const user = firebaseUser
   if (user) headers['Authorization'] = 'Bearer ' + (await user.getIdToken())
   return fetch(`${baseServiceUrl}blob${path}`, { ...options, headers })
 }
@@ -1109,6 +1139,24 @@ export function signinWithGoogle(
   failureCallback = () => {
     postNotification({ type: 'error', message: 'Sign in failed' })
   }
+): void {
+  // On a local host (serve:local), sign in through its dev sign-in page.
+  if (TEST_MODE) {
+    fetch(DEV_LOGIN_PATH, { method: 'HEAD' })
+      .then((res) => {
+        // The header, not the status: a catch-all page server answers 200 too.
+        if (res.headers.get('x-dev-login')) globalThis.location.href = DEV_LOGIN_PATH
+        else signinWithGoogleNow(successCallback, failureCallback)
+      })
+      .catch(() => signinWithGoogleNow(successCallback, failureCallback))
+    return
+  }
+  signinWithGoogleNow(successCallback, failureCallback)
+}
+
+function signinWithGoogleNow(
+  successCallback: () => void,
+  failureCallback: () => void
 ): void {
   logEvent('login', {
     method: 'google',

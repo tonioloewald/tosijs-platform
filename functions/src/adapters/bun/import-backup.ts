@@ -30,6 +30,8 @@ export interface ImportResult {
   missingFiles: string[]
   /** Names a directory cannot hold (files.ts refuses them), skipped. */
   refusedFiles: string[]
+  /** False when the snapshot has no storage.json (`bun run backup` alone takes none). */
+  hadFiles: boolean
 }
 
 /** Invert the backup's tagged encoding (restore-firestore.js `decode`). */
@@ -99,9 +101,10 @@ async function importInto(options: {
     store.close()
   }
 
-  const result: ImportResult = { documents, files: 0, missingFiles: [], refusedFiles: [] }
+  const result: ImportResult = { documents, files: 0, missingFiles: [], refusedFiles: [], hadFiles: false }
   const storageManifest = join(snapshot, 'storage.json')
   if (!existsSync(storageManifest)) return result
+  result.hadFiles = true
   const objectsDir = options.objectsDir ?? join(snapshot, '..', 'storage', 'objects')
   const files = directoryFiles(join(dataDir, 'files'))
   const { objects } = JSON.parse(readFileSync(storageManifest, 'utf8')) as {
@@ -142,7 +145,8 @@ if (import.meta.main) {
   importSnapshot({ snapshot: resolve(snapshot), dataDir }).then(
     (r) => {
       for (const [name, n] of Object.entries(r.documents)) console.log(`  ${name.padEnd(20)} ${n}`)
-      console.log(`  files                ${r.files}`)
+      if (r.hadFiles) console.log(`  files                ${r.files}`)
+      else console.warn('  files                NONE: this snapshot has no storage.json (run `bun run backup:storage` too)')
       if (r.missingFiles.length) console.warn(`  MISSING from the object store: ${r.missingFiles.join(', ')}`)
       if (r.refusedFiles.length) console.warn(`  skipped, not a safe file name: ${r.refusedFiles.join(', ')}`)
       console.log(`imported into ${dataDir}`)

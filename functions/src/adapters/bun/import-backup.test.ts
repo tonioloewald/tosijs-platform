@@ -73,6 +73,7 @@ test('documents and files land in the data directory', async () => {
   expect(result.files).toBe(2)
   expect(result.missingFiles).toEqual(['blog/gone.png'])
   expect(result.refusedFiles).toEqual(['blog/.hidden'])
+  expect(result.hadFiles).toBe(true)
 
   const store = new SqliteStore(join(data, 'host.db'))
   try {
@@ -89,6 +90,13 @@ test('documents and files land in the data directory', async () => {
   // The folder marker is not a file, and the backup is untouched.
   expect(existsSync(join(data, 'files', 'blog', '.json'))).toBe(false)
   expect(existsSync(join(snapshot, 'post', 'a.json'))).toBe(true)
+})
+
+test('a snapshot without storage.json imports documents and says it had no files', async () => {
+  rmSync(join(snapshot, 'storage.json'))
+  const result = await importSnapshot({ snapshot, dataDir: data })
+  expect(result.documents).toEqual({ post: 2, role: 1 })
+  expect(result.hadFiles).toBe(false)
 })
 
 test('a damaged object stops the import', async () => {

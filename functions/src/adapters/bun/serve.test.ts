@@ -107,4 +107,39 @@ describe('serving the platform from a data directory', () => {
     expect(read.status).toBe(200)
     expect((await read.json()).title).toBe('Local')
   })
+
+  test('/__dev/login lists role documents and signs the browser in as one', async () => {
+    const list = await fetch(`${host.url}/__dev/login`)
+    expect(list.status).toBe(200)
+    expect(list.headers.get('x-dev-login')).toBe('1')
+    const html = await list.text()
+    expect(html).toContain('local-owner')
+    const as = await (await fetch(`${host.url}/__dev/login?uid=local-owner&email=owner@example.invalid`)).text()
+    const token = /localStorage\.setItem\("dev-identity-token", "([^"]+)"\)/.exec(as)?.[1]
+    expect(token).toBeTruthy()
+    // The token it hands out is one the host honours, with the role it shows.
+    const me = await fetch(`${host.url}/demo-local/us-central1/user`, { headers: { Authorization: `Bearer ${token}` } })
+    expect((await me.json()).roles).toContain('owner')
+    expect(await (await fetch(`${host.url}/__dev/login?signout`)).text()).toContain('localStorage.removeItem')
+  })
+
+  test('the page escapes what it shows', async () => {
+    await dataStore.set('role/xss', { name: '<script>alert(1)</script>', roles: [], userIds: ['u"x'], contacts: [] })
+    const html = await (await fetch(`${host.url}/__dev/login`)).text()
+    expect(html).not.toContain('<script>alert(1)</script>')
+    expect(html).toContain('&#60;script&#62;')
+  })
+})
+
+test('without dev identities there is no dev sign-in', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'serve-nodev-'))
+  const host = await serveLocal({ dataDir: dir, port: 0, devIdentities: false, firebaseJson: FIREBASE_JSON })
+  try {
+    const res = await fetch(`${host.url}/__dev/login`)
+    expect(res.headers.get('x-dev-login')).toBeNull()
+    expect(await res.text()).not.toContain('dev-identity-token')
+  } finally {
+    await host.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

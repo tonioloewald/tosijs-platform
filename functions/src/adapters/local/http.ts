@@ -41,6 +41,8 @@ export interface LocalAppOptions {
   endpoints: Record<string, Endpoint>
   /** firebase.json's `hosting`, and the directory its paths are relative to. */
   hosting?: { config: HostingConfig; root: string }
+  /** Host-only routes, mounted ahead of everything else (and of Hosting's headers). */
+  extraRoutes?: (app: express.Express) => void
 }
 
 const BODY_LIMIT = '32mb'
@@ -134,11 +136,12 @@ function hostingHeaders(res: ServerResponse, headers: Array<{ key: string; value
   }) as typeof res.writeHead
 }
 
-export function localApp({ endpoints, hosting }: LocalAppOptions): express.Express {
+export function localApp({ endpoints, hosting, extraRoutes }: LocalAppOptions): express.Express {
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', true)
   parseBodies(app)
+  extraRoutes?.(app)
 
   // Functions: /<project>/<region>/<name>/rest → the handler sees /rest.
   const names = Object.keys(endpoints)
