@@ -22,79 +22,20 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
-import { test, expect, describe, beforeAll } from 'bun:test'
-import { emulatorFetch, grantEmulatorRoles, ALL_ROLES } from './emulator-fetch.test'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { test, expect, describe, beforeAll, afterAll } from 'bun:test'
+import { emulatorFetch, ALL_ROLES } from './emulator-fetch.test'
+import { acquireTarget, type IntegrationTarget } from './integration-target.test'
 
-let PROJECT_ID = 'demo-project'
-try {
-  const firebaserc = JSON.parse(
-    readFileSync(join(__dirname, '../../../.firebaserc'), 'utf-8')
-  )
-  PROJECT_ID = firebaserc.projects?.default || PROJECT_ID
-} catch {
-  // Use default
-}
+// The emulators or the in-process Bun host (integration-target.test.ts).
+let target: IntegrationTarget | null = null
+let FUNCTIONS_URL = ''
 
-const FUNCTIONS_URL = `http://127.0.0.1:5001/${PROJECT_ID}/us-central1`
-const AUTH_URL = 'http://127.0.0.1:9099'
-
-async function emulatorFunctionsRunning(): Promise<boolean> {
-  try {
-    await emulatorFetch(`${FUNCTIONS_URL}/hello`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(2000),
-    })
-    return true
-  } catch {
-    return false
-  }
-}
-
-// Mint an ID token for a test-owned identity (accounts:signInWithIdp with a
-// fake OIDC token), then grant it every role by uid.
+// A test-owned identity, granted every role by the uid the platform sees.
 async function getOwnerIdToken(): Promise<string | undefined> {
-  const fakeIdToken = JSON.stringify({
-    sub: 'write-path-owner',
-    email: 'write-path-owner@example.invalid',
-    name: 'Owner User',
-    email_verified: true,
-  })
-  const postBody = `id_token=${encodeURIComponent(
-    fakeIdToken
-  )}&providerId=google.com`
-  try {
-    const res = await emulatorFetch(
-      `${AUTH_URL}/identitytoolkit.googleapis.com/v1/accounts:signInWithIdp`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer owner',
-        },
-        body: JSON.stringify({
-          postBody,
-          requestUri: 'http://localhost',
-          returnSecureToken: true,
-          returnIdpCredential: true,
-        }),
-      }
-    )
-    if (!res.ok) return undefined
-    const json = (await res.json()) as { idToken?: string; localId?: string }
-    if (!json.localId) return undefined
-    // Granted by the uid the emulator assigned — the seed no longer does it.
-    const granted = await grantEmulatorRoles(
-      PROJECT_ID,
-      'write-path-owner',
-      json.localId,
-      ALL_ROLES
-    )
-    return granted ? json.idToken : undefined
-  } catch {
-    return undefined
-  }
+  if (!target) return undefined
+  const { token, uid } = await target.idTokenFor('write-path-owner', 'write-path-owner@example.invalid')
+  if (!token || !uid) return undefined
+  return (await target.grantRoles('write-path-owner', uid, ALL_ROLES)) ? token : undefined
 }
 
 interface DocResponse {
@@ -138,7 +79,9 @@ describe('Write-path integration (validate / unique / provenance)', () => {
   const tag = `itest-${Math.floor(Math.random() * 1e9).toString(36)}`
 
   beforeAll(async () => {
-    ready = await emulatorFunctionsRunning()
+    target = await acquireTarget()
+    ready = target !== null
+    if (target) FUNCTIONS_URL = target.functionsUrl
     if (!ready) {
       console.warn(
         '\n⚠️  Emulators not running. Start: bun start-emulated + bun seed\n'
@@ -151,6 +94,7 @@ describe('Write-path integration (validate / unique / provenance)', () => {
       ready = false
     }
   })
+  afterAll(() => target?.release())
 
   const skip = (): boolean => {
     if (!ready) {

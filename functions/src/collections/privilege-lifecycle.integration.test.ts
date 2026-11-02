@@ -26,12 +26,13 @@
  * REQUIRES EMULATORS. Skip-guarded, and the skip prints loudly — a skipped test
  * is not a passing one.
  */
-import { describe, test, expect, beforeAll } from 'bun:test'
-import { emulatorFetch, grantEmulatorRoles, ALL_ROLES } from './emulator-fetch.test'
+import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
+import { emulatorFetch, ALL_ROLES } from './emulator-fetch.test'
+import { acquireTarget, type IntegrationTarget } from './integration-target.test'
 
-const PROJECT_ID = 'liquid-force-425209-g2'
-const FUNCTIONS_URL = `http://127.0.0.1:5001/${PROJECT_ID}/us-central1`
-const AUTH_URL = 'http://127.0.0.1:9099'
+// The emulators or the in-process Bun host (integration-target.test.ts).
+let target: IntegrationTarget | null = null
+let FUNCTIONS_URL = ''
 
 let emulatorsRunning = false
 let ownerToken = ''
@@ -40,34 +41,9 @@ let subjectToken = ''
 // we mint with — an assumption worth pinning, since role documents key on it.
 let subjectUid = ''
 
-/** Mint an emulator ID token for an arbitrary identity. */
-async function idTokenFor(
-  sub: string,
-  email: string
-): Promise<{ token: string; uid: string }> {
-  const postBody = `id_token=${encodeURIComponent(
-    JSON.stringify({ sub, email, email_verified: true })
-  )}&providerId=google.com`
-  const res = await emulatorFetch(
-    `${AUTH_URL}/identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=fake-api-key`,
-    {
-      method: 'POST',
-      // 'Bearer owner' is the emulator's ADMIN credential authorising the call.
-      // The identity being minted comes from postBody — varying this header with
-      // the subject makes the emulator reject the request with 401.
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
-      body: JSON.stringify({
-        postBody,
-        requestUri: 'http://localhost',
-        returnIdpCredential: true,
-        returnSecureToken: true,
-      }),
-    }
-  )
-  if (!res.ok) return { token: '', uid: '' }
-  const body = (await res.json()) as { idToken?: string; localId?: string }
-  return { token: body.idToken ?? '', uid: body.localId ?? '' }
-}
+/** A token for a fresh identity, and the uid the platform will see. */
+const idTokenFor = (sub: string, email: string) =>
+  target ? target.idTokenFor(sub, email) : Promise.resolve({ token: '', uid: '' })
 
 const doc = async (
   token: string,
@@ -137,26 +113,22 @@ const whoAmI = async () => {
 }
 
 beforeAll(async () => {
-  try {
-    const res = await fetch(`${FUNCTIONS_URL}/hello`, {
-      signal: AbortSignal.timeout(3000),
-    })
-    emulatorsRunning = res.ok || res.status < 500
-  } catch {
-    emulatorsRunning = false
-  }
-  if (!emulatorsRunning) return
+  target = await acquireTarget()
+  emulatorsRunning = target !== null
+  if (!target) return
+  FUNCTIONS_URL = target.functionsUrl
   // A suite-owned owner: the seeded owner@gmail.com grant was claimable on
   // real hosts (#23) and the seed now grants nothing.
   const owner = await idTokenFor('lifecycle-owner', 'lifecycle-owner@example.invalid')
   if (owner.uid) {
-    await grantEmulatorRoles(PROJECT_ID, 'lifecycle-owner', owner.uid, ALL_ROLES)
+    await target.grantRoles('lifecycle-owner', owner.uid, ALL_ROLES)
   }
   ownerToken = owner.token
   const subject = await idTokenFor(SUBJECT_SUB, SUBJECT_EMAIL)
   subjectToken = subject.token
   subjectUid = subject.uid
 })
+afterAll(() => target?.release())
 
 const guard = (): boolean => {
   if (!emulatorsRunning || !ownerToken || !subjectToken) {

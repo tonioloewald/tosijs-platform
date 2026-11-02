@@ -17,60 +17,26 @@
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
-import { test, expect, describe, beforeAll } from 'bun:test'
+import { test, expect, describe, beforeAll, afterAll } from 'bun:test'
 import { emulatorFetch } from './emulator-fetch.test'
+import { acquireTarget, type IntegrationTarget } from './integration-target.test'
 
-// Read project ID from .firebaserc
-import { readFileSync } from 'fs'
-import { join } from 'path'
-
-let PROJECT_ID = 'demo-project'
-try {
-  const firebaserc = JSON.parse(
-    readFileSync(join(__dirname, '../../../.firebaserc'), 'utf-8')
-  )
-  PROJECT_ID = firebaserc.projects?.default || PROJECT_ID
-} catch {
-  // Use default
-}
-
-const EMULATOR_HOST = 'http://127.0.0.1:5001'
-const FUNCTIONS_URL = `${EMULATOR_HOST}/${PROJECT_ID}/us-central1`
-
-// Check if emulators are running by trying to hit a known function
-async function checkEmulatorFunctionsRunning(): Promise<boolean> {
-  try {
-    // Try the hello endpoint which should always exist
-    await emulatorFetch(`${FUNCTIONS_URL}/hello`, {
-      method: 'GET',
-      signal: AbortSignal.timeout(2000),
-    })
-    // If we get any response (even an error), the functions emulator is running
-    return true
-  } catch (e: any) {
-    // Connection refused or timeout means emulator isn't running
-    if (e.code === 'ECONNREFUSED' || e.name === 'TimeoutError') {
-      return false
-    }
-    // Other errors might mean it's running but the endpoint doesn't exist
-    return false
-  }
-}
+// The emulators or the in-process Bun host (integration-target.test.ts).
+let target: IntegrationTarget | null = null
+let FUNCTIONS_URL = ''
 
 describe('Access Control Integration Tests', () => {
   let emulatorsRunning = false
 
   beforeAll(async () => {
-    emulatorsRunning = await checkEmulatorFunctionsRunning()
+    target = await acquireTarget()
+    emulatorsRunning = target !== null
+    if (target) FUNCTIONS_URL = target.functionsUrl
     if (!emulatorsRunning) {
-      console.warn(
-        '\n⚠️  Firebase function emulators are not running or not responding.'
-      )
-      console.warn('   Start emulators with: bun start-emulated')
-      console.warn('   Then seed data with: bun seed')
-      console.warn(`   Expected URL: ${FUNCTIONS_URL}/hello\n`)
+      console.warn('\n⚠️  INTEGRATION_TARGET=emulators, but the emulators are not running.\n')
     }
   })
+  afterAll(() => target?.release())
 
   describe('/doc endpoint access control', () => {
     test('returns proper response for public page access', async () => {
@@ -203,27 +169,5 @@ describe('Access Control Integration Tests', () => {
       // This is intentional to prevent information disclosure
       expect(response.status).toBe(404)
     })
-  })
-})
-
-describe('Emulator status', () => {
-  test('checks emulator availability', async () => {
-    const running = await checkEmulatorFunctionsRunning()
-    if (running) {
-      console.log(
-        `\n✓ Firebase function emulators are running at ${FUNCTIONS_URL}`
-      )
-    } else {
-      console.log(
-        `\n✗ Firebase function emulators not detected at ${FUNCTIONS_URL}`
-      )
-      console.log('  Integration tests were skipped.')
-      console.log('  To run integration tests:')
-      console.log('    1. bun start-emulated')
-      console.log('    2. bun seed (in another terminal)')
-      console.log('    3. bun test src/collections/access.integration.test.ts')
-    }
-    // Always passes - informational only
-    expect(true).toBe(true)
   })
 })
