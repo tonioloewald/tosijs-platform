@@ -132,6 +132,16 @@ export function routeKeysFor(url: string, appConfig: AppConfig | undefined, tabl
   return hydrated.length ? [routeKey(pagePath, hydrated), routeKey(pagePath, [])] : [routeKey(pagePath, [])]
 }
 
+/**
+ * Does the URL name something beyond its page (`/blog/<slug>`, not `/blog/`)?
+ * When it does and only the page alone resolves, the thing it named is not
+ * there: that is a 404, not the page with a 200 (#3891).
+ */
+export function namesBeyondPage(url: string): boolean {
+  const [pathname] = url.split(/[?#]/, 1)
+  return pathname.split('/').filter(Boolean).length > 1
+}
+
 // ── fragments ────────────────────────────────────────────────────────────
 
 export interface NavFragment {

@@ -11,7 +11,10 @@ export const { app } = tosi({
     subtitle: '',
     currentPage: loading,
     pages: [] as Page[],
+    /** The path a 404 was served for: the home page is shown with a note (#3891). */
+    notFound: '',
     setPage(page: Page) {
+      app.notFound.value = ''
       app.currentPage.value = page
       window.history.pushState(null, page.title, `/${page.path}`)
     },
@@ -35,6 +38,10 @@ getPrefetched('appConfig').then((config) => {
   if (!config) return
   app.title = config.title
   app.subtitle = config.subtitle
+})
+
+getPrefetched<string>('notFound').then((path) => {
+  app.notFound.value = path || ''
 })
 
 getPrefetched<Page>('page').then((page) => {

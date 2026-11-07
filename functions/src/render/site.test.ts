@@ -8,6 +8,7 @@ import {
   postIndexEntry,
   routeArtifact,
   routeKeysFor,
+  namesBeyondPage,
   routeTableFragment,
   sitemapXml,
   type SiteSettings,
@@ -61,6 +62,14 @@ describe('routes', () => {
     for (const url of ['/constructor', '/toString', '/__proto__', '/hasOwnProperty']) {
       expect(routeKeysFor(url, appConfig, table)).toEqual([])
     }
+  })
+  test('a URL naming more than its page is not found when only the page resolves (#3891)', () => {
+    expect(namesBeyondPage('/blog/no-such-post')).toBe(true)
+    expect(namesBeyondPage('/blog/2002/8/26/it-begins?x=1')).toBe(true)
+    // `/blog/` also yields a post key (its slug is "blog"); the page alone answers it.
+    expect(namesBeyondPage('/blog/')).toBe(false)
+    expect(namesBeyondPage('/blog?p=12')).toBe(false)
+    expect(namesBeyondPage('/')).toBe(false)
   })
   test('an unknown page has NO keys: nothing is computed or stored for random URLs', () => {
     const table = routeTableFragment([blogPage])

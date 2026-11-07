@@ -168,6 +168,23 @@ document.body.append(
         icons.chevronDown()
       )
     ),
+    // A bad URL is served as the home page with this note (#3891).
+    div({
+      class: 'padded',
+      role: 'status',
+      style: { fontSize: '0.875em', opacity: 0.75 },
+      bind: {
+        value: app.notFound,
+        binding: {
+          toDOM(element: HTMLElement, path: string) {
+            element.hidden = !path
+            element.textContent = path
+              ? `404: there's nothing at ${path}. Here's the home page instead.`
+              : ''
+          },
+        },
+      },
+    }),
     xinPage({
       page: app.currentPage,
     }),

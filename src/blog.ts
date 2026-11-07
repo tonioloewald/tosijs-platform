@@ -237,6 +237,7 @@ export const { blog } = tosi({
       }
       const path = blog.linkFromRef(blog.currentPost as unknown as BlogRef)
       window.history.pushState({ path }, '', path)
+      app.notFound.value = ''
       const blogElement = document.querySelector('xin-blog') as XinBlog
       if (blogElement) {
         blogElement.showPost()
@@ -244,12 +245,14 @@ export const { blog } = tosi({
     },
     async postPathFromLocation(): Promise<string | undefined> {
       const path = window.location.pathname
-      let [, , postPath] = path.match(/\/blog\/(\d+\/)*([\w-]+)\/?$/) || []
+      // This URL was served as a 404 (#3891): it names no post, so show the latest.
+      const notFound = (await getPrefetchedDoc('notFound', false)) === path
+      let [, , postPath] = (!notFound && path.match(/\/blog\/(\d+\/)*([\w-]+)\/?$/)) || []
       if (postPath) {
         return `post/path=${postPath}`
       }
       const urlParams = new URLSearchParams(window.location.search)
-      const postId = urlParams.get('p')
+      const postId = notFound ? null : urlParams.get('p')
       if (postId) {
         return `post/${postId}`
       }
@@ -271,7 +274,8 @@ export const { blog } = tosi({
       })
       const post = await getPrefetchedDoc(p)
       closeNotification()
-      if (post) {
+      // A failed fetch comes back as an Error, not undefined (#3891).
+      if (post && !(post instanceof Error)) {
         blog.currentPost = post
         return post as BlogPost
       } else {

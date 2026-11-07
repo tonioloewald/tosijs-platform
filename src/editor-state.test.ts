@@ -121,7 +121,7 @@ describe('tosiValue is the underlying object, not a copy (#3747)', () => {
     await new Promise((r) => setTimeout(r, 20)) // let creation's own notification pass
     const seen: string[] = []
     observe('st3747.post.path', () => seen.push('notified'))
-    const raw = tosiValue(st3747.post) as { path: string }
+    const raw = tosiValue(st3747.post) as unknown as { path: string }
     raw.path = 'silent'
     expect(st3747.post.path.valueOf()).toBe('silent')
     // Assigning the same value afterwards is "no change": still silent.

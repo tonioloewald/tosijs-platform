@@ -34,7 +34,9 @@ import {
   navFragment,
   pagePathFor,
   postIndexEntry,
+  namesBeyondPage,
   routeArtifact,
+  routeKey,
   routeKeysFor,
   routeTableFragment,
   sitemapXml,
@@ -219,25 +221,38 @@ export interface Served {
 export async function serve(url: string): Promise<Served> {
   const [n, table, blog, prefix] = await Promise.all([nav(), routeTable(), blogIndex(), titlePrefix()])
   const settings = ROUTE_SETTINGS
-  // Most specific first: a post, then its page (the blog index) when the post
-  // does not exist, as the old handler did. An unknown page has no keys at all.
-  for (const key of routeKeysFor(url, n.appConfig, table)) {
+  // Most specific first: a post, then its page (the blog index). The page alone
+  // answers `/blog/`, but not `/blog/<slug>` whose post does not exist: that
+  // is not found (#3891). An unknown page has no keys at all.
+  const keys = routeKeysFor(url, n.appConfig, table)
+  for (const [i, key] of keys.entries()) {
     const artifact = await route(key)
-    if (artifact) {
-      return {
-        status: 200,
-        head: withTitlePrefix(artifact, prefix),
-        prefetched: composePrefetched(artifact, n, blog, settings),
-      }
+    if (!artifact) continue
+    if (i > 0 && namesBeyondPage(url)) break
+    return {
+      status: 200,
+      head: withTitlePrefix(artifact, prefix),
+      prefetched: composePrefetched(artifact, n, blog, settings),
     }
   }
-  // Not a page: the site's 404 page if it has one, with status 404.
+  // Not found: the site's 404 page if it has one, else its home page, with
+  // status 404 and `notFound` (the path asked for) so the client says so (#3891).
   const notFound = Object.prototype.hasOwnProperty.call(table, '404') ? await route('page:404') : null
+  const homePath = pagePathFor('/', n.appConfig)
+  const home = !notFound && Object.prototype.hasOwnProperty.call(table, homePath) ? await route(routeKey(homePath, [])) : null
   const shown =
     notFound ??
+    home ??
     routeArtifact({ pagePath: pagePathFor(url, n.appConfig), page: undefined, hydrated: {}, latestPost: undefined, settings })
-  return { status: 404, head: withTitlePrefix(shown, prefix), prefetched: composePrefetched(shown, n, blog, settings) }
+  return {
+    status: 404,
+    head: withTitlePrefix(shown, prefix),
+    prefetched: { ...composePrefetched(shown, n, blog, settings), notFound: notFoundPath(url) },
+  }
 }
+
+/** The path a 404 reports back to the client: the pathname only, bounded. */
+export const notFoundPath = (url: string): string => url.split(/[?#]/, 1)[0].slice(0, 200)
 
 /** The site's host for absolute URLs at render time: config/app `host`, else SITE_HOST. */
 export function siteHost(appConfig: AppConfig | undefined): string {
