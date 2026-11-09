@@ -13,6 +13,7 @@ import { onPrefetch, PageOptions, PrefetchData } from './prefetch'
 import { resolvePage } from './page'
 import { PostSchema, isPublished } from '../shared/post'
 import { firstImage } from './social-meta'
+import { namesBeyondPage, notFoundPath } from './render/site'
 
 interface BlogConfig {
   prefix: string
@@ -151,6 +152,9 @@ onPrefetch(
     }
     if (currentPost) {
       pageData[`post/path=${currentPost.path}`] = currentPost
+    } else if (isOnBlogPage && namesBeyondPage(url)) {
+      // `/blog/<slug>` with no such post: a 404 showing the blog (#3913).
+      pageData.notFound = notFoundPath(url)
     }
 
     return pageData

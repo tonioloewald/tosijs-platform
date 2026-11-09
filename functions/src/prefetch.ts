@@ -73,8 +73,18 @@ const render = async (
   nonce: string,
   url: string,
   options: PageOptions
-): Promise<string> => {
+): Promise<{ html: string; notFound: boolean }> => {
   const merged = await getPrefetchData(req, res, url, options)
+  const html = await renderPage(req, url, options, merged)
+  return { html, notFound: typeof merged.notFound === 'string' }
+}
+
+const renderPage = async (
+  req: any,
+  url: string,
+  options: PageOptions,
+  merged: PrefetchData
+): Promise<string> => {
   // The shared, pure renderer (D23): it escapes the embedded data so a post
   // cannot end the <script> (a live XSS here until 2026-10-01), keeps keys
   // quoted (the old unquoting regex rewrote `"word":` inside strings), and
@@ -134,7 +144,7 @@ export const handlePrefetch: Handler = async (req, res) => {
   }
 
   const nonce = crypto.randomBytes(16).toString('base64')
-  const html = await render(req, res, nonce, url, {
+  const { html, notFound } = await render(req, res, nonce, url, {
     title: 'inconsequence',
     description: 'musings on subjects of passing interest',
     imageUrl: '',
@@ -150,7 +160,8 @@ export const handlePrefetch: Handler = async (req, res) => {
       `script-src 'nonce-${nonce}' 'self' www.googletagmanager.com apis.google.com`
     )
     */
-    res.status(200).send(html)
+    // A handler marks a bad URL `notFound`; the page shown is still useful (#3913).
+    res.status(notFound ? 404 : 200).send(html)
   })
 }
 

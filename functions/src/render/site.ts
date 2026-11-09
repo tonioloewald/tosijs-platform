@@ -142,6 +142,9 @@ export function namesBeyondPage(url: string): boolean {
   return pathname.split('/').filter(Boolean).length > 1
 }
 
+/** The path a 404 reports back to the client as `notFound`: the pathname only, bounded. */
+export const notFoundPath = (url: string): string => url.split(/[?#]/, 1)[0].slice(0, 200)
+
 // ── fragments ────────────────────────────────────────────────────────────
 
 export interface NavFragment {

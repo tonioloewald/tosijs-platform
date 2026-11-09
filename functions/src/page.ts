@@ -6,6 +6,7 @@ import { getDocs } from './docs'
 
 import { onPrefetch, PageOptions, PrefetchData } from './prefetch'
 import { Page, PageSchema } from '../shared/page'
+import { notFoundPath } from './render/site'
 
 // Exported so other prefetch handlers can check the current page
 /**
@@ -17,7 +18,7 @@ import { Page, PageSchema } from '../shared/page'
  * the site's generic title. Keyed by the request object, which
  * getPrefetchData passes identically to every handler.
  */
-const resolved = new WeakMap<object, Promise<{ appConfig?: AppConfig; page?: Page }>>()
+const resolved = new WeakMap<object, Promise<{ appConfig?: AppConfig; page?: Page; notFound?: boolean }>>()
 export function resolvePage(req: any, res: any, url: string) {
   let p = resolved.get(req)
   if (!p) {
@@ -39,10 +40,16 @@ export function resolvePage(req: any, res: any, url: string) {
       const pageResult = await getDoc(req, res, `page/path=${path}`)
       let page = pageResult.ok ? (pageResult.data as Page) : undefined
 
-      // If no page found, load the 404 page
+      // Not found: the site's 404 page if it has one, else its home page,
+      // marked so the response is a 404 and the client says so (#3913).
       if (!page) {
         const notFoundResult = await getDoc(req, res, `page/path=404`)
         page = notFoundResult.ok ? (notFoundResult.data as Page) : undefined
+        if (!page && appConfig?.defaultPath && path !== appConfig.defaultPath) {
+          const homeResult = await getDoc(req, res, `page/path=${appConfig.defaultPath}`)
+          page = homeResult.ok ? (homeResult.data as Page) : undefined
+        }
+        return { appConfig, page, notFound: true }
       }
       return { appConfig, page }
     })()
@@ -66,8 +73,9 @@ onPrefetch(
     options: PageOptions
   ): Promise<PrefetchData> => {
     const data: PrefetchData = {}
-    const { appConfig, page } = await resolvePage(req, res, url)
+    const { appConfig, page, notFound } = await resolvePage(req, res, url)
     data.appConfig = appConfig
+    if (notFound) data.notFound = notFoundPath(url)
 
     // Get visible pages for navigation menu
     const visiblePages = await getDocs(req, res, 'page/tags=visible', 100)

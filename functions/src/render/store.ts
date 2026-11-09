@@ -31,10 +31,11 @@ export { INVALIDATING_COLLECTIONS }
 import {
   blogIndexFragment,
   composePrefetched,
+  namesBeyondPage,
   navFragment,
+  notFoundPath,
   pagePathFor,
   postIndexEntry,
-  namesBeyondPage,
   routeArtifact,
   routeKey,
   routeKeysFor,
@@ -250,9 +251,6 @@ export async function serve(url: string): Promise<Served> {
     prefetched: { ...composePrefetched(shown, n, blog, settings), notFound: notFoundPath(url) },
   }
 }
-
-/** The path a 404 reports back to the client: the pathname only, bounded. */
-export const notFoundPath = (url: string): string => url.split(/[?#]/, 1)[0].slice(0, 200)
 
 /** The site's host for absolute URLs at render time: config/app `host`, else SITE_HOST. */
 export function siteHost(appConfig: AppConfig | undefined): string {
