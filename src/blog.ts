@@ -54,12 +54,21 @@ export interface BlogRef {
   date?: string
   keywords?: string[]
   summary: string
+  /** Server-stamped on every save: drafts sort by it (they have no date). */
+  _modified?: string
 }
 
 const recentFirst = makeSorter(
   (ref: { date?: any }) => [ref.date || ''],
   [false]
 )
+const recentlyEditedFirst = makeSorter(
+  (ref: { _modified?: string }) => [ref._modified || ''],
+  [false]
+)
+
+/** The fields the post index carries. */
+const INDEX_FIELDS = 'title,date,summary,keywords,path,_modified'
 
 // Turndown for HTML→Markdown conversion (bundled, not CDN)
 import TurndownService from 'turndown'
@@ -143,10 +152,12 @@ export const { blog } = tosi({
       if (filterText !== undefined) {
         blog.filterText.value = filterText
       }
-      const visible =
-        blog.indexVisible.valueOf() === 'published'
-          ? (ref: { date?: any }) => isPublished(ref)
-          : (ref: { date?: any }) => !isPublished(ref)
+      const published = blog.indexVisible.valueOf() === 'published'
+      const visible = published
+        ? (ref: { date?: any }) => isPublished(ref)
+        : (ref: { date?: any }) => !isPublished(ref)
+      // Drafts have no date: most recently edited first.
+      const order = published ? recentFirst : recentlyEditedFirst
       if (blog.filterText) {
         const needle = blog.filterText.toLocaleLowerCase()
         blog.filtered.value = blog.index.value
@@ -157,10 +168,31 @@ export const { blog } = tosi({
               (ref.keywords &&
                 ref.keywords.find((word) => word.includes(needle)))
           )
-          .sort(recentFirst)
+          .sort(order)
       } else {
-        blog.filtered.value = blog.index.value.filter(visible).sort(recentFirst)
+        blog.filtered.value = blog.index.value.filter(visible).sort(order)
       }
+    },
+    /**
+     * Merge the most recently edited posts into the index, so drafts edited
+     * elsewhere (or since the index was cached) show up when switching to drafts.
+     */
+    async refreshRecentlyEdited(count = 30) {
+      const recent = (await service.docs.get({
+        p: 'post',
+        f: INDEX_FIELDS,
+        o: '_modified(desc)',
+        c: count,
+      })) as BlogRef[] | Error
+      if (!Array.isArray(recent)) return
+      const byPath = new Map(recent.map((ref) => [ref._path, ref]))
+      // A new array, assigned whole: the index's own array is live state (#3747).
+      const merged = [...recent, ...blog.index.value.filter((ref) => !byPath.has(ref._path))]
+      blog.index.value = merged
+      if (localStorage.getItem('blog-index-cache')) {
+        localStorage.setItem('blog-index-cache', JSON.stringify(merged))
+      }
+      blog.filterIndex()
     },
     route: '/blog',
     linkFromRef(ref: BlogRef): string {
@@ -179,7 +211,7 @@ export const { blog } = tosi({
         roles.includes('author') || roles.includes('editor') ? '' : 'date(desc)'
       return await service.docs.get({
         p: 'post',
-        f: 'title,date,summary,keywords,path',
+        f: INDEX_FIELDS,
         o,
         c,
       })
@@ -770,6 +802,9 @@ export class XinBlogSearch extends Component {
           bindVisibleIfAuthor: app.user,
           onChange() {
             blog.filterIndex()
+            if (blog.indexVisible.valueOf() === 'drafts') {
+              blog.refreshRecentlyEdited()
+            }
           },
           style: {
             _segmentedOptionCurrentBackground: vars.brandColor,
