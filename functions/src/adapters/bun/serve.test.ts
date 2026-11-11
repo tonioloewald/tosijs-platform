@@ -100,6 +100,21 @@ describe('serving the platform from a data directory', () => {
     expect((await fetch(`${host.url}/stored/private/x.txt`)).status).toBe(404)
   })
 
+  test('/docs?modifiedAfter lists what was edited since, and refuses what Firestore could not answer (#4050)', async () => {
+    const before = new Date(Date.now() - 1000).toISOString()
+    expect((await doc('POST', owner, { p: 'post/edited', data: { title: 'Edited', content: 'x', path: 'edited' } })).status).toBe(200)
+    const docs = (query: string) =>
+      fetch(`${fn('docs')}?${query}`, { headers: { Authorization: `Bearer ${owner}` } })
+    const found = await docs(`p=post&f=title,_modified&modifiedAfter=${encodeURIComponent(before)}`)
+    expect(found.status).toBe(200)
+    expect((await found.json()).map((r: { title: string }) => r.title)).toContain('Edited')
+    const later = await docs(`p=post&modifiedAfter=${encodeURIComponent(new Date(Date.now() + 60000).toISOString())}`)
+    expect(await later.json()).toEqual([])
+    expect((await docs('p=post&modifiedAfter=yesterday')).status).toBe(400)
+    expect((await docs(`p=post&o=date(desc)&modifiedAfter=${encodeURIComponent(before)}`)).status).toBe(400)
+    expect((await docs(`p=post/tags=x&modifiedAfter=${encodeURIComponent(before)}`)).status).toBe(400)
+  })
+
   test('documents survive a restart', async () => {
     await host.close()
     await start()

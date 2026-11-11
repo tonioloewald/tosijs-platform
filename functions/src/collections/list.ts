@@ -71,9 +71,35 @@ export function listOrder(order: string): string {
   return field ? `${field} ${direction === '(desc)' ? 'desc' : 'asc'}` : '~'
 }
 
+/**
+ * `modifiedAfter` (#4050): documents edited strictly after an ISO time, by
+ * `_modified` (newest first unless `_modified(asc)`). Firestore answers a
+ * range without a composite index only when the order is on the same field,
+ * so ordering by anything else is refused rather than failing at query time.
+ */
+export function modifiedAfterQuery(
+  order: string,
+  value: string
+): Error | { orderBy: string; greaterThan: { field: string; value: string } } {
+  const time = Date.parse(value)
+  if (!/^\d{4}-\d{2}-\d{2}/.test(value) || !Number.isFinite(time)) {
+    return new Error('modifiedAfter must be an ISO time, e.g. 2026-11-11T08:00:00Z')
+  }
+  if (order && !/^_modified(\((asc|desc)\))?$/.test(order)) {
+    return new Error('modifiedAfter orders by _modified; it cannot be combined with another order')
+  }
+  return {
+    orderBy: order === '_modified(asc)' ? '_modified asc' : '_modified desc',
+    // Stamped by toISOString(), so normalising makes string order time order.
+    greaterThan: { field: '_modified', value: new Date(time).toISOString() },
+  }
+}
+
 export interface ListOptions {
   limit: number
   order?: string
+  /** Only documents edited after this ISO time (#4050); validated by the caller with modifiedAfterQuery. */
+  modifiedAfter?: string
   fields?: string[] | false
   /**
    * Row-visibility filter, applied to the FULL document. Returns the record
@@ -88,11 +114,15 @@ export interface ListOptions {
 export async function listRecords(
   store: Pick<Store, 'resolve' | 'query' | 'scan'>,
   path: string,
-  { limit, order = '', fields = false, filter, collections, onScanBound }: ListOptions
+  { limit, order = '', fields = false, filter, collections, onScanBound, modifiedAfter }: ListOptions
 ): Promise<Record<string, unknown>[]> {
   const target = await resolveListPath(path, collections, store)
   if (target instanceof Error) return []
-  const orderBy = listOrder(order)
+  const after = modifiedAfter === undefined ? undefined : modifiedAfterQuery(order, modifiedAfter)
+  // A range over a filtered path needs a composite index: refused, like a bad time.
+  if (after instanceof Error || (after && Object.keys(target.where).length)) return []
+  const orderBy = after ? after.orderBy : listOrder(order)
+  const range = after ? { greaterThan: after.greaterThan } : {}
   // `_path` is the LOGICAL collection path plus the id, as it always was.
   const base = collectionPath(path)
   const toRecord = (doc: { path: string; data: Record<string, unknown> }) => ({
@@ -104,6 +134,7 @@ export async function listRecords(
   if (!filter) {
     const rows = await store.query(target.collection, {
       ...target.where,
+      ...range,
       orderBy,
       limit,
       ...(fields ? { fields } : {}),
@@ -125,7 +156,7 @@ export async function listRecords(
   let scanned = 0
   const pageSize = Math.min(Math.max(limit, 50), 300)
 
-  pages: for await (const page of store.scan(target.collection, { ...target.where, orderBy }, pageSize)) {
+  pages: for await (const page of store.scan(target.collection, { ...target.where, ...range, orderBy }, pageSize)) {
     scanned += page.length
     for (const doc of page) {
       const result = await filter(toRecord(doc))

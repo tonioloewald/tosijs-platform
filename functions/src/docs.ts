@@ -10,6 +10,10 @@
 - `c` (count) limits the number of records returned (default is 10)
 - `f` (fields) comma-delimited list of fields to be returned
 - `o` (order) is the sort field, e.g. `date` or `date(desc)`
+- `modifiedAfter` an ISO time: only documents edited after it, newest edit
+  first (or `o=_modified(asc)`). Plain collection paths only, and no other
+  order (Firestore would need a composite index). A convenience for polling;
+  replication uses `since` (#4050)
 
 ## TODO
 - `q` (query) a comma-delimited list of queries; will return a
@@ -34,7 +38,7 @@ import {
 } from './collections/access'
 import { collectionsFor } from './install/installed'
 import { storeFor } from './datastore'
-import { listRecords, sequencedDelta } from './collections/list'
+import { listRecords, modifiedAfterQuery, sequencedDelta } from './collections/list'
 import { Response } from 'express'
 import { validateWriteSet } from './collections/write-set'
 import { commitTransactionally } from './commit'
@@ -67,7 +71,9 @@ export async function getRecords(
     | ((rec: Record<string, unknown>) => Promise<Error | Record<string, unknown>>)
     | undefined,
   /** Configs to resolve `field=value` against — REQUIRED; see getRef in doc.ts. */
-  collections: CollectionMap
+  collections: CollectionMap,
+  /** Only documents edited after this ISO time (#4050). */
+  modifiedAfter?: string
 ): Promise<Record<string, unknown>[]> {
   return listRecords(storeFor(collections), path, {
     limit,
@@ -75,6 +81,7 @@ export async function getRecords(
     fields,
     filter,
     collections,
+    modifiedAfter,
     onScanBound: (detail) =>
       log.warn('[docs] filter scan bound hit — result may be short', detail),
   })
@@ -283,6 +290,19 @@ export const handleDocs: Handler = async (req, res) => {
     return
   }
 
+  const modifiedAfter = typeof req.query.modifiedAfter === 'string' ? req.query.modifiedAfter : undefined
+  if (modifiedAfter !== undefined && access !== undefined) {
+    const checked = modifiedAfterQuery(order, modifiedAfter)
+    if (checked instanceof Error) {
+      fail(res, 400, 'bad-request', checked.message)
+      return
+    }
+    if (path.includes('=')) {
+      fail(res, 400, 'bad-request', 'modifiedAfter lists a plain collection path, not a field=value filter')
+      return
+    }
+  }
+
   if (access === ALL) {
     const found = await getRecords(
       path,
@@ -290,7 +310,8 @@ export const handleDocs: Handler = async (req, res) => {
       order,
       fields,
       undefined,
-      collections
+      collections,
+      modifiedAfter
     )
     compressResponse(req, res, () => {
       res.json(found)
@@ -305,7 +326,8 @@ export const handleDocs: Handler = async (req, res) => {
       order,
       fields,
       (rec) => access(rec, userRoles),
-      collections
+      collections,
+      modifiedAfter
     )
     compressResponse(req, res, () => {
       res.json(found)

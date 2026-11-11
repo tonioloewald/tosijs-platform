@@ -9,7 +9,7 @@
 import { describe, test, expect } from 'bun:test'
 
 import { MemoryStore } from './store'
-import { listRecords, listOrder, resolveListPath, sequencedDelta, MAX_FILTER_SCAN } from './list'
+import { listRecords, listOrder, modifiedAfterQuery, resolveListPath, sequencedDelta, MAX_FILTER_SCAN } from './list'
 import type { CollectionMap } from './access'
 
 const collections = {
@@ -121,6 +121,36 @@ describe('listRecords', () => {
 
   test('a refused path lists nothing', async () => {
     expect(await listRecords(corpus(3), 'post/title=x', { limit: 5, collections })).toEqual([])
+  })
+})
+
+describe('modifiedAfter (#4050)', () => {
+  // Edited one minute apart; ids NOT in edit order, so ordering is observable.
+  const store = new MemoryStore({
+    'post/a': { title: 'A', date: '', _modified: '2026-11-10T10:02:00.000Z' },
+    'post/b': { title: 'B', date: '2026-01-01', _modified: '2026-11-10T10:00:00.000Z' },
+    'post/c': { title: 'C', date: '', _modified: '2026-11-10T10:03:00.000Z' },
+    'post/d': { title: 'D', date: '', _modified: '2026-11-10T10:01:00.000Z' },
+  }, { post: ['path', 'tags'] })
+  const titles = (rows: Record<string, unknown>[]) => rows.map((r) => r.title)
+  const list = (opts: Partial<Parameters<typeof listRecords>[2]>) =>
+    listRecords(store, 'post', { limit: 10, collections, ...opts })
+
+  test('strictly after the time, newest edit first; any ISO form of the time', async () => {
+    expect(titles(await list({ modifiedAfter: '2026-11-10T10:00:00.000Z' }))).toEqual(['C', 'A', 'D'])
+    expect(titles(await list({ modifiedAfter: '2026-11-10T11:01:00+01:00' }))).toEqual(['C', 'A'])
+    expect(titles(await list({ modifiedAfter: '2026-11-10T10:01:00Z', order: '_modified(asc)' }))).toEqual(['A', 'C'])
+  })
+  test('the row filter still applies, before the limit', async () => {
+    const drafts = async (r: Record<string, unknown>) => (r.date ? new Error('published') : r)
+    expect(titles(await list({ modifiedAfter: '2026-11-10T09:00:00Z', filter: drafts, limit: 2 }))).toEqual(['C', 'A'])
+  })
+  test('a bad time, another order, or a filtered path lists nothing (the endpoint answers 400)', async () => {
+    expect(modifiedAfterQuery('', 'yesterday')).toBeInstanceOf(Error)
+    expect(modifiedAfterQuery('', '1731312000')).toBeInstanceOf(Error)
+    expect(modifiedAfterQuery('date(desc)', '2026-11-10T10:00:00Z')).toBeInstanceOf(Error)
+    expect(await list({ modifiedAfter: 'yesterday' })).toEqual([])
+    expect(await listRecords(store, 'post/tags=x', { limit: 10, collections, modifiedAfter: '2026-01-01T00:00:00Z' })).toEqual([])
   })
 })
 

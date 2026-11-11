@@ -178,11 +178,17 @@ export const { blog } = tosi({
      * elsewhere (or since the index was cached) show up when switching to drafts.
      */
     async refreshRecentlyEdited(count = 30) {
+      // Only what was edited after the newest edit the index already has (#4050).
+      const newest = blog.index.value.reduce(
+        (max, ref) => (ref._modified && ref._modified > max ? ref._modified : max),
+        ''
+      )
       const recent = (await service.docs.get({
         p: 'post',
         f: INDEX_FIELDS,
         o: '_modified(desc)',
         c: count,
+        ...(newest ? { modifiedAfter: newest } : {}),
       })) as BlogRef[] | Error
       if (!Array.isArray(recent)) return
       const byPath = new Map(recent.map((ref) => [ref._path, ref]))
