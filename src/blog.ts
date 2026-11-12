@@ -1030,6 +1030,37 @@ export class XinPostEditor extends Component<PostEditorParts> {
     st.textContent =
       '.cm-cursor, .cm-cursor-primary { border-left-color: var(--text-color, #fbfbfb) !important; border-left-width: 2px !important; }'
     sr.appendChild(st)
+    this.#lightenTokens()
+    new MutationObserver(() => setTimeout(this.#lightenTokens, 100)).observe(document.body, {
+      attributes: true,
+      attributeFilter: ['class'],
+    })
+  }
+
+  // Our editor is dark in both page modes, but tosijs-ui picks CodeMirror's
+  // LIGHT token colours unless <body> has `darkmode`: URLs (#219) and Markdown
+  // punctuation (#404740) came out dark on dark. Lighten every dark token colour
+  // in the editor's stylesheets, keeping its hue. The class names are generated,
+  // so match on the rules themselves. The editor loads lazily, and the light
+  // style mounts again on a dark-mode toggle, hence the retries and the observer.
+  #lightenTokens = (tries = 0) => {
+    const sr = this.parts.source?.shadowRoot
+    if (!sr) return
+    const sheets = [...sr.adoptedStyleSheets, ...Array.from(sr.querySelectorAll('style'), (s) => s.sheet)]
+    let tokenRules = 0
+    for (const sheet of sheets) {
+      for (const rule of Array.from(sheet?.cssRules ?? [])) {
+        if (!(rule instanceof CSSStyleRule) || !/^\.ͼ\w+$/.test(rule.selectorText)) continue
+        const rgb = rule.style.color.match(/^rgba?\((\d+), (\d+), (\d+)/)
+        if (!rgb) continue
+        tokenRules++
+        const [r, g, b] = rgb.slice(1).map(Number)
+        if (0.299 * r + 0.587 * g + 0.114 * b < 128) {
+          rule.style.color = `color-mix(in oklab, ${rule.style.color} 40%, white)`
+        }
+      }
+    }
+    if (!tokenRules && tries < 40) setTimeout(() => this.#lightenTokens(tries + 1), 150)
   }
 
   updateContent = () => {
