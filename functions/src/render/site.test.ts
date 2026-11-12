@@ -150,6 +150,26 @@ describe('route artifacts — the head and data the old handlers produced', () =
     expect(a.head).toMatchObject({ title: 'inconsequence', description: 'the blog', url: '/blog', type: '' })
   })
 
+  test('a published post carries its HTML for fetchers without JavaScript (#4063)', () => {
+    const p = { ...post('it-begins', '2002-08-26'), content: 'It *begins*.' }
+    const a = routeArtifact({ pagePath: 'blog', page: blogPage, hydrated: { 'post/path=it-begins': p }, latestPost: latest, settings })
+    expect(a.body).toContain('<article data-ssr><h1>Title it-begins</h1><p>It <em>begins</em>.</p>')
+  })
+
+  test('…and so does the blog index, for the latest post it shows', () => {
+    const a = routeArtifact({ pagePath: 'blog', page: blogPage, hydrated: {}, latestPost: latest, settings })
+    expect(a.body).toContain('<h1>Title newest</h1>')
+  })
+
+  test('a draft opened by link has no body: drafts stay client-only (D10)', () => {
+    const a = routeArtifact({ pagePath: 'blog', page: blogPage, hydrated: { 'post/path=draft': post('draft', '') }, latestPost: latest, settings })
+    expect(a.body).toBeUndefined()
+  })
+
+  test('an ordinary page has no body yet', () => {
+    expect(routeArtifact({ pagePath: 'about', page: { path: 'about' }, hydrated: {}, latestPost: latest, settings }).body).toBeUndefined()
+  })
+
   test('the head URL comes from the KEY, never the request (cache poisoning)', () => {
     const a = routeArtifact({ pagePath: 'about', page: { path: 'about' }, hydrated: {}, latestPost: latest, settings })
     expect(a.head.url).toBe('/about')

@@ -130,7 +130,7 @@ export const handlePrefetch: Handler = async (req, res) => {
   if (process.env.RENDER_ON_STORE === 'true') {
     try {
       const served = await serve(url)
-      const html = renderDocument(served.head, served.prefetched, siteOrigin(req.headers ?? {}))
+      const html = renderDocument(served.head, served.prefetched, siteOrigin(req.headers ?? {}), served.body)
       compressResponse(req, res, () => {
         res.header('Content-Type', 'text/html')
         res.header('Cache-Control', 'public, max-age=60, s-maxage=300')

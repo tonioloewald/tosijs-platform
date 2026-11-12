@@ -22,6 +22,8 @@
     "express": "^4.22.3",
     "firebase-admin": "^12.7.0",
     "firebase-functions": "^7.0.2",
+    "linkedom": "^0.18.15",
+    "tosijs-kilpi": "^1.0.1",
     "tosijs-schema": "^1.0.3"
   },
   "devDependencies": {
@@ -33,7 +35,7 @@
     "eslint-config-google": "^0.14.0",
     "eslint-plugin-import": "^2.32.0",
     "firebase-functions-test": "^3.4.1",
-    "marked": "^13.0.3",
+    "marked": "^16.4.2",
     "tjs-lang": "0.13.12",
     "typescript": "^5.9.3"
   },

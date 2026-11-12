@@ -216,3 +216,8 @@ document.body.append(
     )
   )
 )
+
+// The server's plain-HTML copy of the page, for fetchers that run no
+// JavaScript (#4063). The app renders the page itself, so it goes, in the same
+// task as the append above: the browser never paints both.
+document.body.querySelectorAll('[data-ssr]').forEach((el) => el.remove())

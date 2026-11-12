@@ -79,3 +79,22 @@ for (const engine of ['per-request', 'store'] as const) {
     })
   })
 }
+
+describe('render on store: the page is readable without JavaScript (#4063)', () => {
+  beforeAll(() => {
+    process.env.RENDER_ON_STORE = 'true'
+  })
+  afterAll(() => {
+    delete process.env.RENDER_ON_STORE
+  })
+  const bodyOf = async (path: string) => (await (await fetch(`${host.url}${path}`)).text()).split('<body>')[1] ?? ''
+
+  test('a post URL: the post in the body, marked for the client to replace', async () => {
+    const body = await bodyOf('/blog/2002/8/26/it-begins')
+    expect(body).toContain('<article data-ssr><h1>It begins</h1><p>hello</p>')
+  })
+
+  test('a page with no post of its own has no body yet', async () => {
+    expect(await bodyOf('/about')).toBe('</body></html>')
+  })
+})

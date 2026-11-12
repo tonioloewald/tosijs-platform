@@ -4,8 +4,10 @@
  * runs identically at render-on-store time and at serve time, and is tested
  * without emulators.
  *
- * The page body is empty on purpose: the client (index.js) renders it from
- * `window.prefetched`. What matters for SEO and social previews is the head.
+ * The client (index.js) renders the page from `window.prefetched`. The body
+ * carries the page as plain HTML too (#4063), so a fetcher that runs no
+ * JavaScript (most AI fetchers, link previews, some crawlers) reads more than
+ * the head. The client removes it (`[data-ssr]`) when it renders.
  */
 import { DOCTYPE, elements } from '../elements'
 import { absoluteUrl } from '../social-meta'
@@ -44,8 +46,14 @@ export function embedJson(value: unknown): string {
 export const escapeText = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-export function renderDocument(head: HeadOptions, prefetched: unknown, origin: string): string {
-  const { html, head: headEl, meta, title, link, script, body } = elements
+/** Readable before the app's styles load; the app replaces it. */
+const SSR_STYLE =
+  '[data-ssr]{max-width:44rem;margin:2rem auto;padding:0 1rem;font:18px/1.6 Georgia,serif}' +
+  '[data-ssr] img{max-width:100%;height:auto}[data-ssr] pre{overflow-x:auto}'
+
+/** `bodyHtml` must already be safe to serve: render/markdown.ts sanitizes it. */
+export function renderDocument(head: HeadOptions, prefetched: unknown, origin: string, bodyHtml = ''): string {
+  const { html, head: headEl, meta, title, link, script, style, body } = elements
   const pageUrl = absoluteUrl(head.url, origin)
   const ownImage = Boolean(head.imageUrl)
   const imageUrl = absoluteUrl(head.imageUrl || DEFAULT_IMAGE, origin)
@@ -69,9 +77,10 @@ export function renderDocument(head: HeadOptions, prefetched: unknown, origin: s
         link({ rel: 'apple-touch-icon', href: ICON_URL }),
         link({ rel: 'manifest', href: MANIFEST_URL }),
         script({}, `var prefetched = ${embedJson(prefetched)}`),
-        script({ type: 'module', src: SCRIPT_URL })
+        script({ type: 'module', src: SCRIPT_URL }),
+        bodyHtml ? style(SSR_STYLE) : ''
       ),
-      body()
+      body(bodyHtml)
     )
   )
 }

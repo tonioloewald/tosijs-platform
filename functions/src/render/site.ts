@@ -17,6 +17,7 @@
 import { firstImage } from '../social-meta'
 import { isPublished } from '../../shared/post'
 import type { HeadOptions } from './document'
+import { postBodyHtml } from './markdown'
 
 type Doc = Record<string, any>
 
@@ -200,6 +201,8 @@ export interface RouteArtifact {
   data: Record<string, unknown>
   /** Document path → its `_modified` when rendered, so staleness is visible. */
   sources: Record<string, string | null>
+  /** The page as HTML, for a fetcher without JavaScript (#4063): the post shown, if published. */
+  body?: string
 }
 
 const sourceOf = (doc: Doc | undefined) => (doc ? (doc._modified as string | undefined) ?? null : null)
@@ -221,6 +224,7 @@ export function routeArtifact(input: {
 }): RouteArtifact {
   const { pagePath, page, hydrated, latestPost, settings } = input
   let postTitle = false
+  let body = ''
   // Derived from the KEY, never from the request: a stored value must not
   // depend on who happened to trigger its compute (cache poisoning).
   const head: HeadOptions = {
@@ -247,6 +251,8 @@ export function routeArtifact(input: {
     head.description = shown.summary || head.description
     head.url = `/blog/${shown.path}`
     head.type = 'article'
+    // Drafts stay client-only: only what the public may list is rendered (D10).
+    if (isPublished(shown)) body = postBodyHtml(shown)
   }
 
   const data: Record<string, unknown> = {}
@@ -257,7 +263,14 @@ export function routeArtifact(input: {
     if (doc) data[path] = doc
     sources[path] = sourceOf(doc)
   }
-  return { key: routeKey(pagePath, Object.keys(hydrated)), head, data, sources, ...(postTitle ? { postTitle } : {}) }
+  return {
+    key: routeKey(pagePath, Object.keys(hydrated)),
+    head,
+    data,
+    sources,
+    ...(postTitle ? { postTitle } : {}),
+    ...(body ? { body } : {}),
+  }
 }
 
 /**

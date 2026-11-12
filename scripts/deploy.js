@@ -131,6 +131,22 @@ const site = await fetch(`https://${projectId}.web.app/`).catch(() => ({ status:
 console.log(`   ${site.status === 200 ? 'ok ' : 'BAD'} site ${site.status}`)
 if (site.status !== 200) problems.push(`site: ${site.status}`)
 
+// Render on store serves a post as readable HTML, not only as JSON for the
+// client (#4063). Silent if it breaks: people see the app, fetchers see nothing.
+const envFile = path.join(lib.projectRoot, `functions/.env.${projectId}`)
+const renderOnStore = fs.existsSync(envFile) && /^RENDER_ON_STORE=true\s*$/m.test(fs.readFileSync(envFile, 'utf-8'))
+if (renderOnStore) {
+  const [newest] = await fetch(`${base}/docs?p=post&f=path&o=date(desc)&c=1`)
+    .then((r) => r.json())
+    .catch(() => [])
+  const html = newest?.path ? await fetch(`https://${projectId}.web.app/blog/${newest.path}`).then((r) => r.text(), () => '') : ''
+  const text = (html.split('<body>')[1] ?? '').replace(/<(script|style)[\s\S]*?<\/\1>/g, '').replace(/<[^>]+>/g, ' ')
+  const chars = text.replace(/\s+/g, ' ').trim().length
+  const ok = chars >= 200
+  console.log(`   ${ok ? 'ok ' : 'BAD'} post readable without JS: ${chars} characters${ok ? '' : ` (/blog/${newest?.path ?? '?'})`}`)
+  if (!ok) problems.push(`post without JS: ${chars} characters`)
+}
+
 if (problems.length) {
   console.error(`\n${problems.length} problem(s):\n  ${problems.join('\n  ')}\n`)
   process.exit(1)

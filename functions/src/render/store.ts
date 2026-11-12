@@ -55,7 +55,7 @@ import {
  * lazily. Each version has its OWN collection, so an old one is never scanned
  * by invalidation and can be dropped whole.
  */
-export const RENDER_VERSION = 'r3'
+export const RENDER_VERSION = 'r4'
 const RENDER_COLLECTION = `system:render-${RENDER_VERSION}`
 /** Shared by all versions: which deps were invalidated, and when (see computed.ts, Races). */
 const LOG_COLLECTION = 'system:render-log'
@@ -216,6 +216,8 @@ export interface Served {
   status: number
   head: RouteArtifact['head']
   prefetched: Record<string, unknown>
+  /** The page as HTML for a fetcher without JavaScript, when the route has one (#4063). */
+  body?: string
 }
 
 /** What a URL is served as. A hit is a handful of document reads and no queries. */
@@ -234,6 +236,7 @@ export async function serve(url: string): Promise<Served> {
       status: 200,
       head: withTitlePrefix(artifact, prefix),
       prefetched: composePrefetched(artifact, n, blog, settings),
+      body: artifact.body,
     }
   }
   // Not found: the site's 404 page if it has one, else its home page, with
@@ -249,6 +252,7 @@ export async function serve(url: string): Promise<Served> {
     status: 404,
     head: withTitlePrefix(shown, prefix),
     prefetched: { ...composePrefetched(shown, n, blog, settings), notFound: notFoundPath(url) },
+    body: shown.body,
   }
 }
 
