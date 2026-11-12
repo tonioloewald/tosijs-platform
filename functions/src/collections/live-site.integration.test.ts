@@ -220,7 +220,8 @@ describe(`live site: ${HOSTING}`, () => {
     if (guard()) return
     const slug = posts.find(published)?.path
     expect(slug).toBeTruthy()
-    const r = await get(`${HOSTING}/${String(slug)}`)
+    // A post lives under its page: `/<slug>` names no page, so it is a 404 (#3891).
+    const r = await get(`${HOSTING}/blog/${String(slug)}`)
     expect(r.status).toBe(200)
     expect(r.type).toContain('text/html')
   }, NET_MS)
