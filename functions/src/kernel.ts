@@ -41,6 +41,8 @@ export interface Endpoint {
   handler: Handler
   /** The secrets it reads (secrets.ts); Cloud Functions mounts only these. */
   secrets?: readonly string[]
+  /** How long a request may run before Cloud Functions ends it with a 504 (default 60). */
+  timeoutSeconds?: number
 }
 
 /** Every endpoint by its name: the deployed function's name, and its path on the Bun server. */
@@ -60,5 +62,6 @@ export const ENDPOINTS = {
   token: { handler: handleToken },
   authorize: { handler: handleAuthorize },
   blob: { handler: handleBlobEndpoint },
-  gen: { handler: handleGen, secrets: GEN_SECRETS },
+  // A proofread rewrites the whole post; a long one takes Gemini over a minute.
+  gen: { handler: handleGen, secrets: GEN_SECRETS, timeoutSeconds: 300 },
 } satisfies Record<string, Endpoint>
