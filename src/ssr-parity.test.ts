@@ -1,8 +1,9 @@
 /**
  * The server's copy of a post (functions/src/render/markdown.ts, #4063) must
- * match what the client's <tosi-md> renders: same `marked` version, same
- * sanitizing. Otherwise a crawler reads a different post than a person does,
- * or the server serves something the client would have stripped.
+ * say what the client's <tosi-md> says: the same text, links and images.
+ * Otherwise a crawler reads a different post than a person does, or the server
+ * serves something the client would have stripped. The markup itself differs
+ * on purpose: the server writes a plainer, allowlisted copy.
  */
 import { test, expect } from 'bun:test'
 import { readFileSync } from 'fs'
@@ -22,11 +23,16 @@ const SAMPLES = [
   '<tosi-example>const x = 1</tosi-example> <button is="x-y">b</button>',
 ]
 
-// Both serializations through the same parser, so only content can differ.
-const normal = (html: string) => {
+// What a reader or crawler gets from the HTML: its words, where it links, what it shows.
+const meaning = (html: string) => {
   const t = document.createElement('template')
   t.innerHTML = html
-  return t.innerHTML.replace(/>\s+</g, '><').trim()
+  const f = t.content
+  return {
+    text: (f.textContent ?? '').replace(/\s+/g, ' ').trim(),
+    links: [...f.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')),
+    images: [...f.querySelectorAll('img')].map((i) => [i.getAttribute('src'), i.getAttribute('alt')]),
+  }
 }
 
 const clientRender = (source: string) => {
@@ -44,7 +50,7 @@ test('server and client use the same marked', () => {
 })
 
 for (const [i, source] of SAMPLES.entries()) {
-  test(`sample ${i}: the server renders what the client does`, () => {
-    expect(normal(renderMarkdown(source))).toBe(normal(clientRender(source)))
+  test(`sample ${i}: the server says what the client does`, () => {
+    expect(meaning(renderMarkdown(source))).toEqual(meaning(clientRender(source)))
   })
 }

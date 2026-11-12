@@ -1,18 +1,28 @@
 /**
  * A post's body as HTML, for the page a fetcher without JavaScript reads
- * (#4063). The client renders the same post with tosijs-ui's <tosi-md>, and
- * this does what it does, in the same order and with the same libraries:
- * `marked` with default options, then tosijs-kilpi's sanitizer, then custom
- * elements unwrapped and every href held to the navigation rule. So the server
- * shows what the client will, and cannot show anything the client would strip.
+ * (#4063). The client renders the same post with tosijs-ui's <tosi-md>:
+ * `marked` with default options, then tosijs-kilpi's sanitizer. This starts the
+ * same way (same marked version, same kilpi, same URL rules), so it shows the
+ * same text, links and images, and nothing the client would strip.
  *
- * Sanitizing matters more here than in the browser: this HTML is served as
- * the site to every visitor, so a script in a post (an author account taken
- * over) would run for everyone before any client code did.
+ * It does NOT hand on what the parser serializes. The browser sanitizes with
+ * the parser that then displays the result; here linkedom parses, and the
+ * visitor's browser re-parses whatever we emit. linkedom is not a
+ * spec-compliant HTML parser, and a gap between the parser that sanitized and
+ * the one that renders is how mutation XSS gets through sanitizers. So the
+ * output is written fresh from an allowlist: text-structure tags and a few
+ * attributes, every text and value escaped, nothing from raw-text or foreign
+ * elements (script, style, svg, math…). HTML that plain means the same thing to
+ * every parser. It is a plainer copy than the client renders; the client
+ * replaces it anyway.
  *
- * kilpi needs a DOM; linkedom supplies one, only while kilpi runs. The root is a plain
- * element, not a <template>: linkedom's tree walker does not enter template
- * content, so kilpi would silently sanitize nothing.
+ * This matters more than in the browser: the HTML is served as the site, to
+ * every visitor, before any client code runs. A script in a post (an author
+ * account taken over) would run for everyone.
+ *
+ * kilpi needs a DOM; linkedom supplies one, only while kilpi runs. The root is
+ * a plain element, not a <template>: linkedom's tree walker does not enter
+ * template content, so kilpi would silently sanitize nothing.
  */
 import { marked } from 'marked'
 import { elements } from '../elements'
@@ -68,23 +78,57 @@ function domTools() {
   return tools
 }
 
-/** tosi-md unwraps these even when a host allows custom elements; we allow none. */
-const isCustomElement = (el: Element) => el.localName.includes('-')
+/** Emitted as themselves (with only the attributes below); anything else is unwrapped. */
+const ALLOWED_TAGS = new Set(
+  (
+    'a abbr b blockquote br caption cite code dd del dfn div dl dt em figcaption figure ' +
+    'h1 h2 h3 h4 h5 h6 hr i img ins kbd li mark ol p pre q s samp small span strong sub sup ' +
+    'table tbody td tfoot th thead time tr u ul'
+  ).split(' ')
+)
+const VOID_TAGS = new Set(['br', 'hr', 'img'])
+/** Dropped with everything in them: code, styling, foreign content, forms. */
+const DROPPED_TAGS = new Set(
+  'script style template noscript iframe object embed svg math textarea select option title head form'.split(' ')
+)
+const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
+  a: ['href', 'title'],
+  img: ['src', 'alt', 'title', 'width', 'height'],
+  td: ['colspan', 'rowspan'],
+  th: ['colspan', 'rowspan'],
+  time: ['datetime'],
+}
 
-/** Markdown (or the HTML many older posts are written in) → sanitized HTML. */
+const escapeValue = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+const escapeData = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+const TEXT_NODE = 3
+const ELEMENT_NODE = 1
+
+function serialize(node: Node, isSafeNavigationUrl: (url: string) => boolean): string {
+  if (node.nodeType === TEXT_NODE) return escapeData(node.textContent ?? '')
+  if (node.nodeType !== ELEMENT_NODE) return '' // comments, processing instructions
+  const el = node as Element
+  const tag = el.localName.toLowerCase()
+  if (DROPPED_TAGS.has(tag)) return ''
+  const inner = () => Array.from(el.childNodes, (child) => serialize(child, isSafeNavigationUrl)).join('')
+  if (!ALLOWED_TAGS.has(tag)) return inner() // custom elements, font, center…: their content only
+  const attrs = (ALLOWED_ATTRIBUTES[tag] ?? [])
+    .filter((name) => el.hasAttribute(name))
+    .filter((name) => name !== 'href' || isSafeNavigationUrl(el.getAttribute(name) ?? ''))
+    .map((name) => ` ${name}="${escapeValue(el.getAttribute(name) ?? '')}"`)
+    .join('')
+  return VOID_TAGS.has(tag) ? `<${tag}${attrs}>` : `<${tag}${attrs}>${inner()}</${tag}>`
+}
+
+/** Markdown (or the HTML many older posts are written in) → plain, safe HTML. */
 export function renderMarkdown(source: string): string {
   const { dom, kilpi } = domTools()
   const root = dom.document.createElement('div')
   root.innerHTML = marked.parse(String(source ?? ''), { async: false }) as string
+  // kilpi's URL rules for src (raster data: images allowed, svg not), as the client applies them.
   withDomGlobals(dom, () => kilpi.sanitizeInPlace(root))
-  for (const el of [...root.querySelectorAll('*')]) {
-    el.removeAttribute('is')
-    if (isCustomElement(el)) el.replaceWith(...el.childNodes)
-  }
-  for (const el of root.querySelectorAll('[href]')) {
-    if (!kilpi.isSafeNavigationUrl(el.getAttribute('href') || '')) el.removeAttribute('href')
-  }
-  return root.innerHTML
+  return Array.from(root.childNodes, (child) => serialize(child, kilpi.isSafeNavigationUrl)).join('')
 }
 
 /**

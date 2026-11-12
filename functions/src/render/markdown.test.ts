@@ -12,7 +12,7 @@ describe('renderMarkdown', () => {
     expect(renderMarkdown('# Hi\n\nA [link](https://loewald.com/x).')).toBe(
       '<h1>Hi</h1>\n<p>A <a href="https://loewald.com/x">link</a>.</p>\n'
     )
-    expect(renderMarkdown('<p class="lede">Old <em>post</em></p>')).toBe('<p class="lede">Old <em>post</em></p>')
+    expect(renderMarkdown('<p class="lede">Old <em>post</em></p>')).toBe('<p>Old <em>post</em></p>')
   })
 
   test('nothing that runs survives', () => {
@@ -30,11 +30,29 @@ describe('renderMarkdown', () => {
     expect(html).toContain('<img src="data:image/png;base64,AA">')
   })
 
-  test('custom elements are unwrapped, their text kept; `is` is dropped', () => {
+  test('custom and unlisted elements are unwrapped, their text kept', () => {
     const html = renderMarkdown('<tosi-example>const x = 1</tosi-example> <tosi-md sanitize="off">raw</tosi-md> <button is="x-y">b</button>')
-    expect(html).not.toMatch(/tosi-|is=/)
-    expect(html).toContain('const x = 1')
-    expect(html).toContain('<button>b</button>')
+    expect(html).toBe('<p>const x = 1 raw b</p>\n')
+  })
+
+  test('only allowlisted attributes, every value escaped', () => {
+    expect(renderMarkdown(`<a href="/x" title='a" onmouseover="alert(1)' class="c" style="x" id="i">l</a>`)).toBe(
+      '<p><a href="/x" title="a&quot; onmouseover=&quot;alert(1)">l</a></p>\n'
+    )
+  })
+
+  test('nothing from foreign or raw-text content, where parsers disagree (mutation XSS)', () => {
+    const html = renderMarkdown(
+      '<svg><style><img src=x onerror=alert(1)></style></svg>' +
+        '<math><mtext><table><mglyph><style><img src=x onerror=alert(2)>' +
+        '<noscript><p title="</noscript><img src=x onerror=alert(3)>"></noscript>' +
+        '<!--><img src=x onerror=alert(4)>-->'
+    )
+    expect(html).not.toMatch(/onerror|<svg|<math|<style|<noscript|<!--/i)
+  })
+
+  test('text is escaped even where the parser kept it raw', () => {
+    expect(renderMarkdown('<p>a &lt;script&gt; b</p>')).toBe('<p>a &lt;script&gt; b</p>')
   })
 
   test('code is escaped, not interpreted', () => {
