@@ -116,6 +116,25 @@ for (const name of names) {
   if (!ours) problems.push(`${name}: ${r.status}`)
 }
 
+// An answer is not proof the new code is serving: when a new revision fails
+// to start (a missing dependency, say), traffic stays on the old one, which
+// still answers. A redeploy of the same source then skips the function as
+// unchanged, and only this shows it.
+let stuck = 0
+for (const name of names) {
+  const r = await lib
+    .api('GET', `https://run.googleapis.com/v2/projects/${projectId}/locations/us-central1/services/${name.toLowerCase()}`)
+    .catch((e) => ({ ok: false, status: 0, json: { error: String(e) } }))
+  const { latestReadyRevision: ready, latestCreatedRevision: created } = r.json ?? {}
+  if (!r.ok || !ready || ready !== created) {
+    stuck++
+    const why = r.ok ? `serving ${ready?.split('/').pop()}, newest ${created?.split('/').pop()} never became ready` : `status ${r.status}`
+    console.log(`   BAD ${name.padEnd(13)} ${why}`)
+    problems.push(`${name}: ${why}`)
+  }
+}
+if (!stuck) console.log(`   ok  all ${names.length} functions serve their newest revision`)
+
 const configFile = path.join(lib.projectRoot, `src/firebase-config.${alias}.ts`)
 const bucket = fs.existsSync(configFile)
   ? fs.readFileSync(configFile, 'utf-8').match(/storageBucket:\s*['`]([^'`]+)['`]/)?.[1]?.replace('${PROJECT_ID}', projectId)
