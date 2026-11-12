@@ -155,13 +155,16 @@ if (site.status !== 200) problems.push(`site: ${site.status}`)
 const envFile = path.join(lib.projectRoot, `functions/.env.${projectId}`)
 const renderOnStore = fs.existsSync(envFile) && /^RENDER_ON_STORE=true\s*$/m.test(fs.readFileSync(envFile, 'utf-8'))
 if (renderOnStore) {
-  const [newest] = await fetch(`${base}/docs?p=post&f=path&o=date(desc)&c=1`)
+  const [newest] = await fetch(`${base}/docs?p=post&f=path,title&o=date(desc)&c=1`)
     .then((r) => r.json())
     .catch(() => [])
   const html = newest?.path ? await fetch(`https://${projectId}.web.app/blog/${newest.path}`).then((r) => r.text(), () => '') : ''
   const text = (html.split('<body>')[1] ?? '').replace(/<(script|style)[\s\S]*?<\/\1>/g, '').replace(/<[^>]+>/g, ' ')
-  const chars = text.replace(/\s+/g, ' ').trim().length
-  const ok = chars >= 200
+  const entities = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'" }
+  const visible = text.replace(/&(amp|lt|gt|quot|#39);/g, (e) => entities[e]).replace(/\s+/g, ' ').trim()
+  const chars = visible.length
+  // A real post can be short; its title and a paragraph's worth of text are the floor.
+  const ok = chars >= 100 && Boolean(newest?.title) && visible.includes(String(newest.title).replace(/\s+/g, ' ').trim())
   console.log(`   ${ok ? 'ok ' : 'BAD'} post readable without JS: ${chars} characters${ok ? '' : ` (/blog/${newest?.path ?? '?'})`}`)
   if (!ok) problems.push(`post without JS: ${chars} characters`)
 }
