@@ -35,6 +35,7 @@ time, carry the entry with the code.
 | [D22](#d22) | Setup: as few human steps as security allows; IAM only from code | this repo |
 | [D23](#d23) | Render on store: SSR pages, nav, blog index, sitemap and RSS are rendered when content is written, served as stored files | this repo (renderers → stored ajs later) |
 | [D24](#d24) | A post always names its author: the server fills an empty one from the writer, or refuses the write | this repo + tosijs-blog |
+| [D25](#d25) | Server HTML of content is written fresh from an allowlist, never a parser's serialization | this repo (renderers → stored ajs later) |
 
 ---
 
@@ -643,3 +644,36 @@ that name had not loaded yet. "From 1994 sprites to a game-ready 3D Character…
   saved.
 
 Board: #4063 (found while deploying it).
+
+## D25
+**The HTML the server renders from content is written fresh from an allowlist of tags and
+attributes, every text and value escaped. It never forwards a parser's serialization.**
+*(2026-11-13, owner)* Refines D23's "server HTML and client rendering cannot drift".
+
+A published post's page carries the post as plain HTML (`<article data-ssr>`), so a reader or
+crawler without JavaScript gets the text (#4063). The client renders the same post with `<tosi-md>`:
+`marked`, then tosijs-kilpi's sanitizer, in the browser that then displays the result. The server
+has no browser. It parses with linkedom, which is not a spec-compliant HTML parser, and the
+visitor's browser re-parses whatever the server emits. A gap between the parser that sanitized and
+the one that renders is how mutation XSS gets past sanitizers. Run through both renderers, 114 of
+860 production posts already came out with different markup. And this HTML is served to every
+visitor before any client code runs, so a script that got through (an author account taken over)
+would run for everyone.
+
+- **The pipeline:** `marked` (the client's version, which a test pins), then kilpi under linkedom
+  (the client's URL rules for `href` and `src`), then `render/markdown.ts`'s own serializer.
+- **Allowed:** text-structure tags (headings, paragraphs, lists, quotes, tables, code, emphasis,
+  links, images, `time`…) and a few attributes (`a`: href, title; `img`: src, alt, title, width,
+  height; `td`/`th`: colspan, rowspan; `time`: datetime).
+- **Unwrapped:** any other element, custom elements included. Its text is kept.
+- **Dropped with their contents:** raw-text and foreign elements (`script`, `style`, `template`,
+  `noscript`, `svg`, `math`…), embeds and forms. Comments are dropped too.
+- **The parity that matters is meaning, not markup.** `ssr-parity.test.ts` checks that server and
+  client give the same text, link targets and images. All 860 posts match. The server copy is
+  plainer on purpose (no classes, no styling), and the client replaces it when it mounts.
+- **Rejected:** serving linkedom's `innerHTML` (the parser gap above), and a second, hand-written
+  Markdown parser (it would drift from the client's).
+- **Scope:** every renderer that turns stored content into served HTML. The blog index and pages
+  (#4063's next steps) use the same serializer.
+
+Board: #4063.
