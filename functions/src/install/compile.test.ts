@@ -370,6 +370,53 @@ describe('derive: principal reads the REQUEST principal (#18)', () => {
   })
 })
 
+describe('derive: a required principal field (a post names its author)', () => {
+  // The editor sent `author: ''` when the signed-in name had not loaded, and a
+  // post went out with no byline (2026-11-12). Now the server fills it, or
+  // refuses the write.
+  const config = compileCollection({
+    schema: { type: 'object' },
+    derive: [{ op: 'principal', to: 'author', field: 'name', required: true }],
+    access: [{ role: 'author', write: 'ALL' }],
+  } as never)
+  const validate = config.validate as (d: unknown, r: unknown, e: unknown) => Promise<unknown>
+  const ada = { name: 'Ada', userIds: ['u'], roles: ['author'], contacts: [], principal: { uid: 'u', name: 'Ada' } } as never
+  const nameless = { userIds: ['u'], roles: ['author'], contacts: [], principal: { uid: 'u' } } as never
+
+  test('an empty or blank author is the caller\'s name', async () => {
+    for (const author of [undefined, '', '  ']) {
+      const out = await validate({ t: 'x', author }, ada, {})
+      expect((out as Record<string, unknown>).author).toBe('Ada')
+    }
+  })
+
+  test('a supplied author is kept', async () => {
+    const out = await validate({ t: 'x', author: 'Guest Writer' }, ada, {})
+    expect((out as Record<string, unknown>).author).toBe('Guest Writer')
+  })
+
+  test('no author and no published name: refused', async () => {
+    const out = await validate({ t: 'x', author: '' }, nameless, {})
+    expect(out).toBeInstanceOf(Error)
+    expect((out as Error).message).toContain('author')
+  })
+
+  test('a name that is an email is not published, so it is refused too', async () => {
+    const emailOnly = { name: 'me@example.org', userIds: ['u'], roles: ['author'], contacts: [], principal: { uid: 'u', name: 'me@example.org' } } as never
+    expect(await validate({ t: 'x' }, emailOnly, {})).toBeInstanceOf(Error)
+  })
+
+  test('without required, the same caller writes with no author (as before)', async () => {
+    const optional = compileCollection({
+      schema: { type: 'object' },
+      derive: [{ op: 'principal', to: 'author', field: 'name' }],
+      access: [{ role: 'author', write: 'ALL' }],
+    } as never)
+    const validateOptional = optional.validate as (d: unknown, r: unknown, e: unknown) => Promise<unknown>
+    expect(await validateOptional({ t: 'x' }, nameless, {})).not.toBeInstanceOf(Error)
+  })
+})
+
 describe('immutable compiles to the pipeline flag (#25)', () => {
   const compile = (immutable?: boolean) =>
     compileCollection({

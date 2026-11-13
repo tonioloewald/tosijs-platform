@@ -171,7 +171,7 @@ export function compileDerive(
 ): (
   data: Record<string, unknown>,
   principal?: { uid?: string; name?: string; roleId?: string }
-) => Record<string, unknown> {
+) => Record<string, unknown> | Error {
   return (data, principal = ctx.principal ?? {}) => {
     const out = { ...data }
     for (const op of ops) {
@@ -211,7 +211,8 @@ export function compileDerive(
           // DEFAULT, not an override. A caller who names an author is taken at
           // their word here; `_by` is the record of who actually wrote it, and
           // that one cannot be influenced at all.
-          if (!out[op.to]) {
+          // Whitespace counts as empty, as it does for `nonEmpty`.
+          if (!String(out[op.to] ?? '').trim()) {
             const value = (principal as Record<string, string | undefined>)[
               op.field
             ]
@@ -220,6 +221,13 @@ export function compileDerive(
             // then block the default on a later write because the field is
             // already set.
             if (value) out[op.to] = value
+            // The editor used to send `author: ''` when the signed-in name had
+            // not loaded yet, and a post went out with no byline (2026-11-12).
+            if (op.required && !value) {
+              return new Error(
+                `${op.to} is empty and the caller has no published ${op.field} to fill it with`
+              )
+            }
           }
           break
         case 'constant':
@@ -332,7 +340,9 @@ export function compileCollection(
       if (derive) {
         // The same identity provenance records — never the role document's
         // first uid (#28; 0.2.1 review, B1).
-        out = derive(out, { ...principalIdentity(r), roleId: r?._id })
+        const derived = derive(out, { ...principalIdentity(r), roleId: r?._id })
+        if (derived instanceof Error) return derived
+        out = derived
       }
       if (bump) out = bump(out, existing ?? {})
       return out

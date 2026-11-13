@@ -30,8 +30,8 @@ const meaning = (html: string) => {
   const f = t.content
   return {
     text: (f.textContent ?? '').replace(/\s+/g, ' ').trim(),
-    links: [...f.querySelectorAll('a[href]')].map((a) => a.getAttribute('href')),
-    images: [...f.querySelectorAll('img')].map((i) => [i.getAttribute('src'), i.getAttribute('alt')]),
+    links: Array.from(f.querySelectorAll('a[href]')).map((a) => a.getAttribute('href')),
+    images: Array.from(f.querySelectorAll('img')).map((i) => [i.getAttribute('src'), i.getAttribute('alt')]),
   }
 }
 

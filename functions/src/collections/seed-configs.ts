@@ -54,7 +54,12 @@ export const PLATFORM_CONFIGS: StoredCollectionConfig[] = [
       // Both, each on its own, matching blog.ts (D19: per-field unique).
       unique: ['title', 'path'],
       // Replaces blog.ts's `validate`, which generates a path from the title.
-      derive: [{ op: 'slug', to: 'path', from: 'title', when: 'absent' }],
+      // …and an empty author from the caller's published name, refusing the
+      // write when there is none: every post's byline names someone.
+      derive: [
+        { op: 'slug', to: 'path', from: 'title', when: 'absent' },
+        { op: 'principal', to: 'author', field: 'name', required: true },
+      ],
       access: [
         {
           role: ROLES.public,

@@ -43,7 +43,7 @@
     "restore": "bun scripts/restore-firestore.js",
     "backup:install": "bun scripts/backup-install.js",
     "backup:uninstall": "bun scripts/backup-install.js --uninstall",
-    "test": "bun test src scripts && cd functions && bun test",
+    "test": "bun test ./src ./scripts && cd functions && bun test",
     "typecheck": "tsc --noEmit",
     "build:lib": "tsc -p tsconfig.lib.json",
     "install:ci": "cd functions && npm install --ignore-scripts --no-audit --no-fund",

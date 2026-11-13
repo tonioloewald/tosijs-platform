@@ -46,7 +46,12 @@ export type DeriveOp =
   | { op: 'slug'; to: string; from: string; when?: 'absent' | 'always' }
   | { op: 'shortId'; to: string; length?: number }
   | { op: 'now'; to: string }
-  | { op: 'principal'; to: string; field: 'uid' | 'name' | 'roleId' }
+  /**
+   * Fills an EMPTY `to` from the calling principal's identity (the same,
+   * never-an-email name `_by` records). With `required`, a write that leaves
+   * `to` empty is refused: a post's byline must name someone.
+   */
+  | { op: 'principal'; to: string; field: 'uid' | 'name' | 'roleId'; required?: boolean }
   | { op: 'constant'; to: string; value: string | number | boolean }
 
 export const DERIVE_OPS = ['slug', 'shortId', 'now', 'principal', 'constant']

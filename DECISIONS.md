@@ -34,6 +34,7 @@ time, carry the entry with the code.
 | [D21](#d21) | Files live in storage areas: collections with blob limits | this repo |
 | [D22](#d22) | Setup: as few human steps as security allows; IAM only from code | this repo |
 | [D23](#d23) | Render on store: SSR pages, nav, blog index, sitemap and RSS are rendered when content is written, served as stored files | this repo (renderers → stored ajs later) |
+| [D24](#d24) | A post always names its author: the server fills an empty one from the writer, or refuses the write | this repo + tosijs-blog |
 
 ---
 
@@ -618,3 +619,27 @@ the visible-pages list for the nav, the blog cache. Its handlers once raced each
 
 Board: #2698 (design + prototype).
 
+## D24
+**A post always names its author. The server fills an empty `author` from the writer's published
+name, or refuses the write.** *(2026-11-13, owner)*
+
+The editor set `author` from the signed-in user's name when it created a post, and sent `''` when
+that name had not loaded yet. "From 1994 sprites to a game-ready 3D Character…" was published on
+2026-11-12 with no byline, though the server had recorded the writer (`_by.name`) correctly.
+
+- **Where:** the post collection's write transform. In the registry it is the `principal` derive op
+  with the new `required: true`: `{ op: 'principal', to: 'author', field: 'name', required: true }`.
+  `blog.ts`'s TypeScript `validate` mirrors it for the non-registry path.
+- **Filled from** `principalIdentity`, the same name `_by` records. It is never an email address or
+  one of the writer's contacts.
+- **Refused** when the field is empty (blank counts as empty) and the writer has no publishable
+  name. A writer with no name must type one.
+- **A supplied author is kept.** Posting under another name (a guest post) stays possible; `_by`
+  records who actually wrote it.
+- **Rejected alternative:** falling back to `_by.name` at display time. It fixes the byline, but
+  leaves stored data that every renderer (page, feed, client) has to remember to repair. The rule
+  lives once, at write.
+- **Existing posts are not migrated.** A post with an empty author gains one the next time it is
+  saved.
+
+Board: #4063 (found while deploying it).

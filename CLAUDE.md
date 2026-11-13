@@ -54,9 +54,13 @@ bun start              # Dev server at https://localhost:8020 (uses self-signed 
 bun start-emulated     # Start with Firebase emulators
 bun seed               # Seed emulators with initial_state data
 bun seed-clear         # Clear emulators and reseed
+bun run serve:local    # The whole platform in one Bun process: SQLite + a files dir, no Firebase (port 5001)
+bun run import:local -- <backup dir> [--data .local]  # Load a `bun run backup` snapshot for serve:local
+bun run test           # Client + scripts tests, then functions tests
 bun build              # Build client to dist/
 bun format             # Format code with Prettier
 bun run deploy         # THE deploy: whole host in order (indexes → functions+rules+hosting), then checks it
+bun run backup         # Snapshot production Firestore (always, before a production deploy; files are not included)
 bun run deploy:sandbox # Same, to the sandbox alias (refuses consumer/unmarked hosts, e.g. virta)
 bun deploy-functions   # Expert: functions only — ships no rules or headers changed alongside
 bun deploy-hosting     # Expert: hosting only
@@ -76,7 +80,9 @@ bun run build                               # Compile TypeScript to lib/
 npm run lint                                # Lint (eslint, google config)
 ```
 
-Tests come in two flavors. Unit tests (`*.test.ts`, e.g. `access.test.ts`) run standalone. Integration tests (`*.integration.test.ts`, e.g. `access.integration.test.ts`) hit live endpoints and are **skip-guarded** — they pass vacuously (`expect(true).toBe(true)`) unless emulators are up, so a green CI run does not mean they exercised anything. To actually run them: `cd functions && bun run build`, then from the root `bun start-emulated` + `bun seed`, then `bun test src/collections/access.integration.test.ts`. The emulators run compiled code from `lib/`, so **rebuild and restart emulators** after changing functions.
+Tests come in two flavors. Unit tests (`*.test.ts`, e.g. `access.test.ts`) run standalone. Integration tests (`*.integration.test.ts`, e.g. `access.integration.test.ts`) hit live endpoints through `collections/integration-target.test.ts`: the Firebase emulators when their functions answer, otherwise the **Bun host started in-process** (`adapters/bun/serve.ts`, SQLite, dev identities). So they **do** exercise the code on every `bun test`, without Java. `INTEGRATION_TARGET=emulators|local` forces one. Against the emulators they run compiled code from `lib/`, so **rebuild and restart emulators** after changing functions.
+
+Run client tests as `bun test ./src ./scripts` (what `bun run test` does). A bare `bun test src` from the root also matches `functions/src` and runs the functions suite under the client's happy-dom preload, where a dozen of its tests fail for reasons that are not bugs.
 
 **Emulator note:** the global `firebase-tools` was **10.1.0** until late September 2026, which crashed the functions emulator under firebase-functions v7 (it calls the removed `functions.config()`). It is now **15.x** (15.28.2 as of 2026-10-01), so that failure should be gone, but `bun start-emulated` has not been re-verified since the upgrade. The scripts here use `npx -y firebase-tools@latest`, which always works:
 
@@ -86,7 +92,11 @@ npx -y firebase-tools@latest emulators:start --only auth,functions,firestore
 
 Emulator ports (see `firebase.json`): UI 4000, functions 5001, hosting 5002, firestore 8080, auth 9099, storage 9199. `bun run kill-ports` frees all six; `start-emulated` runs it first.
 
-Note: `functions/` is npm-managed — `package-lock.json` is authoritative and `firebase.json`'s `predeploy` runs `npm run lint` + `npm run build` — even though the root project uses Bun and a stray `functions/bun.lock` exists. `bun test` still works there for running tests. The root `bun start` connects directly to **production** Firebase over HTTPS — use emulators + `bun seed` for isolated local work.
+Note: `functions/` is npm-managed — `firebase.json`'s `predeploy` runs `npm run lint` + `npm run build` — even though the root project uses Bun. **No lockfile is tracked**: `.gitignore` excludes `package-lock.json`, so deploys resolve the semver ranges in `functions/package.json` afresh. `bun test` still works there for running tests.
+
+Cloud Functions installs with `NODE_ENV=production`, which **skips devDependencies**. A package the deployed code loads must be in `dependencies`, or the new revision fails to start while the old one keeps serving (it happened with `marked`). `deploy-dependencies.test.ts` scans the sources for this, and the deploy check fails when a function is not serving its newest revision.
+
+The root `bun start` connects directly to **production** Firebase over HTTPS — use emulators + `bun seed` for isolated local work.
 
 ## Architecture
 
@@ -115,8 +125,8 @@ All Firestore access goes through Cloud Functions, not the client SDK:
 - **`/doc`** - CRUD for single documents (GET, POST, PUT, PATCH, DELETE)
 - **`/docs`** - Collection queries with filtering
 - **`/esm`** - Dynamic ES module serving from Firestore
-- **`/prefetch`** (+ `/prefetchData`) - Server-side rendering for SEO
-- **`/gen`** - LLM text generation (Gemini); uses `defineSecret` for API keys
+- **`/prefetch`** (+ `/prefetchData`) - Server-side rendering for SEO. With `RENDER_ON_STORE=true` (production) pages come from stored render artifacts (D23, `functions/src/render/`). A published post's page also carries the post itself as plain HTML (`<article data-ssr>`, written from an allowlist by `render/markdown.ts`) for readers without JavaScript; the client removes it when it mounts. Bump `RENDER_VERSION` in `render/store.ts` when the artifact shape changes
+- **`/gen`** - LLM text generation (Gemini); uses `defineSecret` for API keys; 300s timeout
 - **`/blob`** - Files in **storage areas** (manifest collections with `blob` limits; D21). PUT/GET/DELETE `/blob/<area>/<path>`, POST move. Decisions in `collections/blob.ts`, request handling in `blob-handler.ts`, wiring in `blob-endpoint.ts`
 - **`/stored`** - LEGACY file reader: Admin SDK, so `storage.rules` never applies to it; serves only the allowlisted legacy folders (`legacy-storage.ts`, mirrored in `storage.rules`, agreement tested)
 - **`/install`**, **`/claim`**, **`/token`**, **`/authorize`** - Library install, host bootstrap (D16), scoped agent tokens, and the browser loop that issues them (see BETA.md)
@@ -124,7 +134,7 @@ All Firestore access goes through Cloud Functions, not the client SDK:
 - **`/sitemap`** - Sitemap generation
 - **`/state`**, **`/user`** - App state and user/role management
 
-Endpoints are individual Firebase v2 `onRequest` functions, each exported from `functions/src/index.ts`. New endpoints follow the pattern in `functions/src/hello.ts`: declare `onRequest(PUBLIC_ENDPOINT, …)` (`endpoint-options.ts`; a test fails without it, and it is what keeps the function publicly invocable across deploys), handle CORS via `optionsResponse`, get roles via `getUserRoles` (both from `utilities.ts`), then export from `index.ts` and add the name to `PLATFORM_FUNCTIONS` or `SITE_FUNCTIONS` in `scripts/sandbox-lib.js` (the deploy check probes those).
+Endpoints are plain handlers (the HTTP port, `functions/src/http.ts`) listed in **`ENDPOINTS` in `functions/src/kernel.ts`**, which names no vendor. `functions/src/index.ts` only binds each one to a Firebase v2 function with `firebaseEndpoint(ENDPOINTS.<name>)` (`adapters/firebase/http.ts`, which applies `PUBLIC_ENDPOINT` so the function stays publicly invocable across deploys); `adapters/bun/serve.ts` binds the same table to one Bun server. New endpoints follow `functions/src/hello.ts`: handle CORS via `optionsResponse`, get roles via `getUserRoles` (both from `utilities.ts`), add the entry to `ENDPOINTS` (with `secrets` and `timeoutSeconds` when needed: the default limit is 60s, and `gen` has 300 because a proofread takes longer), export it from `index.ts` under the same name (a test checks), and add the name to `PLATFORM_FUNCTIONS` or `SITE_FUNCTIONS` in `scripts/sandbox-lib.js` (the deploy check probes those).
 
 ### Access Control System
 
@@ -154,7 +164,9 @@ Config files are split across two locations and are activated only by being impo
 - `functions/src/collections/` - core/internal collections (`module`, `config`, `role`)
 - `functions/src/` - content collections that also export endpoints (`blog.ts`, `page.ts`)
 
-To add a content type: create the config module, assign to `COLLECTIONS.<name>`, and add a side-effect `import './<name>'` in `functions/src/index.ts`. A collection with no config is fully inaccessible (deny-by-default).
+To add a content type: create the config module, assign to `COLLECTIONS.<name>`, and add a side-effect `import './<name>'` in `functions/src/kernel.ts`. A collection with no config is fully inaccessible (deny-by-default).
+
+**Production reads the platform collections' rules from the registry, not from this TypeScript** (`system:registry`, live since 2026-09-26). Their data form is `functions/src/collections/seed-configs.ts`, compiled by `install/compile.ts`; a change to `post`, `page`, `role`… goes in **both** places (the seed-parity tests compare them) and reaches production only when the registry is re-seeded with `scripts/seed-registry.js` (a dry run by default; `--apply` writes, and production also needs `--production`). That is a production write. Transforms are closed `derive` ops, not code: for example, a post's empty `author` is filled from the writer's published name or the write is refused (D24).
 
 ### Client Data Access
 

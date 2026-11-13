@@ -2,7 +2,7 @@ import { log } from './log'
 import { COLLECTIONS } from './collections'
 import { PLATFORM_HOOKS } from './collections/hooks'
 import { ALL } from './collections/access'
-import { ROLES } from './collections/roles'
+import { ROLES, principalIdentity, type UserRoles } from './collections/roles'
 import { getDocs } from './docs'
 import { getDoc } from './doc'
 import { config } from './config'
@@ -173,10 +173,17 @@ PLATFORM_HOOKS.post = { afterWrite: clearBlogCacheAfterWrite }
 COLLECTIONS.post = {
   schema: PostSchema,
   unique: ['title', 'path'],
-  async validate(data: any): Promise<Error | any> {
+  async validate(data: any, userRoles: UserRoles): Promise<Error | any> {
     // Auto-generate path from title if not provided
     if (!data.path) {
       data.path = data.title.toLocaleLowerCase().replace(/[^\w]+/g, '-')
+    }
+    // An empty author is the caller's published name, or the write is refused
+    // (the registry's `principal` derive op, required).
+    if (!String(data.author ?? '').trim()) {
+      const { name } = principalIdentity(userRoles)
+      if (!name) return new Error('author is empty and the caller has no published name to fill it with')
+      data.author = name
     }
 
     return data

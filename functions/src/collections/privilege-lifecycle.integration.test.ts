@@ -245,6 +245,8 @@ describe('uid and contact are BOTH grants — neither caches the other', () => {
     const created = await doc(subjectToken, 'POST', `post/${id}`, {
       title: `provenance ${id}`,
       content: 'x',
+      // This principal has no published name, so an empty author is refused.
+      author: 'Subject',
     })
     expect(created.status).toBe(200)
     const stored = await doc(ownerToken, 'GET', `post/${id}`)
