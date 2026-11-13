@@ -154,7 +154,7 @@ COLLECTIONS.post = {
 }
 ```
 
-Roles hierarchy: `public` → `author` → `editor` → `admin` → `developer` → `owner`
+Roles are **independent, not a hierarchy**: `getMethodAccess` collects the `public` grant plus a grant for each role the caller actually holds, and joins them. Roles are `public`, `author`, `editor`, `admin`, `developer`, `configurator` and `owner`. `owner` is authority over rules and roles (D4), and on its own it grants nothing on `post`; someone who administers and writes holds both roles.
 
 ### Collection Configs
 
