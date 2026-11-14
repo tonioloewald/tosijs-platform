@@ -8,6 +8,8 @@
  *
  * A static scan of the non-test sources under src/ and shared/ (what tsc
  * compiles into lib/), for `import … from`, `import(…)` and `require(…)`.
+ * The Bun host's own adapters are left out: they never deploy, and they
+ * import what only Bun provides (`bun:sqlite`, its built-in `ws`).
  */
 import { test, expect } from 'bun:test'
 import { builtinModules } from 'module'
@@ -28,10 +30,21 @@ function sources(dir: string): string[] {
 /** `@scope/name/sub` → `@scope/name`; `name/sub` → `name`. */
 const packageOf = (spec: string) => spec.split('/').slice(0, spec.startsWith('@') ? 2 : 1).join('/')
 
+/** Only on the Bun host; nothing deployed imports them. */
+const HOST_ONLY = [join(ROOT, 'src/adapters/bun'), join(ROOT, 'src/adapters/sqlite')]
+
+// The test runs under Bun, which counts packages it bundles as built in. Node,
+// where the functions run, does not: an import of one of these needs a
+// dependency like any other.
+const BUN_ONLY_BUILTINS = new Set(['ws', 'undici'])
+
 test('deployed code loads only production dependencies', () => {
-  const builtins = new Set(builtinModules)
+  const builtins = new Set(builtinModules.filter((name) => !BUN_ONLY_BUILTINS.has(name)))
   const loaded = new Map<string, string>()
-  for (const file of [...sources(join(ROOT, 'src')), ...sources(join(ROOT, 'shared'))]) {
+  const deployed = [...sources(join(ROOT, 'src')), ...sources(join(ROOT, 'shared'))].filter(
+    (file) => !HOST_ONLY.some((dir) => file.startsWith(dir + '/'))
+  )
+  for (const file of deployed) {
     const text = readFileSync(file, 'utf-8')
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '')
