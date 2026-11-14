@@ -36,6 +36,7 @@ time, carry the entry with the code.
 | [D23](#d23) | Render on store: SSR pages, nav, blog index, sitemap and RSS are rendered when content is written, served as stored files | this repo (renderers → stored ajs later) |
 | [D24](#d24) | A post always names its author: the server fills an empty one from the writer, or refuses the write | this repo + tosijs-blog |
 | [D25](#d25) | Server HTML of content is written fresh from an allowlist, never a parser's serialization | this repo (renderers → stored ajs later) |
+| [D26](#d26) | Game rooms: one room interface, two backends (our own host, and Firebase as an option whose scale is unproven); relay-only first | this repo + the room client + Manta |
 
 ---
 
@@ -677,3 +678,47 @@ would run for everyone.
   (#4063's next steps) use the same serializer.
 
 Board: #4063.
+
+## D26
+**Realtime game rooms have one client interface and two backends, both built: the platform's own
+host, and Firebase as an option for people who would rather pay Google. Rooms start relay-only.**
+*(2026-11-15, owner)* Takes up SOVEREIGN.md §D. Brings §F's step 5 (rooms) forward, because there
+is now a game to point at (Manta, #3374), as D13 asks.
+
+- **Not a stopgap.** The platform's own host comes first and is the reference: a WebSocket on the
+  Bun host (`adapters/bun/serve.ts`) with room state in memory. Firebase is built alongside it, as a
+  supported option and as the test of how well Firebase does this.
+- **Firebase's scale is a question, not a promise** (owner: "quite suspect"). Realtime Database
+  documents a limit of roughly 1,000 writes per second per database instance. One room of 8 players
+  sending 20 updates a second is 160 writes a second, so an instance holds only a handful of rooms,
+  and more means sharding rooms across instances. Bandwidth is billed per GB. The Firebase backend
+  is built to measure this (rooms per instance, cost per room-hour) before anyone is told it
+  scales.
+- **The Firebase backend is Realtime Database.** Cloud Functions end with each request and can't
+  hold a socket open, and Firestore's listeners are closed by its deny-all rules.
+- **One interface:** join, send, subscribe, leave. A game is written against it, never against
+  Realtime Database or the socket, so it runs on either host unchanged.
+- **Permissions are checked once, at join** (§D). Joining goes through our endpoint and the usual
+  role checks, and only the platform writes a room's member list. Inside the room, only members
+  can send. On Realtime Database a rule enforces that on every write, so removing a member cuts
+  them off at once.
+- **The exception, kept small:** until now every client read and write went through our functions.
+  On the Firebase backend, room traffic does not. Realtime Database holds room traffic and member
+  lists only, and its rules deny everything else. Nothing durable is kept there.
+- **Results go through `/doc`.** A mission's outcome and the unlocks it earns are documents, saved
+  through the normal write rules. Positions never reach a database.
+- **Relay-only first:** players' machines run the game, and the server passes messages along and
+  judges the results. It avoids §D's tick-rate ceiling, and the join and results path stays the
+  same when game logic later runs on the server.
+  - **The cost is cheating:** a client can report a result it didn't earn. Co-op and friends'
+    games accept that. Unlocks are checked for plausibility before they are saved. Leaderboards
+    and competitive play require every player's report to agree, or wait for game logic on the
+    server.
+- **Every room has limits:** a cap on message size and on messages per second, enforced by each
+  backend (on Realtime Database, by its rules). This stops a member flooding the room, and it
+  bounds the bandwidth a paying host is billed for.
+- **Open:** where the room client lives; whether the own-host backend can run on Cloud Run, where
+  a room's players are not guaranteed to reach the same instance; and the tick rate that game
+  logic on the server can sustain (measure before promising one).
+
+Board: #3374.
