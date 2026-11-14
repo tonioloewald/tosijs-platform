@@ -8,7 +8,8 @@
  * Ports installed: SQLite (`<data>/host.db`) for documents and the render
  * cache, a directory (`<data>/files`) for /blob and /stored, the console for
  * logs, and dev identities (adapters/local/identity.ts), which a browser
- * picks at /__dev/login (adapters/local/dev-login.ts).
+ * picks at /__dev/login (adapters/local/dev-login.ts). Game rooms are
+ * WebSockets at /rooms (rooms-socket.ts, D26).
  *
  * Dev identities are unsigned, so they are only ever installed on a loopback
  * address; on any other the server refuses to start with them. Without them
@@ -28,6 +29,7 @@ import { directoryFiles } from '../local/files'
 import { devIdentities } from '../local/identity'
 import { localApp, readHosting } from '../local/http'
 import { mountDevLogin } from '../local/dev-login'
+import { mountRoomSockets, type RoomSockets } from './rooms-socket'
 
 export interface LocalHostOptions {
   /** Where host.db and files/ live. */
@@ -44,6 +46,7 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost'])
 export interface LocalHost {
   server: Server
   url: string
+  rooms: RoomSockets
   close(): Promise<void>
 }
 
@@ -68,6 +71,7 @@ export async function serveLocal(options: LocalHostOptions): Promise<LocalHost> 
     extraRoutes: useDevIdentities ? mountDevLogin : undefined,
   })
   const server = createServer(app)
+  const rooms = mountRoomSockets(server)
   const uninstall = () => {
     setDataStoreProvider(null)
     setFilesProvider(null)
@@ -87,9 +91,11 @@ export async function serveLocal(options: LocalHostOptions): Promise<LocalHost> 
   const port = typeof address === 'object' && address ? address.port : options.port
   return {
     server,
+    rooms,
     url: `http://${host.includes(':') ? `[${host}]` : host}:${port}`,
     close: () =>
       new Promise<void>((done) => {
+        rooms.close()
         server.close(() => {
           uninstall()
           done()
