@@ -81,8 +81,8 @@ export interface RelayOptions {
 
 export interface Relay {
   connect(conn: Connection): ConnectionHandle
-  /** Close one member's connections to a room (they were removed from it). */
-  revoke(room: string, uid: string): void
+  /** Close one member's connections to a room (they were removed), or everyone's (it was closed). */
+  revoke(room: string, uid?: string): void
   /** Connected members of a room, for tests and diagnostics. */
   members(room: string): string[]
 }
@@ -226,10 +226,10 @@ export function createRelay(options: RelayOptions): Relay {
 
     revoke(room, uid) {
       for (const member of [...(rooms.get(room) ?? [])]) {
-        if (member.uid !== uid) continue
+        if (uid !== undefined && member.uid !== uid) continue
         // Out of the room now, not when the socket finishes closing.
         leave(member)
-        member.conn.close(CLOSE.revoked, 'removed from the room')
+        member.conn.close(CLOSE.revoked, uid === undefined ? 'the room was closed' : 'removed from the room')
       }
     },
 

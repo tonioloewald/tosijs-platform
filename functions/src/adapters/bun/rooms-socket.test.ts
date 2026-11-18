@@ -66,7 +66,11 @@ describe('rooms on the Bun host', () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'rooms-'))
     host = await serveLocal({ dataDir: dir, port: 0 })
-    await dataStore.set('room/match-1', { members: ['ada', 'bob'], limits: { messageBytes: 256 } })
+    await dataStore.set('room/match-1', {
+      members: ['ada', 'bob'],
+      limits: { messageBytes: 256 },
+      expires: new Date(Date.now() + 3600e3).toJSON(),
+    })
   })
   afterAll(async () => {
     await host.close()
@@ -111,6 +115,40 @@ describe('rooms on the Bun host', () => {
     const a = await open(ada)
     await a.next('joined')
     host.rooms.relay.revoke('match-1', 'ada')
+    expect((await a.closed).code).toBe(CLOSE.revoked)
+  })
+
+  test('the whole flow: make a room, share its code, play, be removed', async () => {
+    const room = (method: string, token: string | null, body?: unknown, query = '') =>
+      fetch(`${host.url}/demo-local/us-central1/room${query}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      })
+    expect((await room('POST', null, {})).status).toBe(401)
+    const madeResponse = await room('POST', ada, { maxMembers: 4 })
+    expect(madeResponse.status).toBe(201)
+    const made = await madeResponse.json()
+    expect(made).toMatchObject({ creator: 'ada', members: ['ada'], maxMembers: 4 })
+
+    expect((await room('PUT', bob, { id: made.id, code: 'WRONGCOD' })).status).toBe(404)
+    expect((await room('PUT', bob, { id: made.id, code: made.code })).status).toBe(200)
+    // Room documents are closed to /doc: no config, deny by default.
+    expect((await fetch(`${host.url}/demo-local/us-central1/doc?p=room/${made.id}`, { headers: { Authorization: `Bearer ${ada}` } })).status).toBe(404)
+
+    const a = await open(ada, made.id)
+    await a.next('joined')
+    const b = await open(bob, made.id)
+    await b.next('joined')
+    expect(await a.next('presence')).toEqual({ type: 'presence', joined: 'bob' })
+    b.send({ type: 'send', data: 'hello' })
+    expect(await a.next('message')).toEqual({ type: 'message', from: 'bob', data: 'hello' })
+
+    expect((await room('DELETE', ada, undefined, `?id=${made.id}&uid=bob`)).status).toBe(200)
+    expect((await b.closed).code).toBe(CLOSE.revoked)
+    expect(await a.next('presence')).toEqual({ type: 'presence', left: 'bob' })
+
+    expect((await room('DELETE', ada, undefined, `?id=${made.id}`)).status).toBe(200)
     expect((await a.closed).code).toBe(CLOSE.revoked)
   })
 

@@ -10,6 +10,7 @@ import type { Server } from 'http'
 import { WebSocketServer } from 'ws'
 import { createRelay, HOST_LIMITS, type Relay, type RelayOptions } from '../../rooms/relay'
 import { roomMembership } from '../../rooms/membership'
+import { setRoomRevoker } from '../../rooms/rooms'
 
 export const ROOMS_PATH = '/rooms'
 
@@ -20,6 +21,8 @@ export interface RoomSockets {
 
 export function mountRoomSockets(server: Server, options: Partial<RelayOptions> = {}): RoomSockets {
   const relay = createRelay({ authorizeJoin: roomMembership, ...options })
+  // Removing a member through /room closes their connection here.
+  const previousRevoker = setRoomRevoker((room, uid) => relay.revoke(room, uid))
   // An oversized frame is refused while it arrives, not after it is buffered.
   const wss = new WebSocketServer({ noServer: true, maxPayload: (options.hostLimits ?? HOST_LIMITS).messageBytes })
 
@@ -48,6 +51,7 @@ export function mountRoomSockets(server: Server, options: Partial<RelayOptions> 
     close: () => {
       for (const ws of wss.clients) ws.terminate()
       wss.close()
+      setRoomRevoker(previousRevoker)
     },
   }
 }

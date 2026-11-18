@@ -36,6 +36,7 @@ import { handleToken } from './auth/endpoint'
 import { handleAuthorize } from './auth/authorize-endpoint'
 import { handleBlobEndpoint } from './blob-endpoint'
 import { handleGen, GEN_SECRETS } from './gen'
+import { handleRoom } from './room-endpoint'
 
 export interface Endpoint {
   handler: Handler
@@ -62,6 +63,8 @@ export const ENDPOINTS = {
   token: { handler: handleToken },
   authorize: { handler: handleAuthorize },
   blob: { handler: handleBlobEndpoint },
+  // Game rooms (D26); their sockets are the host's (adapters/bun/rooms-socket.ts).
+  room: { handler: handleRoom },
   // A proofread rewrites the whole post; a long one takes Gemini over a minute.
   gen: { handler: handleGen, secrets: GEN_SECRETS, timeoutSeconds: 300 },
 } satisfies Record<string, Endpoint>

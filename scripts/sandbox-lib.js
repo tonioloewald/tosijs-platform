@@ -67,6 +67,8 @@ export const PLATFORM_FUNCTIONS = [
   'authorize',
   // Storage areas (#1136): files permissioned like collections.
   'blob',
+  // Game rooms (D26).
+  'room',
 ]
 
 /** Everything else this repo deploys — loewald.com's own surface. */

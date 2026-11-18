@@ -4,10 +4,10 @@
  *
  * A room is the document `room/<id>`:
  *
- *   { members: ['uid', …], limits?: { messageBytes?, perSecond? } }
+ *   { members: ['uid', …], expires, limits?: { messageBytes?, perSecond? } }
  *
- * The member list is written through `/doc`, under the `room` collection's
- * rules, never by a socket. Joining only reads it. An anonymous caller, a
+ * The member list is written only by rooms.ts (the `/room` endpoint), never
+ * by a socket. Joining only reads it. An anonymous caller, a
  * room that does not exist and a caller not on the list are all refused.
  */
 import { identity } from '../identity'
@@ -29,7 +29,9 @@ export const roomMembership: AuthorizeJoin = async (room, token) => {
   }
   const doc = await dataStore.get(`${ROOM_COLLECTION}/${room}`)
   // The same answer for "no such room" and "not a member": a room's existence is not public.
-  const members = doc.exists && Array.isArray(doc.data.members) ? doc.data.members : []
+  // …and an expired room is as gone as a missing one.
+  const open = doc.exists && Date.parse(String(doc.data.expires)) > Date.now()
+  const members = open && Array.isArray(doc.data.members) ? doc.data.members : []
   if (!members.includes(uid)) return { ok: false, reason: 'not a member of this room' }
   const limits = doc.data.limits
   return { ok: true, uid, limits: limits && typeof limits === 'object' ? (limits as Partial<RoomLimits>) : undefined }
