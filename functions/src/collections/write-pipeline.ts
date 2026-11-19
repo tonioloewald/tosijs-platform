@@ -21,10 +21,12 @@
  * is trusted code: it is the thing a silent wrong value would persist.
  *
  * NOTE (2026-09-06): "rules stay predicates" is NOT the same as "rules are safe".
- * tjs-lang#52 corrupts predicates too, and upstream coerces a corrupted result to
- * a GRANT (tjs-lang#54) — so when the rule half is built, its host must interpret
- * results as `result === true`, never `!!result`, and rules must avoid bare
- * dot-path returns. Pinned in `tjs-lang.baseline.test.ts` §5-§6.
+ * tjs-lang#52 corrupted predicates too, and upstream coerced a corrupted result
+ * to a GRANT (tjs-lang#54). Both are fixed (0.13.12), as are the bare-binding
+ * return and #59 (0.14.0), but a failed run still puts a truthy error object in
+ * `result`. So when the rule half is built, its host checks `r.error` and
+ * interprets results as `result === true`, never `!!result`. Pinned in
+ * `tjs-lang.baseline.test.ts` §2 and §7.
  */
 import { validate as schemaValidate } from 'tosijs-schema'
 import type { CollectionConfig } from './access.js'

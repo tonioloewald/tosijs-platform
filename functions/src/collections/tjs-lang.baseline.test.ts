@@ -13,12 +13,16 @@
  *     moved; stop and re-derive.
  *  2. REGRESSION — bugs found in the wild, now FIXED upstream, kept forever as
  *     conformance cases so they cannot return silently (tjs-lang#52/#54, fixed
- *     in 0.13.12). This is the ratchet: every interpreter bug found becomes a
- *     permanent case.
+ *     in 0.13.12; the bare-binding return and #59, fixed in 0.14.0). This is
+ *     the ratchet: every interpreter bug found becomes a permanent case.
  *  3. TRIPWIRE — behaviour still broken upstream, asserted as broken *on
- *     purpose*, so the suite goes red the day it is fixed. §6 holds the one
- *     remaining case. The §4/§5 tripwires fired on 0.13.12 and were converted to
- *     regressions, which is the mechanism working as intended.
+ *     purpose*, so the suite goes red the day it is fixed. None remain on
+ *     0.14.0: the §4/§5 tripwires fired on 0.13.12 and the §6 ones on 0.14.0,
+ *     and each was converted to a regression, which is the mechanism working
+ *     as intended.
+ *
+ * Pinned to an exact version (functions/package.json): a new tjs-lang is
+ * adopted by re-running this file, not by a semver range moving underneath it.
  *
  * Run: cd functions && bun test src/collections/tjs-lang.baseline.test.ts
  */
@@ -40,7 +44,7 @@ const FUEL = 5000
 // survived only because each used a shape #52 did not corrupt.
 //
 // Both are fixed in 0.13.12 (#52, #54 closed; verified 2026-09-11) and are now
-// permanent regression cases in §4/§5. §6 holds the one residual.
+// permanent regression cases in §4/§5. The last residual (§6) is fixed in 0.14.0.
 describe('relied-on: pure boolean predicates', () => {
   test('role membership evaluates correctly', async () => {
     const r = await Eval({
@@ -99,10 +103,53 @@ describe('relied-on: sandbox guarantees', () => {
   test('oversized source is refused before transpilation (denial-of-wallet guard)', async () => {
     // New in 0.13.x: transpilation runs BEFORE fuel/timeout apply, so source
     // length is capped separately. Relied on for any hosted stored-proc endpoint.
-    const big = 'const x = 1\n'.repeat(6000) + 'return x' // ~72KB > 64KB default
+    // The default limit was 64 KB through 0.13; it is 8 KB from 0.14.0.
+    const big = 'const x = 1\n'.repeat(800) + 'return x' // ~9.6 KB > 8 KB default
     const r = await Eval({ code: big, fuel: 100, timeoutMs: 500 })
     expect(r.error).toBeDefined()
     expect(r.error?.message ?? '').toMatch(/byte|limit|maxSourceBytes/i)
+  })
+
+  // 0.14.0 (#3986): before it, a deadline could not interrupt a run that only
+  // computes, so fuel was the only real limit.
+  test('timeoutMs stops a run that only computes', async () => {
+    const started = Date.now()
+    const r = await Eval({ code: 'let i = 0\nwhile (i < 100000000) { i = i + 1 }\nreturn i', fuel: 1e12, timeoutMs: 200 })
+    expect(r.error?.message ?? '').toMatch(/timeout/i)
+    expect(Date.now() - started).toBeLessThan(2000)
+  })
+
+  // 0.14.0: an undeclared name is a transpile error. On 0.13.12, `return nope`
+  // returned the string 'nope': truthy, so a typo in a rule granted.
+  test('an undeclared name is refused, not returned as its own name', async () => {
+    const r = await Eval({ code: 'return nope', fuel: FUEL })
+    expect(r.error?.message ?? '').toMatch(/not defined/)
+    expect(r.result).toBeUndefined()
+  })
+
+  // 0.14.0 (#4091): the clock and the random source are capabilities. Eval
+  // grants both by default; a host that wants a rule to give the same answer
+  // every time withholds them.
+  test('a rule can be denied the clock and the random source', async () => {
+    const clock = await Eval({ code: 'return Date.now() > 0', fuel: FUEL, capabilities: { clock: undefined } })
+    const random = await Eval({ code: 'return Math.random() < 2', fuel: FUEL, capabilities: { random: undefined } })
+    expect(clock.error?.message ?? '').toMatch(/clock/)
+    expect(random.error?.message ?? '').toMatch(/random/)
+  })
+
+  // 0.14.0 (#4099): no route puts an own `__proto__` key into a result.
+  test('an own __proto__ key never reaches the result', async () => {
+    const r = await Eval({ code: `return JSON.parse('{"__proto__": {"admin": true}}')`, fuel: FUEL })
+    expect(r.error?.message ?? '').toMatch(/__proto__/)
+  })
+
+  // On every version: a failed run's `result` is an error OBJECT, which is
+  // truthy. A host checks `r.error` first, and treats only `true` as a yes (§7).
+  test('a failed run puts a truthy error object in result: check r.error', async () => {
+    const r = await Eval({ code: 'let i = 0\nwhile (true) { i = i + 1 }\nreturn i', fuel: 500 })
+    expect(r.error).toBeDefined()
+    expect(Boolean(r.result)).toBe(true) // the hazard
+    expect(r.result === true).toBe(false) // why §7's rule is safe
   })
 })
 
@@ -257,36 +304,25 @@ describe('regression: a deny rule denies (tjs-lang#54)', () => {
   }
 })
 
-// ── 6. RESIDUAL: a bare context binding still returns its own name ─────────
+// ── 6. REGRESSION CASES — fixed in 0.14.0 ───────────────────────────────
 //
-// Found 2026-09-11 while verifying the #52 fix. `return published`, where
-// `published` is a context binding rather than a property access, still yields
-// the STRING 'published' instead of the bound value — so it is truthy and would
-// still fail open at an RBAC boundary. Narrower than #52 (property access is
-// fixed; only the bare-identifier form remains) but the same class.
+// Both were tripwires, asserting the defect, until 0.14.0 fixed them.
 //
-// TRIPWIRE: this asserts the defect. It fails when upstream fixes it.
-describe('tripwire: bare context binding still returns its name', () => {
-  test('return <binding> yields the identifier, not the value', async () => {
+// Found 2026-09-11 while verifying the #52 fix: `return published`, where
+// `published` is a context binding rather than a property access, yielded the
+// STRING 'published', which is truthy, so a rule written that way failed open.
+describe('regression: a bare context binding returns its value (fixed 0.14.0)', () => {
+  test('return <binding> yields the value, not the identifier', async () => {
     const r = await Eval({
       code: 'return published',
       context: { published: false },
       fuel: FUEL,
     })
     expect(r.error).toBeUndefined()
-    expect(r.result).toBe('published') // BROKEN: should be false
+    expect(r.result).toBe(false)
   })
 
-  test('so a rule written that way would still grant', async () => {
-    const r = await Eval({
-      code: 'return published',
-      context: { published: false },
-      fuel: FUEL,
-    })
-    expect(Boolean(r.result)).toBe(true) // the hazard, spelled out
-  })
-
-  test('the property-access form is correct, so prefer it', async () => {
+  test('the property-access form is correct too', async () => {
     const r = await Eval({
       code: 'return doc.published',
       context: { doc: { published: false } },
@@ -296,24 +332,22 @@ describe('tripwire: bare context binding still returns its name', () => {
   })
 })
 
-// Silent wrong results found 2026-10-01 while assessing ajs for render-on-store
-// (tjs-lang#59; present in 0.13.12 and 0.14.0-rc.1). Compound assignment stores
-// only the RHS, and reassigning an outer `let` inside for…of is lost. Any ajs
-// that ACCUMULATES (renderers, counters) must use `x = x + y` in a `while`
-// loop, or mutate through a method (push), until these fail — which is the
-// good news: then delete this note and the workaround.
-describe('tripwire: compound assignment and for…of reassignment (tjs-lang#59)', () => {
+// Found 2026-10-01 while assessing ajs for render-on-store (tjs-lang#59):
+// compound assignment stored only the right-hand side, and reassigning an outer
+// `let` inside for…of was lost. Accumulating code (renderers, counters) needed
+// workarounds until 0.14.0.
+describe('regression: compound assignment and for…of reassignment (tjs-lang#59, fixed 0.14.0)', () => {
   const run = async (code: string) => (await Eval({ code, fuel: FUEL })).result
-  test('`+=` stores only the right-hand side', async () => {
-    expect(await run(`let s = 'a'; s += 'b'; return s`)).toBe('b') // BROKEN: should be 'ab'
+  test('`+=` adds', async () => {
+    expect(await run(`let s = 'a'; s += 'b'; return s`)).toBe('ab')
   })
-  test('`-=` too', async () => {
-    expect(await run(`let n = 5; n -= 2; return n`)).toBe(2) // BROKEN: should be 3
+  test('`-=` subtracts', async () => {
+    expect(await run(`let n = 5; n -= 2; return n`)).toBe(3)
   })
-  test('reassigning an outer let inside for…of is lost', async () => {
-    expect(await run(`let s = ''; for (const w of ['a','b']) { s = s + w } return s`)).toBe('') // BROKEN: 'ab'
+  test('reassigning an outer let inside for…of keeps the value', async () => {
+    expect(await run(`let s = ''; for (const w of ['a','b']) { s = s + w } return s`)).toBe('ab')
   })
-  test('the workarounds are correct, so use them', async () => {
+  test('the old workarounds still work', async () => {
     expect(await run(`let s = ''; let i = 0; while (i < 2) { s = s + 'x'; i = i + 1 } return s`)).toBe('xx')
     expect(await run(`const out = []; for (const w of ['a','b']) { out.push(w) } return out.join('')`)).toBe('ab')
   })
@@ -321,8 +355,8 @@ describe('tripwire: compound assignment and for…of reassignment (tjs-lang#59)'
 
 // ── 7. The invariant our host must enforce regardless ───────────────────────
 // UNIVERSAL-ENDPOINT.md §4.2: "non-boolean return evaluates as false". Upstream
-// coerces with `!!`; we must not. This is belt-and-braces now that #52 is fixed,
-// and it is what makes §6's residual harmless at our boundary.
+// coerces with `!!`; we must not. Belt-and-braces now that #52 and §6 are
+// fixed, and still needed: a failed run's result is a truthy error object (§2).
 describe('isWriteAllowed: a non-boolean result must deny', () => {
   const interpretRuleResult = (result: unknown): boolean => result === true
 

@@ -9,10 +9,12 @@
  *
  * ## v1 is DECLARATIVE ONLY
  *
- * No stored ajs. tjs-lang is a validated but entirely unwired dependency here,
- * and tjs-lang#52/#54 corrupt transforms *and* predicates silently while
- * upstream coerces a corrupted result to a GRANT. Shipping caller-authored code
- * on top of that is not a trade worth making, so `functions` in a manifest is a
+ * No stored ajs. tjs-lang is a validated but entirely unwired dependency here.
+ * When this was decided, tjs-lang#52/#54 corrupted transforms *and* predicates
+ * silently while upstream coerced a corrupted result to a GRANT (fixed in
+ * 0.13.12, with the last silent-value bugs fixed in 0.14.0; see
+ * tjs-lang.baseline.test.ts). Shipping caller-authored code before a host for
+ * it exists is still not a trade worth making, so `functions` in a manifest is a
  * HARD FAILURE rather than an ignored field — silently dropping the executable
  * half of someone's manifest and reporting success is the worst option.
  *
