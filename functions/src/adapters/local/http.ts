@@ -96,7 +96,7 @@ const matcher = (rule: { source?: string; regex?: string }) =>
   rule.regex ? new RegExp(rule.regex) : globToRegExp(rule.source ?? '')
 
 /** Body parsing as the functions framework does it, keeping `rawBody`. */
-function parseBodies(app: express.Express) {
+export function parseBodies(app: express.Express) {
   const verify = (req: unknown, _res: unknown, buf: Buffer) => {
     ;(req as HttpRequest).rawBody = buf
   }
@@ -113,7 +113,7 @@ function parseBodies(app: express.Express) {
 }
 
 /** Run a handler; a throw or rejection is a 500, never a hung request. */
-const run = (name: string, handler: Handler) => (req: Request, res: Response) => {
+export const run = (name: string, handler: Handler) => (req: Request, res: Response) => {
   const failed = (e: unknown) => {
     log.error(`${name}: unhandled`, e)
     if (!res.headersSent) res.status(500).send('Internal Server Error')

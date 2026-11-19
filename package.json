@@ -30,6 +30,7 @@
     "seed": "bun scripts/seed-emulators.js",
     "serve:local": "bun functions/src/adapters/bun/serve.ts",
     "import:local": "bun functions/src/adapters/bun/import-backup.ts",
+    "build:rooms-host": "bun build --compile --target=bun-linux-x64-baseline functions/src/adapters/bun/rooms-host.ts --outfile build/rooms-host/tosijs-rooms-host",
     "seed-clear": "bun scripts/seed-emulators.js --clear",
     "seed-production": "bun scripts/seed-production.js",
     "backup": "bun scripts/backup-firestore.js",

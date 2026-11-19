@@ -210,3 +210,18 @@ export async function closeRoom(uid: string, id: unknown, deps = DEFAULT_DEPS): 
   revoker(found.id)
   return { ok: true, value: { id: found.id } }
 }
+
+/**
+ * Delete rooms that have expired, up to `limit` at a time, closing any
+ * connection still in them; returns how many went. Rooms are otherwise only
+ * swept when their creator makes another, and a guest (adapters/local/
+ * guest-identity.ts) may never come back.
+ */
+export async function sweepExpiredRooms(deps = DEFAULT_DEPS, limit = 500): Promise<number> {
+  // Strictly before a millisecond from now: expired as isOpen counts it.
+  const now = new Date(deps.now() + 1).toISOString()
+  const expired = await deps.store.query(ROOM_COLLECTION, { lessThan: { field: 'expires', value: now }, orderBy: 'expires asc', limit })
+  await Promise.all(expired.map((d) => deps.store.delete(d.path)))
+  for (const d of expired) revoker(d.path.slice(ROOM_COLLECTION.length + 1))
+  return expired.length
+}

@@ -13,6 +13,7 @@ import {
   removeMember,
   closeRoom,
   setRoomRevoker,
+  sweepExpiredRooms,
   MAX_OPEN_ROOMS,
   MAX_MEMBERS,
   ROOM_LIFETIME_MS,
@@ -138,5 +139,19 @@ describe('leaving and removing', () => {
     expect(await closeRoom('ada', room.id, deps)).toEqual({ ok: true, value: { id: room.id } })
     expect(revoked).toEqual([[room.id, undefined]])
     expect((await deps.store.get(`room/${room.id}`)).exists).toBe(false)
+  })
+})
+
+describe('sweeping', () => {
+  test('expired rooms are deleted and their connections closed; open ones stay', async () => {
+    const old = await made('ada')
+    clock += ROOM_LIFETIME_MS / 2
+    const young = await made('bob')
+    clock += ROOM_LIFETIME_MS / 2
+    expect(await sweepExpiredRooms(deps)).toBe(1)
+    expect(revoked).toEqual([[old.id, undefined]])
+    expect((await deps.store.get(`room/${old.id}`)).exists).toBe(false)
+    expect((await deps.store.get(`room/${young.id}`)).exists).toBe(true)
+    expect(await sweepExpiredRooms(deps)).toBe(0)
   })
 })
