@@ -47,6 +47,13 @@ export interface Endpoint {
 }
 
 /** Every endpoint by its name: the deployed function's name, and its path on the Bun server. */
+/**
+ * Endpoints only the Bun host serves; index.ts does not bind them to Firebase.
+ * `room` is useless there until rooms have a Firebase socket (D26), and v1 of
+ * rooms does not use Firebase.
+ */
+export const HOST_ONLY_ENDPOINTS = ['room']
+
 export const ENDPOINTS = {
   doc: { handler: handleDoc },
   docs: { handler: handleDocs },

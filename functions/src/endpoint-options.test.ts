@@ -31,12 +31,14 @@ describe('every HTTP endpoint is publicly invocable, declared in code', () => {
   })
 
   test('index.ts binds every endpoint in kernel.ts, each under its own name', () => {
-    // The Bun server serves ENDPOINTS by name; Firebase must deploy the same set.
+    // The Bun server serves ENDPOINTS by name; Firebase deploys the same set, less HOST_ONLY_ENDPOINTS.
     const kernel = readFileSync(join(SRC, 'kernel.ts'), 'utf-8')
     const table = kernel.slice(kernel.indexOf('export const ENDPOINTS'))
     const names = [...table.matchAll(/^ {2}(\w+): \{ handler:/gm)].map((m) => m[1])
     expect(names.length).toBeGreaterThanOrEqual(15)
-    expect(boundAs.map((m) => m[1]).sort()).toEqual([...names].sort())
+    const hostOnly = [...(kernel.match(/HOST_ONLY_ENDPOINTS = \[([^\]]*)\]/)?.[1] ?? '').matchAll(/'(\w+)'/g)].map((m) => m[1])
+    expect(hostOnly.every((n) => names.includes(n))).toBe(true)
+    expect(boundAs.map((m) => m[1]).sort()).toEqual(names.filter((n) => !hostOnly.includes(n)).sort())
     expect(boundAs.filter((m) => m[1] !== m[2])).toEqual([])
   })
 
