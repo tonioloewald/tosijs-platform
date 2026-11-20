@@ -37,6 +37,7 @@ time, carry the entry with the code.
 | [D24](#d24) | A post always names its author: the server fills an empty one from the writer, or refuses the write | this repo + tosijs-blog |
 | [D25](#d25) | Server HTML of content is written fresh from an allowlist, never a parser's serialization | this repo (renderers → stored ajs later) |
 | [D26](#d26) | Game rooms: one room interface, two backends (our own host, and Firebase as an option whose scale is unproven); relay-only first | this repo + the room client + Manta |
+| [D27](#d27) | Rooms v1: our host only, on the preview box, with host-issued guest tokens; Firebase deferred (amends D26) | this repo + tosijs-rooms |
 
 ---
 
@@ -428,6 +429,10 @@ requests — all serializable. No stored ajs: tjs-lang is a validated but unwire
 tjs-lang#52/#54 corrupt transforms *and* predicates silently while upstream coerces a corrupted
 result to a GRANT. Shipping caller-authored code on that is not a trade worth making.
 
+*Status (2026-11-19):* those bugs are fixed (#52 and #54 in 0.13.12; bare bindings in 0.14.0, now
+pinned), so this reason for refusing `functions` is gone. The refusal stands until stored ajs has
+a host; lifting it is its own decision.
+
 Refusing rather than ignoring matters: silently dropping the executable half of someone's manifest
 and reporting success is the worst available outcome.
 
@@ -616,7 +621,7 @@ the visible-pages list for the nav, the blog cache. Its handlers once raced each
   settings the client components use, so server HTML and client rendering cannot drift. Why: ajs
   refuses classes, `new`, callbacks and `for` loops, so `marked` cannot be transpiled, and a
   hand-written parser would have to match the client exactly (and tjs-lang#59 makes accumulating
-  code silently wrong today). Until stored ajs exists, the TypeScript renderers call `marked`
+  code silently wrong today; *fixed in 0.14.0, 2026-11-19*). Until stored ajs exists, the TypeScript renderers call `marked`
   directly, the same function the capability will wrap.
 
 Board: #2698 (design + prototype).
@@ -720,5 +725,37 @@ is now a game to point at (Manta, #3374), as D13 asks.
 - **Open:** where the room client lives; whether the own-host backend can run on Cloud Run, where
   a room's players are not guaranteed to reach the same instance; and the tick rate that game
   logic on the server can sustain (measure before promising one).
+
+Board: #3374. **Amended by [D27](#d27)** (v1 is our host only; the client is `tosijs-rooms`).
+
+## D27
+**Rooms v1 is our own host only, on the preview box, and its players are guests the host signs
+tokens for. The Firebase backend is deferred, not dropped.** *(2026-11-19, owner)* Amends D26,
+and closes its first open question.
+
+- **No Firebase in v1** (owner). `/room` is a host-only endpoint (`HOST_ONLY_ENDPOINTS` in
+  `kernel.ts`): Firebase does not deploy it, because rooms there would have no socket until the
+  Realtime Database backend exists. D26's reasoning for that backend stands; it is built when
+  someone wants to pay Google for rooms, and its scale is measured then.
+- **Where it runs:** the box the tunnel uses, at `rooms.dev.tosijs.net`. It is a rooms-only host
+  (`adapters/bun/rooms-host.ts`): `/guest`, `/room` and the `/rooms` socket, on SQLite, and no
+  other endpoint, so nothing else on the platform is reachable through it. It is compiled to one
+  executable with Bun inside and runs as its own unprivileged systemd service behind Caddy
+  (`scripts/deploy-rooms-host.ts`, dry run by default). Live since 2026-11-20.
+- **Guests, not accounts** (owner: the first players will almost all be synthetic agents, so the
+  host should issue tokens). `POST /guest` returns an HMAC-signed token that lasts as long as a
+  room, 24 hours. A guest token proves only that its holder is the same guest as before, which is
+  all a relay-only room gated by its code needs. A guest has no claims and can be given none, so
+  guest identities must never be installed on a host that grants roles. Deleting the host's secret
+  signs every guest out.
+- **What that costs:** anyone can mint guests, so the limits do the work: the per-address rate
+  limit (100 requests a minute, shared by `/guest` and `/room`; Caddy sets the address, so a client
+  cannot claim another), 5 open rooms per guest, and an hourly sweep that deletes expired rooms
+  and closes their connections. A swarm of agents from one machine shares one address's limit.
+- **The client is `tosijs-rooms`** (its own repo, Apache-2.0), answering D26's "where the room
+  client lives". It does not wrap `/guest`; a game or agent posts to it directly.
+- **Still open:** room expiry is enforced by the hourly sweep, not at the moment a room expires;
+  sign-in for real players (Firebase Auth tokens, or the host's own accounts) when a game needs
+  identities that persist; and D26's Cloud Run and tick-rate questions.
 
 Board: #3374.

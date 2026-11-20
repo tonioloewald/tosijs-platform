@@ -39,9 +39,13 @@ as cached SSR HTML. Consequences for any work here:
 - **The backend is where value concentrates.** `doc.ts`/`docs.ts` (the universal document atom),
   the auth atom (`user.ts`), and hardened `gen`/`stored` are the trusted core (TCB); the backend
   half of tjs-lang's reference universal endpoint consolidates *here*.
-- **The ajs/security design is NOT frozen.** It is grounded on **tjs-lang 0.13.1** (released; shape
-  settled, patches possible) and is *provisional* — re-validate against 0.13.1's primitives (re-run
-  the VM spike) before building backend internals. The old "design invariants — don't relitigate"
+- **The ajs/security design is NOT frozen.** It is grounded on **tjs-lang**, pinned exactly at
+  **0.14.0** in `functions/package.json` (2026-11-19), and is *provisional*: re-validate against the
+  pinned version's primitives before building backend internals. The VM spike is a test,
+  `functions/src/collections/tjs-lang.baseline.test.ts`, so re-validating is `bun test` on it. The
+  silent-value bugs (#52, #54 and #59, and bare bindings) are fixed upstream and kept there as
+  regression cases. A failed run still returns a truthy `{$error: true}`, so a rule host checks
+  `r.error` first. The old "design invariants — don't relitigate"
   framing is **retired**; see ROADMAP.md.
 - **Testability falls out of the split:** once unique code is all backend and ajs is deterministic
   (mock the capabilities), the write-path oracle (`validate.test.ts`, `access.test.ts`,
@@ -133,8 +137,11 @@ All Firestore access goes through Cloud Functions, not the client SDK:
 - **`/cachedQuery`** - Cached collection queries
 - **`/sitemap`** - Sitemap generation
 - **`/state`**, **`/user`** - App state and user/role management
+- **`/room`** + the **`/rooms`** WebSocket - Game rooms (D26, D27): make, join, leave and close rooms, and relay messages between members. **Host-only** (`HOST_ONLY_ENDPOINTS` in `kernel.ts`): Firebase does not deploy it, since Cloud Functions cannot hold a socket. Rules in `rooms/rooms.ts`, relay in `rooms/relay.ts`, socket in `adapters/bun/rooms-socket.ts`; the client is the `tosijs-rooms` package
 
-Endpoints are plain handlers (the HTTP port, `functions/src/http.ts`) listed in **`ENDPOINTS` in `functions/src/kernel.ts`**, which names no vendor. `functions/src/index.ts` only binds each one to a Firebase v2 function with `firebaseEndpoint(ENDPOINTS.<name>)` (`adapters/firebase/http.ts`, which applies `PUBLIC_ENDPOINT` so the function stays publicly invocable across deploys); `adapters/bun/serve.ts` binds the same table to one Bun server. New endpoints follow `functions/src/hello.ts`: handle CORS via `optionsResponse`, get roles via `getUserRoles` (both from `utilities.ts`), add the entry to `ENDPOINTS` (with `secrets` and `timeoutSeconds` when needed: the default limit is 60s, and `gen` has 300 because a proofread takes longer), export it from `index.ts` under the same name (a test checks), and add the name to `PLATFORM_FUNCTIONS` or `SITE_FUNCTIONS` in `scripts/sandbox-lib.js` (the deploy check probes those).
+**The rooms host** (`adapters/bun/rooms-host.ts`, D27) serves `/guest`, `/room` and `/rooms` and nothing else, on SQLite, with host-signed guest tokens (`adapters/local/guest-identity.ts`) instead of accounts. It runs on the preview box at `rooms.dev.tosijs.net`, compiled to one executable (`bun run build:rooms-host`) and deployed with `bun scripts/deploy-rooms-host.ts --go` (dry run without `--go`; needs `PREVIEW_HOST` from `~/local-secrets/tosijs-preview.env`). That is a deploy to a box other projects share: the script validates Caddy before reloading and rolls back a binary that fails `/health`.
+
+Endpoints are plain handlers (the HTTP port, `functions/src/http.ts`) listed in **`ENDPOINTS` in `functions/src/kernel.ts`**, which names no vendor. `functions/src/index.ts` only binds each one to a Firebase v2 function with `firebaseEndpoint(ENDPOINTS.<name>)` (`adapters/firebase/http.ts`, which applies `PUBLIC_ENDPOINT` so the function stays publicly invocable across deploys); `adapters/bun/serve.ts` binds the same table to one Bun server. New endpoints follow `functions/src/hello.ts`: handle CORS via `optionsResponse`, get roles via `getUserRoles` (both from `utilities.ts`), add the entry to `ENDPOINTS` (with `secrets` and `timeoutSeconds` when needed: the default limit is 60s, and `gen` has 300 because a proofread takes longer), export it from `index.ts` under the same name (a test checks; an endpoint only the Bun host can serve goes in `HOST_ONLY_ENDPOINTS` instead), and add the name to `PLATFORM_FUNCTIONS` or `SITE_FUNCTIONS` in `scripts/sandbox-lib.js` (the deploy check probes those).
 
 ### Access Control System
 

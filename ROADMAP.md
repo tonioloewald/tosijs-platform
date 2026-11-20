@@ -170,10 +170,10 @@ the capability model — are the product. Client-side polish is not.
    everything else is a collection config or a stored ajs call.
 5. **Adopt tosijs-ui's `DocStore` interface as the contract.** Implement `RestStore`/`DbStore` to
    satisfy their seam (`readSource`/`writeSource`/`createDoc`) so it plugs in wholesale.
-6. **Ground the ajs/security design on tjs-lang 0.13.1 — don't re-freeze it.** 0.13.1 is released,
-   shape settled (patches possible). The prior "14 settled invariants, do not relitigate" framing
-   is retired — carry that reasoning as *design intent to re-validate against 0.13.1's primitives*,
-   and re-run the VM spike against 0.13.1 before building backend internals.
+6. **Ground the ajs/security design on tjs-lang (now pinned at 0.14.0) — don't re-freeze it.** The
+   prior "14 settled invariants, do not relitigate" framing is retired — carry that reasoning as
+   *design intent to re-validate against the pinned version's primitives*, and re-run the VM spike
+   (`tjs-lang.baseline.test.ts`) against it before building backend internals.
 
 ## Serving model
 
@@ -244,7 +244,7 @@ this is the target, not today.)
 - **Stays as the backend core:** `/doc`/`/docs` (the substrate), the auth atom (`user.ts`), the VM
   host, hardened `gen`/`stored`, collection configs, and stored ajs.
 
-## The ajs / security design — grounded on tjs-lang 0.13.1 (not re-frozen)
+## The ajs / security design — grounded on tjs-lang, pinned at 0.14.0 (not re-frozen)
 
 **The concrete spec now lives in [UNIVERSAL-ENDPOINT.md](UNIVERSAL-ENDPOINT.md)** (doc / docs /
 procedures; the `beforeWrite` transform + boolean `isWriteAllowed` write pipeline; body-vs-envelope;
@@ -261,6 +261,14 @@ discriminated-union write outcomes; buffered/transactional capabilities) capture
 pressure and much will likely persist **in some form** — but 0.13.1 (released; shape settled,
 patches possible) reworks the VM/capability/typing model, so treat it as **design intent to
 re-validate against 0.13.1's primitives**.
+
+**Status (2026-11-19): functions pins tjs-lang 0.14.0 exactly.** Every silent-value bug below is
+fixed upstream: spread and dot-path returns (#52, #54) in 0.13.12, and bare bindings and #59 in
+0.14.0. Their tripwires fired and are regression cases now; none remain. 0.14.0 also stops
+compute-only runs at `timeoutMs`, makes clock and random capabilities a rule can be denied, refuses
+`__proto__`, and turns an undeclared name into a transpile error. One shape still bites: a failed
+run's result is a truthy `{$error: true}`, so the host reads `r.error` before the value. The
+history below is kept as the reasoning.
 
 **Action:** ~~re-read 0.13.1's model, then re-run the VM spike~~ — **done 2026-09-05 on 0.13.11**
 (see Phase 0 below). The `module.validate` oracle ports cleanly *using the #52 workarounds*, and the

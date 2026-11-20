@@ -472,3 +472,9 @@ otherwise:
 5. **Rooms**, only once there is a game to point at. Everything above has a consumer today; this does
    not, and building it first would be exactly the premature-requirements error the sovereign
    argument is against.
+
+   **Update (2026-11-20):** that game arrived (Manta, board #3374), so rooms came forward, ahead of
+   steps 1–4 (DECISIONS D26, D27). They needed none of them: rooms are relay-only, membership is
+   checked once at join (§D), and the host keeps them in SQLite with host-signed guest tokens rather
+   than Postgres and passkeys. The rooms host is live at `rooms.dev.tosijs.net`. Steps 1–4 keep
+   their order.
