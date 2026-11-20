@@ -1,6 +1,7 @@
 import { Component as WebComponent, ElementCreator } from 'tosijs'
 
 export class TosiEsm extends WebComponent {
+  static preferredTagName = 'tosi-esm'
   module = ''
   version = ''
   method = ''
@@ -49,6 +50,4 @@ export class TosiEsm extends WebComponent {
   }
 }
 
-export const tosiEsm = TosiEsm.elementCreator({
-  tag: 'tosi-esm',
-}) as ElementCreator<TosiEsm>
+export const tosiEsm = TosiEsm.elementCreator() as ElementCreator<TosiEsm>

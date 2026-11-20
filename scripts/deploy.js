@@ -33,6 +33,7 @@
 import fs from 'fs'
 import path from 'path'
 import * as lib from './sandbox-lib.js'
+import { moduleGraph, fetchModule } from './module-graph.js'
 
 const { has, val } = lib.parseArgs(process.argv)
 const alias = val('alias') ?? 'default'
@@ -149,6 +150,14 @@ if (bucket) {
 const site = await fetch(`https://${projectId}.web.app/`).catch(() => ({ status: 0 }))
 console.log(`   ${site.status === 200 ? 'ok ' : 'BAD'} site ${site.status}`)
 if (site.status !== 200) problems.push(`site: ${site.status}`)
+
+// The chunks load on demand (the editor, the Markdown viewer), so a missing
+// one breaks only whoever opens it, and Safari keeps the failure until reload.
+if (site.status === 200) {
+  const graph = await moduleGraph(`https://${projectId}.web.app/index.js`, fetchModule)
+  console.log(`   ${graph.problems.length ? 'BAD' : 'ok '} client modules: ${graph.modules.length} reachable${graph.problems.length ? `, ${graph.problems.length} broken` : ''}`)
+  for (const problem of graph.problems) problems.push(`client module ${problem}`)
+}
 
 // Render on store serves a post as readable HTML, not only as JSON for the
 // client (#4063). Silent if it breaks: people see the app, fetchers see nothing.

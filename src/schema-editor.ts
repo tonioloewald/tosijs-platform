@@ -56,6 +56,82 @@ const shouldShowField = (key: string, schema: JSONSchema): boolean => {
 }
 
 export class SchemaEditor extends Component<SchemaEditorParts> {
+  static preferredTagName = 'schema-editor'
+  static lightStyleSpec = {
+    ':host': {
+      display: 'block',
+    },
+    ':host .schema-editor-form': {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: vars.spacing50,
+    },
+    ':host .field': {
+      display: 'grid',
+      gridTemplateColumns: '100px 1fr',
+      alignItems: 'center',
+      gap: vars.spacing25,
+    },
+    ':host .field label': {
+      display: 'contents',
+    },
+    ':host .field label > span:first-child': {
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+      fontSize: '0.9em',
+    },
+    ':host .field input, :host .field select, :host .field tosi-select': {
+      padding: vars.spacing25,
+      borderRadius: vars.roundedRadius,
+      border: `1px solid ${vars.borderColor}`,
+    },
+    ':host .required': {
+      color: vars.errorColor,
+    },
+    ':host .array-field': {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: vars.spacing25,
+      padding: vars.spacing50,
+      border: `1px solid ${vars.borderColor}`,
+      borderRadius: vars.roundedRadius,
+    },
+    ':host .array-label': {
+      fontWeight: 'bold',
+    },
+    ':host .array-items': {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: vars.spacing25,
+    },
+    ':host .array-item': {
+      display: 'flex',
+      alignItems: 'center',
+      gap: vars.spacing25,
+    },
+    ':host .array-item > *:first-child': {
+      flex: 1,
+    },
+    ':host .add-item': {
+      alignSelf: 'flex-start',
+      display: 'flex',
+      alignItems: 'center',
+      gap: vars.spacing25,
+    },
+    ':host .remove-item': {
+      flexShrink: 0,
+    },
+    ':host .object-field': {
+      padding: vars.spacing50,
+      border: `1px solid ${vars.borderColor}`,
+      borderRadius: vars.roundedRadius,
+    },
+    ':host .object-field legend': {
+      fontWeight: 'bold',
+      padding: `0 ${vars.spacing25}`,
+    },
+  }
   schema: JSONSchema = {}
   value: Record<string, any> = {}
   isValid = true
@@ -513,81 +589,5 @@ export class SchemaEditor extends Component<SchemaEditorParts> {
   }
 }
 
-export const schemaEditor = SchemaEditor.elementCreator({
-  tag: 'schema-editor',
-  styleSpec: {
-    ':host': {
-      display: 'block',
-    },
-    ':host .schema-editor-form': {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: vars.spacing50,
-    },
-    ':host .field': {
-      display: 'grid',
-      gridTemplateColumns: '100px 1fr',
-      alignItems: 'center',
-      gap: vars.spacing25,
-    },
-    ':host .field label': {
-      display: 'contents',
-    },
-    ':host .field label > span:first-child': {
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-      fontSize: '0.9em',
-    },
-    ':host .field input, :host .field select, :host .field tosi-select': {
-      padding: vars.spacing25,
-      borderRadius: vars.roundedRadius,
-      border: `1px solid ${vars.borderColor}`,
-    },
-    ':host .required': {
-      color: vars.errorColor,
-    },
-    ':host .array-field': {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: vars.spacing25,
-      padding: vars.spacing50,
-      border: `1px solid ${vars.borderColor}`,
-      borderRadius: vars.roundedRadius,
-    },
-    ':host .array-label': {
-      fontWeight: 'bold',
-    },
-    ':host .array-items': {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: vars.spacing25,
-    },
-    ':host .array-item': {
-      display: 'flex',
-      alignItems: 'center',
-      gap: vars.spacing25,
-    },
-    ':host .array-item > *:first-child': {
-      flex: 1,
-    },
-    ':host .add-item': {
-      alignSelf: 'flex-start',
-      display: 'flex',
-      alignItems: 'center',
-      gap: vars.spacing25,
-    },
-    ':host .remove-item': {
-      flexShrink: 0,
-    },
-    ':host .object-field': {
-      padding: vars.spacing50,
-      border: `1px solid ${vars.borderColor}`,
-      borderRadius: vars.roundedRadius,
-    },
-    ':host .object-field legend': {
-      fontWeight: 'bold',
-      padding: `0 ${vars.spacing25}`,
-    },
-  },
-}) as ElementCreator<SchemaEditor>
+export const schemaEditor =
+  SchemaEditor.elementCreator() as ElementCreator<SchemaEditor>

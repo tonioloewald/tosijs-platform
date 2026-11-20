@@ -3,6 +3,7 @@ import { Component, elements } from 'tosijs'
 const { iframe } = elements
 
 export class YoutubePlayer extends Component {
+  static preferredTagName = 'youtube-player'
   src = 'https://www.youtube-nocookie.com/embed/y7K-lk6MnEE?si=ja-4Mcr-JKruHbKM'
   allowfullscreen = true
   allow =
@@ -45,6 +46,4 @@ export class YoutubePlayer extends Component {
   }
 }
 
-export const youtubePlayer = YoutubePlayer.elementCreator({
-  tag: 'youtube-player',
-})
+export const youtubePlayer = YoutubePlayer.elementCreator()

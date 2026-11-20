@@ -102,6 +102,34 @@ interface AssetManagerParts extends PartsMap {
 }
 
 class AssetManager extends Component<AssetManagerParts> {
+  static preferredTagName = 'asset-manager'
+  static lightStyleSpec = {
+    ':host': {
+      _spacing: varDefault.pad('10px'),
+    },
+    ':host tosi-sizer': {
+      _resizeIconFill: vars.textColor,
+    },
+    ':host [part=assetList] .row': {
+      padding: 2,
+    },
+    ':host tosi-select': {
+      display: 'inline-flex',
+      width: 100,
+      _fieldWidth: 40,
+      _touchSize: 32,
+    },
+    ':host tosi-float': {
+      background: vars.panelBg,
+      display: 'flex',
+      flexDirection: 'column',
+    },
+    ':host .text-nowrap': {
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+    },
+  }
   popItemMenu = (event: Event) => {
     const target = event.target as HTMLElement
     const file = getListItem(target)
@@ -493,33 +521,5 @@ class AssetManager extends Component<AssetManagerParts> {
   }
 }
 
-export const assetManager = AssetManager.elementCreator({
-  tag: 'asset-manager',
-  styleSpec: {
-    ':host': {
-      _spacing: varDefault.pad('10px'),
-    },
-    ':host tosi-sizer': {
-      _resizeIconFill: vars.textColor,
-    },
-    ':host [part=assetList] .row': {
-      padding: 2,
-    },
-    ':host tosi-select': {
-      display: 'inline-flex',
-      width: 100,
-      _fieldWidth: 40,
-      _touchSize: 32,
-    },
-    ':host tosi-float': {
-      background: vars.panelBg,
-      display: 'flex',
-      flexDirection: 'column',
-    },
-    ':host .text-nowrap': {
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-    },
-  },
-}) as ElementCreator<AssetManager>
+export const assetManager =
+  AssetManager.elementCreator() as ElementCreator<AssetManager>

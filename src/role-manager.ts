@@ -77,6 +77,54 @@ interface RoleManagerParts extends PartsMap {
 }
 
 class RoleManager extends Component<RoleManagerParts> {
+  static preferredTagName = 'role-manager'
+  static lightStyleSpec = {
+    ':host': {
+      _spacing: varDefault.pad('10px'),
+    },
+    ':host tosi-sizer': {
+      _resizeIconFill: vars.textColor,
+    },
+    ':host tosi-float': {
+      background: vars.panelBg,
+      display: 'flex',
+      flexDirection: 'column',
+    },
+    ':host .list-view, :host .edit-view': {
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+    },
+    ':host .role-item': {
+      padding: vars.spacing50,
+      cursor: 'pointer',
+      borderRadius: vars.roundedRadius,
+    },
+    ':host .role-item:hover': {
+      background: vars.hoverBg,
+    },
+    ':host .role-name': {
+      fontWeight: 500,
+    },
+    ':host .role-roles': {
+      fontSize: '0.85em',
+    },
+    ':host .text-muted': {
+      opacity: 0.7,
+    },
+    ':host .editor-container': {
+      flex: 1,
+    },
+    ':host button': {
+      display: 'inline-flex',
+      gap: '0.5em',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    ':host button.danger': {
+      color: vars.errorColor,
+    },
+  }
   private originalPath = ''
 
   loadRoles = async () => {
@@ -402,53 +450,5 @@ class RoleManager extends Component<RoleManagerParts> {
   }
 }
 
-export const roleManager = RoleManager.elementCreator({
-  tag: 'role-manager',
-  styleSpec: {
-    ':host': {
-      _spacing: varDefault.pad('10px'),
-    },
-    ':host tosi-sizer': {
-      _resizeIconFill: vars.textColor,
-    },
-    ':host tosi-float': {
-      background: vars.panelBg,
-      display: 'flex',
-      flexDirection: 'column',
-    },
-    ':host .list-view, :host .edit-view': {
-      display: 'flex',
-      flexDirection: 'column',
-      flex: 1,
-    },
-    ':host .role-item': {
-      padding: vars.spacing50,
-      cursor: 'pointer',
-      borderRadius: vars.roundedRadius,
-    },
-    ':host .role-item:hover': {
-      background: vars.hoverBg,
-    },
-    ':host .role-name': {
-      fontWeight: 500,
-    },
-    ':host .role-roles': {
-      fontSize: '0.85em',
-    },
-    ':host .text-muted': {
-      opacity: 0.7,
-    },
-    ':host .editor-container': {
-      flex: 1,
-    },
-    ':host button': {
-      display: 'inline-flex',
-      gap: '0.5em',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    ':host button.danger': {
-      color: vars.errorColor,
-    },
-  },
-}) as ElementCreator<RoleManager>
+export const roleManager =
+  RoleManager.elementCreator() as ElementCreator<RoleManager>

@@ -4,6 +4,7 @@ import { markdownViewer, MarkdownViewer } from 'tosijs-ui'
 import { Page, emptyPage } from '../functions/shared/page'
 
 export class XinPage extends WebComponent {
+  static preferredTagName = 'xin-page'
   _page: Page = { ...emptyPage }
 
   set page(p: Page) {
@@ -43,6 +44,4 @@ export class XinPage extends WebComponent {
   }
 }
 
-export const xinPage = XinPage.elementCreator({
-  tag: 'xin-page',
-}) as ElementCreator<XinPage>
+export const xinPage = XinPage.elementCreator() as ElementCreator<XinPage>

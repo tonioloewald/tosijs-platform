@@ -180,7 +180,8 @@ export const { blog } = tosi({
     async refreshRecentlyEdited(count = 30) {
       // Only what was edited after the newest edit the index already has (#4050).
       const newest = blog.index.value.reduce(
-        (max, ref) => (ref._modified && ref._modified > max ? ref._modified : max),
+        (max, ref) =>
+          ref._modified && ref._modified > max ? ref._modified : max,
         ''
       )
       const recent = (await service.docs.get({
@@ -193,7 +194,10 @@ export const { blog } = tosi({
       if (!Array.isArray(recent)) return
       const byPath = new Map(recent.map((ref) => [ref._path, ref]))
       // A new array, assigned whole: the index's own array is live state (#3747).
-      const merged = [...recent, ...blog.index.value.filter((ref) => !byPath.has(ref._path))]
+      const merged = [
+        ...recent,
+        ...blog.index.value.filter((ref) => !byPath.has(ref._path)),
+      ]
       blog.index.value = merged
       if (localStorage.getItem('blog-index-cache')) {
         localStorage.setItem('blog-index-cache', JSON.stringify(merged))
@@ -285,7 +289,8 @@ export const { blog } = tosi({
       const path = window.location.pathname
       // This URL was served as a 404 (#3891): it names no post, so show the latest.
       const notFound = (await getPrefetchedDoc('notFound', false)) === path
-      let [, , postPath] = (!notFound && path.match(/\/blog\/(\d+\/)*([\w-]+)\/?$/)) || []
+      let [, , postPath] =
+        (!notFound && path.match(/\/blog\/(\d+\/)*([\w-]+)\/?$/)) || []
       if (postPath) {
         return `post/path=${postPath}`
       }
@@ -412,7 +417,7 @@ const {
   button,
   textarea,
   template,
-  xinSlot,
+  tosiSlot,
   details,
   summary: summaryTag,
 } = elements
@@ -471,6 +476,7 @@ interface PostParts extends PartsMap {
 }
 
 export class XinBlogPost extends Component<PostParts> {
+  static preferredTagName = 'xin-blog-post'
   #post = null as BlogPost | null
 
   get post(): BlogPost | null {
@@ -494,12 +500,12 @@ export class XinBlogPost extends Component<PostParts> {
     div(
       div(
         { style: { display: 'flex' } },
-        xinSlot({ name: 'before-title' }),
+        tosiSlot({ name: 'before-title' }),
         h1({
           part: 'title',
           style: { marginTop: 0, flex: '1 1 auto' },
         }),
-        xinSlot()
+        tosiSlot()
       ),
       markdownViewer({
         part: 'html',
@@ -533,9 +539,10 @@ export class XinBlogPost extends Component<PostParts> {
   }
 }
 
-export const xinBlogPost = XinBlogPost.elementCreator({ tag: 'xin-blog-post' })
+export const xinBlogPost = XinBlogPost.elementCreator()
 
 export class XinBlogPostList extends Component {
+  static preferredTagName = 'xin-blog-post-list'
   list = blog.otherPosts
 
   content = () =>
@@ -581,11 +588,35 @@ export class XinBlogPostList extends Component {
     )
 }
 
-export const xinBlogPostList = XinBlogPostList.elementCreator({
-  tag: 'xin-blog-post-list',
-})
+export const xinBlogPostList = XinBlogPostList.elementCreator()
 
 export class XinBlog extends Component {
+  static preferredTagName = 'xin-blog'
+  static lightStyleSpec = {
+    'xin-blog, xin-blog-post, xin-blog-search, xin-post-editor': {
+      _xinBlogPad: varDefault.pad('10px'),
+      _xinBlogBodyBg: varDefault.bodyBg('white'),
+      _spacing: varDefault.pad('10px'),
+      _tosiTabsSelectedColor: varDefault.brandColor('blue'),
+      _tosiTabsBarColor: vars.paleBrandColor,
+    },
+
+    ':host [part="menuTrigger"]:not(.author)': {
+      visibility: 'hidden',
+    },
+
+    ':host [part="showMode"]:not(.author)': {
+      display: 'none',
+    },
+
+    ':host tosi-sidenav:not([compact]) [part="show-sidebar"]': {
+      display: 'none',
+    },
+
+    ':host xin-blog-search, :host nav': {
+      height: '100%',
+    },
+  }
   search = () => {
     const nav = this.parts.sidenav as SideNav
     if (nav.compact) {
@@ -702,36 +733,10 @@ export class XinBlog extends Component {
     )
 }
 
-export const xinBlog = XinBlog.elementCreator({
-  tag: 'xin-blog',
-  styleSpec: {
-    'xin-blog, xin-blog-post, xin-blog-search, xin-post-editor': {
-      _xinBlogPad: varDefault.pad('10px'),
-      _xinBlogBodyBg: varDefault.bodyBg('white'),
-      _spacing: varDefault.pad('10px'),
-      _tosiTabsSelectedColor: varDefault.brandColor('blue'),
-      _tosiTabsBarColor: vars.paleBrandColor,
-    },
-
-    ':host [part="menuTrigger"]:not(.author)': {
-      visibility: 'hidden',
-    },
-
-    ':host [part="showMode"]:not(.author)': {
-      display: 'none',
-    },
-
-    ':host tosi-sidenav:not([compact]) [part="show-sidebar"]': {
-      display: 'none',
-    },
-
-    ':host xin-blog-search, :host nav': {
-      height: '100%',
-    },
-  },
-})
+export const xinBlog = XinBlog.elementCreator()
 
 export class XinBlogSearch extends Component {
+  static preferredTagName = 'xin-blog-search'
   loadIndex = async () => {
     const closeNotification = postNotification({
       message: `downloading full index`,
@@ -826,6 +831,10 @@ export class XinBlogSearch extends Component {
             bindList: {
               value: blog.filtered,
               idPath: '_path',
+              // Every post is rendered, so the browser's find and the scroll position see the
+              // whole archive; virtualizing it is a follow-up once its rows have a fixed height.
+              nonVirtualReason:
+                'the full archive list, searchable with the browser’s find',
             },
           },
           template(
@@ -841,9 +850,7 @@ export class XinBlogSearch extends Component {
     )
 }
 
-export const xinBlogSearch = XinBlogSearch.elementCreator({
-  tag: 'xin-blog-search',
-})
+export const xinBlogSearch = XinBlogSearch.elementCreator()
 
 interface PostEditorParts extends PartsMap {
   title: HTMLInputElement
@@ -881,6 +888,39 @@ const genFailure = (e: unknown): string => {
 type CmView = NonNullable<CodeEditor['editor']>
 
 export class XinPostEditor extends Component<PostEditorParts> {
+  static preferredTagName = 'xin-post-editor'
+  static lightStyleSpec = {
+    ':host label': {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: vars.xinBlogPad50,
+      margin: `${vars.xinBlogPad50} 0`,
+      alignItems: 'stretch',
+    },
+    ':host textarea': {
+      width: '100%',
+      resize: 'vertical',
+      minHeight: '200px',
+      fontFamily: vars.codeFont,
+      fontSize: '16px',
+    },
+    ':host tosi-code': {
+      fontFamily: vars.codeFont,
+    },
+    // was .ace-tooltip before tosijs-ui 1.7 swapped ACE for CodeMirror 6
+    '.cm-tooltip': {
+      maxWidth: 300,
+      wordWrap: 'break-word',
+      whiteSpace: 'pre-wrap !important',
+    },
+    ':host input': {
+      margin: '2px',
+    },
+    ':host tosi-rich-text [part=doc]': {
+      overflowY: 'auto',
+      padding: vars.xinBlogPad,
+    },
+  }
   // The resolved doc path, remembered across re-saves within this editor session
   // (a generated `_path` cannot be written back onto the editorPost proxy).
   #path = ''
@@ -1031,10 +1071,13 @@ export class XinPostEditor extends Component<PostEditorParts> {
       '.cm-cursor, .cm-cursor-primary { border-left-color: var(--text-color, #fbfbfb) !important; border-left-width: 2px !important; }'
     sr.appendChild(st)
     this.#lightenTokens()
-    new MutationObserver(() => setTimeout(this.#lightenTokens, 100)).observe(document.body, {
-      attributes: true,
-      attributeFilter: ['class'],
-    })
+    new MutationObserver(() => setTimeout(this.#lightenTokens, 100)).observe(
+      document.body,
+      {
+        attributes: true,
+        attributeFilter: ['class'],
+      }
+    )
   }
 
   // Our editor is dark in both page modes, but tosijs-ui picks CodeMirror's
@@ -1046,11 +1089,18 @@ export class XinPostEditor extends Component<PostEditorParts> {
   #lightenTokens = (tries = 0) => {
     const sr = this.parts.source?.shadowRoot
     if (!sr) return
-    const sheets = [...sr.adoptedStyleSheets, ...Array.from(sr.querySelectorAll('style'), (s) => s.sheet)]
+    const sheets = [
+      ...sr.adoptedStyleSheets,
+      ...Array.from(sr.querySelectorAll('style'), (s) => s.sheet),
+    ]
     let tokenRules = 0
     for (const sheet of sheets) {
       for (const rule of Array.from(sheet?.cssRules ?? [])) {
-        if (!(rule instanceof CSSStyleRule) || !/^\.ͼ\w+$/.test(rule.selectorText)) continue
+        if (
+          !(rule instanceof CSSStyleRule) ||
+          !/^\.ͼ\w+$/.test(rule.selectorText)
+        )
+          continue
         const rgb = rule.style.color.match(/^rgba?\((\d+), (\d+), (\d+)/)
         if (!rgb) continue
         tokenRules++
@@ -1060,7 +1110,8 @@ export class XinPostEditor extends Component<PostEditorParts> {
         }
       }
     }
-    if (!tokenRules && tries < 40) setTimeout(() => this.#lightenTokens(tries + 1), 150)
+    if (!tokenRules && tries < 40)
+      setTimeout(() => this.#lightenTokens(tries + 1), 150)
   }
 
   updateContent = () => {
@@ -1697,38 +1748,4 @@ export class XinPostEditor extends Component<PostEditorParts> {
     )
 }
 
-export const xinPostEditor = XinPostEditor.elementCreator({
-  tag: 'xin-post-editor',
-  styleSpec: {
-    ':host label': {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: vars.xinBlogPad50,
-      margin: `${vars.xinBlogPad50} 0`,
-      alignItems: 'stretch',
-    },
-    ':host textarea': {
-      width: '100%',
-      resize: 'vertical',
-      minHeight: '200px',
-      fontFamily: vars.codeFont,
-      fontSize: '16px',
-    },
-    ':host tosi-code': {
-      fontFamily: vars.codeFont,
-    },
-    // was .ace-tooltip before tosijs-ui 1.7 swapped ACE for CodeMirror 6
-    '.cm-tooltip': {
-      maxWidth: 300,
-      wordWrap: 'break-word',
-      whiteSpace: 'pre-wrap !important',
-    },
-    ':host input': {
-      margin: '2px',
-    },
-    ':host tosi-rich-text [part=doc]': {
-      overflowY: 'auto',
-      padding: vars.xinBlogPad,
-    },
-  },
-})
+export const xinPostEditor = XinPostEditor.elementCreator()
