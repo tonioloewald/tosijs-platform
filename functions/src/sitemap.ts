@@ -4,7 +4,7 @@ import compression from 'compression'
 
 import { getDoc } from './doc'
 import { dataStore } from './datastore'
-import { isPublished } from '../shared/post'
+import { isPublished, POST_COLLECTION } from '../shared/post'
 import { optionsResponse } from './utilities'
 import { serveSitemap } from './render/store'
 
@@ -45,7 +45,7 @@ export const handleSitemap: Handler = async (req, res) => {
   try {
     // Every post, oldest first, a page at a time (the store port's scan; this
     // was a Firestore stream over the same `orderBy('date')`).
-    for await (const page of dataStore.scan('post', { orderBy: 'date asc' }, 500)) {
+    for await (const page of dataStore.scan(POST_COLLECTION, { orderBy: 'date asc' }, 500)) {
       for (const { data: post } of page) {
         // Drafts must not reach the sitemap. Unpublished posts are deliberately
         // READABLE by direct link (so a draft can be shared for comment) — the

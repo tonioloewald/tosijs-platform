@@ -72,7 +72,7 @@ const call = async (method, pathAndQuery, { bearer, body } = {}) => {
 const firestore = async (method, docPath, body) => {
   const res = await fetch(
     `https://firestore.googleapis.com/v1/projects/${projectId}` +
-      `/databases/(default)/documents/${docPath}`,
+      `/databases/(default)/documents/${docPath.split('/').map(encodeURIComponent).join('/')}`,
     {
       method,
       headers: {
@@ -119,7 +119,7 @@ const mint = (body) => call('POST', '/token', { bearer: human, body })
 
 const minted = await mint({
   label: 'ci × tosijs-platform',
-  caveats: { roles: ['author'], collections: ['post'] },
+  caveats: { roles: ['author'], collections: ['blog:post'] },
 })
 ok(
   'a human mints an attenuated token',
@@ -173,7 +173,7 @@ ok(
 // --- the token works, within its caveats ------------------------------------
 const wrote = await call('POST', '/doc', {
   bearer: agent,
-  body: { p: 'post/token-probe', data: { title: 'by an agent', content: 'x' } },
+  body: { p: 'blog:post/token-probe', data: { title: 'by an agent', content: 'x' } },
 })
 ok(
   'the token can do what it was scoped for',
@@ -181,7 +181,7 @@ ok(
   `${wrote.status} ${wrote.text.slice(0, 140)}`
 )
 
-const del = await call('DELETE', '/doc?p=post/token-probe', { bearer: agent })
+const del = await call('DELETE', '/doc?p=blog:post/token-probe', { bearer: agent })
 ok(
   'but NOT a method outside its caveats',
   del.status === 404 || del.status === 403,
@@ -246,7 +246,7 @@ ok(
 
 const afterWrite = await call('POST', '/doc', {
   bearer: agent,
-  body: { p: 'post/token-probe-2', data: { title: 'should fail', content: 'x' } },
+  body: { p: 'blog:post/token-probe-2', data: { title: 'should fail', content: 'x' } },
 })
 ok(
   'and the agent can no longer write',
@@ -274,7 +274,7 @@ if (minted.json?.id) {
 // The grant was minted for THIS run, so it is deleted rather than restored —
 // restoring it left an author+admin grant behind after every run.
 await firestore('DELETE', ROLE_DOC)
-await firestore('DELETE', 'post/token-probe')
+await firestore('DELETE', 'blog:post/token-probe')
 
 console.log(
   failures

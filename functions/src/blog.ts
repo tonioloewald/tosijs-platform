@@ -1,8 +1,5 @@
 import { log } from './log'
-import { COLLECTIONS } from './collections'
 import { PLATFORM_HOOKS } from './collections/hooks'
-import { ALL } from './collections/access'
-import { ROLES, principalIdentity, type UserRoles } from './collections/roles'
 import { getDocs } from './docs'
 import { getDoc } from './doc'
 import { config } from './config'
@@ -11,7 +8,7 @@ import { Response } from 'express'
 
 import { onPrefetch, PageOptions, PrefetchData } from './prefetch'
 import { resolvePage } from './page'
-import { PostSchema, isPublished } from '../shared/post'
+import { POST_COLLECTION } from '../shared/post'
 import { firstImage } from './social-meta'
 import { namesBeyondPage, notFoundPath } from './render/site'
 
@@ -87,11 +84,11 @@ onPrefetch(
 
     if (cacheExpired) {
       const [latestPosts, recentPosts] = await Promise.all([
-        getDocs(req, res, 'post', 6, false, 'date(desc)'),
+        getDocs(req, res, POST_COLLECTION, 6, false, 'date(desc)'),
         getDocs(
           req,
           res,
-          'post',
+          POST_COLLECTION,
           30,
           ['title', 'date', 'summary', 'keywords', 'path'],
           'date(desc)'
@@ -120,7 +117,7 @@ onPrefetch(
       : latestPosts.find((post: any) => post.path === postPath)
 
     if (!currentPost && postPath) {
-      const postResult = await getDoc(req, res, `post/path=${postPath}`)
+      const postResult = await getDoc(req, res, `${POST_COLLECTION}/path=${postPath}`)
       currentPost = postResult.ok ? postResult.data : undefined
     }
 
@@ -148,10 +145,10 @@ onPrefetch(
       blogVersion: 4,
     }
     for (const post of latestPosts) {
-      pageData[`post/path=${post.path}`] = post
+      pageData[`${POST_COLLECTION}/path=${post.path}`] = post
     }
     if (currentPost) {
-      pageData[`post/path=${currentPost.path}`] = currentPost
+      pageData[`${POST_COLLECTION}/path=${currentPost.path}`] = currentPost
     } else if (isOnBlogPage && namesBeyondPage(url)) {
       // `/blog/<slug>` with no such post: a 404 showing the blog (#3913).
       pageData.notFound = notFoundPath(url)
@@ -165,52 +162,7 @@ async function clearBlogCacheAfterWrite(): Promise<void> {
   await clearBlogCache()
 }
 
-// The same side effect, attached by name when `post`'s config comes from the
-// registry as data (D19) — data cannot carry code, and a cache clear is not
-// authority. See collections/hooks.ts.
-PLATFORM_HOOKS.post = { afterWrite: clearBlogCacheAfterWrite }
-
-COLLECTIONS.post = {
-  schema: PostSchema,
-  unique: ['title', 'path'],
-  async validate(data: any, userRoles: UserRoles): Promise<Error | any> {
-    // Auto-generate path from title if not provided
-    if (!data.path) {
-      data.path = data.title.toLocaleLowerCase().replace(/[^\w]+/g, '-')
-    }
-    // An empty author is the caller's published name, or the write is refused
-    // (the registry's `principal` derive op, required).
-    if (!String(data.author ?? '').trim()) {
-      const { name } = principalIdentity(userRoles)
-      if (!name) return new Error('author is empty and the caller has no published name to fill it with')
-      data.author = name
-    }
-
-    return data
-  },
-  // Cache invalidation runs AFTER the commit, not inside validate.
-  //
-  // It used to be the last thing `validate` did, which put it *before* the write
-  // (doc.ts validates, then checks uniqueness, then calls ref.set). Any read in
-  // that window — and the racing reader is `onPrefetch`, i.e. essentially every
-  // page request — would miss the cache, rebuild it from the PRE-write data, and
-  // stamp it fresh. The blog then served stale content for up to the cache
-  // duration (24h by default), which is the "I saved but the site still shows the
-  // old post" failure. Clearing after the write closes the window.
-  afterWrite: clearBlogCacheAfterWrite,
-  access: {
-    [ROLES.public]: {
-      read: ALL,
-      // Uses the SHARED isPublished so the server's notion of "published"
-      // cannot drift from the client's `unpublish()`. It did: this guard tested
-      // `date !== undefined` while unpublish() writes `''`, so all 57
-      // unpublished posts in production were being listed to the public.
-      list: (data: any) =>
-        isPublished(data) ? data : new Error('unpublished'),
-    },
-    [ROLES.author]: {
-      write: ALL,
-      list: ALL,
-    },
-  },
-}
+// The blog's posts are installed by the blog manifest (D28), so their rules
+// are data and carry no code. A cache clear is not authority, so it attaches
+// by name (collections/hooks.ts).
+PLATFORM_HOOKS[POST_COLLECTION] = { afterWrite: clearBlogCacheAfterWrite }

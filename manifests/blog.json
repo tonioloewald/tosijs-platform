@@ -1,34 +1,251 @@
 {
   "manifest": 1,
   "name": "blog",
-  "version": "1.0.0",
-  "description": "The blog's storage areas (board #1136 step 3): public files anyone may read, and private files only its writers see. The blog's own collections move here when tosijs-blog does.",
+  "version": "1.1.0",
+  "description": "The blog (D28): its posts and the site's pages, and its storage areas — public files anyone may read, and private files only its writers see. Posts and pages were the platform's bare `post` and `page` until 2026-11.",
   "collections": {
+    "blog:post": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "_created": {
+            "type": "string"
+          },
+          "_modified": {
+            "type": "string"
+          }
+        },
+        "required": ["title", "content"]
+      },
+      "unique": ["title", "path"],
+      "derive": [
+        {
+          "op": "slug",
+          "to": "path",
+          "from": "title",
+          "when": "absent"
+        },
+        {
+          "op": "principal",
+          "to": "author",
+          "field": "name",
+          "required": true
+        }
+      ],
+      "access": [
+        {
+          "role": "public",
+          "read": "ALL",
+          "list": {
+            "visible": {
+              "field": "date",
+              "op": "nonEmpty"
+            }
+          }
+        },
+        {
+          "role": "author",
+          "write": "ALL",
+          "list": "ALL"
+        }
+      ]
+    },
+    "blog:page": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "css": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "type": {
+            "type": "string"
+          },
+          "navSort": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "_created": {
+            "type": "string"
+          },
+          "_modified": {
+            "type": "string"
+          }
+        },
+        "required": ["title", "description", "path", "source"]
+      },
+      "unique": ["path"],
+      "tagFields": ["tags"],
+      "access": [
+        {
+          "role": "public",
+          "read": {
+            "visible": {
+              "field": "tags",
+              "op": "includes",
+              "value": "public"
+            }
+          },
+          "list": {
+            "visible": {
+              "all": [
+                {
+                  "field": "tags",
+                  "op": "includes",
+                  "value": "public"
+                },
+                {
+                  "field": "tags",
+                  "op": "includes",
+                  "value": "visible"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "role": "admin",
+          "read": "ALL",
+          "write": "ALL",
+          "list": "ALL"
+        }
+      ]
+    },
     "blog:public": {
       "blob": {
         "maxBytes": 26214400,
-        "contentTypes": ["image/*", "video/*", "audio/*", "application/pdf", "application/json", "text/plain"]
+        "contentTypes": [
+          "image/*",
+          "video/*",
+          "audio/*",
+          "application/pdf",
+          "application/json",
+          "text/plain"
+        ]
       },
       "access": [
-        { "role": "public", "read": "ALL", "list": "ALL" },
-        { "role": "author", "write": "ALL" },
-        { "role": "editor", "write": "ALL" },
-        { "role": "admin", "write": "ALL" },
-        { "role": "developer", "write": "ALL" },
-        { "role": "owner", "write": "ALL" }
+        {
+          "role": "public",
+          "read": "ALL",
+          "list": "ALL"
+        },
+        {
+          "role": "author",
+          "write": "ALL"
+        },
+        {
+          "role": "editor",
+          "write": "ALL"
+        },
+        {
+          "role": "admin",
+          "write": "ALL"
+        },
+        {
+          "role": "developer",
+          "write": "ALL"
+        },
+        {
+          "role": "owner",
+          "write": "ALL"
+        }
       ]
     },
     "blog:private": {
       "blob": {
         "maxBytes": 26214400,
-        "contentTypes": ["image/*", "video/*", "audio/*", "application/pdf", "application/json", "text/plain"]
+        "contentTypes": [
+          "image/*",
+          "video/*",
+          "audio/*",
+          "application/pdf",
+          "application/json",
+          "text/plain"
+        ]
       },
       "access": [
-        { "role": "author", "read": "ALL", "list": "ALL", "write": "ALL" },
-        { "role": "editor", "read": "ALL", "list": "ALL", "write": "ALL" },
-        { "role": "admin", "read": "ALL", "list": "ALL", "write": "ALL" },
-        { "role": "developer", "read": "ALL", "list": "ALL", "write": "ALL" },
-        { "role": "owner", "read": "ALL", "list": "ALL", "write": "ALL" }
+        {
+          "role": "author",
+          "read": "ALL",
+          "list": "ALL",
+          "write": "ALL"
+        },
+        {
+          "role": "editor",
+          "read": "ALL",
+          "list": "ALL",
+          "write": "ALL"
+        },
+        {
+          "role": "admin",
+          "read": "ALL",
+          "list": "ALL",
+          "write": "ALL"
+        },
+        {
+          "role": "developer",
+          "read": "ALL",
+          "list": "ALL",
+          "write": "ALL"
+        },
+        {
+          "role": "owner",
+          "read": "ALL",
+          "list": "ALL",
+          "write": "ALL"
+        }
       ]
     }
   }

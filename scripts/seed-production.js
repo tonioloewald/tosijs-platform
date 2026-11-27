@@ -81,10 +81,12 @@ async function checkExistingData() {
     return { exists: true, reason: 'role collection has documents' }
   }
 
-  // Check if any posts exist
-  const postsSnapshot = await db.collection('post').limit(1).get()
-  if (!postsSnapshot.empty) {
-    return { exists: true, reason: 'post collection has documents' }
+  // Check if any posts exist (in `blog:post` since D28, `post` before it)
+  for (const posts of ['blog:post', 'post']) {
+    const postsSnapshot = await db.collection(posts).limit(1).get()
+    if (!postsSnapshot.empty) {
+      return { exists: true, reason: `${posts} collection has documents` }
+    }
   }
 
   return { exists: false }
@@ -102,8 +104,9 @@ async function seedFirestore() {
   const files = fs.readdirSync(firestorePath).filter((f) => f.endsWith('.json'))
 
   for (const file of files) {
-    // Convert filename to collection path (| -> /)
-    const collectionPath = file.replace(/\.json$/, '').replace(/\|/g, '/')
+    // Filename to collection path: percent-decoded (`blog%3Apost.json` is
+    // `blog:post`, D28), then `|` -> `/`.
+    const collectionPath = decodeURIComponent(file.replace(/\.json$/, '')).replace(/\|/g, '/')
     const filePath = path.join(firestorePath, file)
 
     try {
@@ -169,6 +172,9 @@ async function main() {
   await seedFirestore()
 
   console.log('\nProduction seeding complete!\n')
+  // The seeded posts and pages are the blog manifest's collections (D28):
+  // until it is installed no rule covers them, and the site shows no blog.
+  console.log('Next, install the blog: bun scripts/install-manifest.js manifests/blog.json --production\n')
 }
 
 main().catch((error) => {

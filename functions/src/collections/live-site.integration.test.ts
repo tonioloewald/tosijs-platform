@@ -97,7 +97,7 @@ beforeAll(async () => {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), PROBE_MS)
-    const res = await fetch(`${FUNCTIONS}/docs?p=post`, {
+    const res = await fetch(`${FUNCTIONS}/docs?p=blog:post`, {
       signal: controller.signal,
     })
     clearTimeout(timer)
@@ -150,7 +150,7 @@ describe(`live site: ${HOSTING}`, () => {
     // || 10`). Pinned here because the query surface is single-letter and
     // undocumented — `limit=5` is silently IGNORED rather than rejected, so a
     // caller who guesses wrong gets the default and never learns.
-    const r = await json(`${FUNCTIONS}/docs?p=post&c=5`)
+    const r = await json(`${FUNCTIONS}/docs?p=blog:post&c=5`)
     const rows = (r.body as unknown[]) ?? []
     expect(rows.length).toBe(5)
     expect((rows as Array<Record<string, unknown>>).every(published)).toBe(true)
@@ -167,7 +167,7 @@ describe(`live site: ${HOSTING}`, () => {
     const draftPath = process.env.VERIFY_DRAFT_PATH
     if (!draftPath) {
       console.log(
-        '   [partial] set VERIFY_DRAFT_PATH=post/<id> to verify draft-by-link'
+        '   [partial] set VERIFY_DRAFT_PATH=blog:post/<id> to verify draft-by-link'
       )
       return
     }
@@ -312,7 +312,7 @@ describe('authenticated behaviour', () => {
     // took every authenticated request to a 500. Production had the index by
     // console; source control did not, so a freshly provisioned host had none
     // and this failed until firestore.indexes.json declared it.
-    for (const path of ['user', 'docs?p=post', 'doc?p=config/app']) {
+    for (const path of ['user', 'docs?p=blog:post', 'doc?p=config/app']) {
       const r = await authed(`${FUNCTIONS}/${path}`)
       expect(r.status).toBeLessThan(500)
     }

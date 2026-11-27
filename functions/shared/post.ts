@@ -17,6 +17,24 @@ export const PostSchema = s.object({
 
 export type Post = Infer<typeof PostSchema>
 
+/**
+ * The blog's posts: a collection the blog manifest installs
+ * (`manifests/blog.json`, D28), not one the platform owns. It was the bare
+ * `post` until 2026-11; `scripts/migrate-blog-collections.js` moved the data.
+ */
+export const POST_COLLECTION = 'blog:post'
+
+/**
+ * A post's document path as it is now: `post/abc`, stored before the move,
+ * becomes `blog:post/abc`; anything else is returned unchanged. Browsers keep
+ * paths in localStorage (the index cache, an unsaved draft), and a draft saved
+ * to its old path would be written to the retired collection, or refused.
+ */
+export const currentPostPath = <T extends string | undefined>(path: T): T =>
+  (typeof path === 'string' && path.startsWith('post/')
+    ? `${POST_COLLECTION}/${path.slice('post/'.length)}`
+    : path) as T
+
 export const emptyPost: Post = {
   title: '',
   content: '',

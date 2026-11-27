@@ -1,3 +1,6 @@
+import { POST_COLLECTION } from '../../shared/post'
+import { PAGE_COLLECTION } from '../../shared/page'
+
 /**
  * Render on store: what a STORED value may depend on. Pure (no Firebase), so
  * it is tested directly; store.ts gives it to the ComputedStore, which
@@ -5,7 +8,7 @@
  */
 
 /** Collections whose writes invalidate (render/hooks.ts). A value read from any other cannot be kept. */
-export const INVALIDATING_COLLECTIONS = ['post', 'page', 'config']
+export const INVALIDATING_COLLECTIONS = [POST_COLLECTION, PAGE_COLLECTION, 'config']
 
 /**
  * May a STORED value depend on this? Only on what a write invalidates: a

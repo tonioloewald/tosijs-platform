@@ -6,11 +6,12 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { serveLocal, type LocalHost } from './adapters/bun/serve'
 import { dataStore } from './datastore'
+import { installAsOperator } from './install/operator'
 
 const FIREBASE_JSON = join(__dirname, '../../firebase.json')
 const created = new Date().toJSON()
@@ -21,17 +22,19 @@ let host: LocalHost
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'prefetch-404-'))
   host = await serveLocal({ dataDir: dir, port: 0, firebaseJson: FIREBASE_JSON })
+  // Pages and posts are the blog manifest's collections (D28).
+  await installAsOperator(dataStore, JSON.parse(readFileSync(join(__dirname, '../../manifests/blog.json'), 'utf-8')))
   await dataStore.set('config/app', { title: 'Test', description: '', defaultPath: 'blog' })
-  await dataStore.set('page/blog', {
+  await dataStore.set('blog:page/blog', {
     path: 'blog',
     title: 'Blog',
     tags: ['public', 'visible'],
     source: '',
-    prefetch: [{ regexp: '^\\/(([\\w\\d]+\\/)*)([\\w-]+)\\/?$', path: 'post/path=[3]' }],
+    prefetch: [{ regexp: '^\\/(([\\w\\d]+\\/)*)([\\w-]+)\\/?$', path: 'blog:post/path=[3]' }],
     _created: created,
   })
-  await dataStore.set('page/about', { path: 'about', title: 'About', tags: ['public', 'visible'], source: '', _created: created })
-  await dataStore.set('post/p1', {
+  await dataStore.set('blog:page/about', { path: 'about', title: 'About', tags: ['public', 'visible'], source: '', _created: created })
+  await dataStore.set('blog:post/p1', {
     path: 'it-begins',
     title: 'It begins',
     date: '2002-08-26T00:00:00.000Z',

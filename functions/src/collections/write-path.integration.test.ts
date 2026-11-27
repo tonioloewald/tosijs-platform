@@ -108,7 +108,7 @@ describe('Write-path integration (validate / unique / provenance)', () => {
   describe('provenance stamping (doc.ts inline merge)', () => {
     test('create stamps _created/_modified; update preserves _created', async () => {
       if (skip()) return
-      const path = `post/${tag}-prov`
+      const path = `blog:post/${tag}-prov`
 
       const created = await docRequest('POST', path, token, {
         title: `${tag} prov`,
@@ -180,7 +180,7 @@ describe('Write-path integration (validate / unique / provenance)', () => {
 
     test('rejects a post missing required content', async () => {
       if (skip()) return
-      const res = await docRequest('POST', `post/${tag}-nocontent`, token, {
+      const res = await docRequest('POST', `blog:post/${tag}-nocontent`, token, {
         title: `${tag} no content`,
         path: `${tag}-nocontent`,
       })

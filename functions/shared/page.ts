@@ -38,6 +38,13 @@ export const PageSchema = s.object({
 
 export type Page = Infer<typeof PageSchema>
 
+/**
+ * The site's pages: installed by the blog manifest (`manifests/blog.json`,
+ * D28), not owned by the platform. It was the bare `page` until 2026-11;
+ * `scripts/migrate-blog-collections.js` moved the data.
+ */
+export const PAGE_COLLECTION = 'blog:page'
+
 export const emptyPage: Page = {
   title: '',
   description: '',

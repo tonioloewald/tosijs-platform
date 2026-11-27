@@ -71,15 +71,25 @@ describe('the recorded outcomes', () => {
 })
 
 describe('summarize — what the approver reads', () => {
-  test('the real blog manifest: both storage areas, every grant, the limits', () => {
+  test('the real blog manifest: posts, pages, both storage areas, every grant, the limits', () => {
     const blog = JSON.parse(readFileSync(new URL('../../../manifests/blog.json', import.meta.url), 'utf-8'))
     const s = summarize(blog)
+    const named = (name: string) => s.collections.find((c) => c.name === name) as (typeof s.collections)[number]
     expect(s.name).toBe('blog')
-    expect(s.collections.map((c) => `${c.name} (${c.kind})`)).toEqual(['blog:public (storage area)', 'blog:private (storage area)'])
-    expect(s.collections[0].access).toContain('public: read, list')
-    expect(s.collections[0].access).toContain('author: write')
-    expect(s.collections[1].access.join()).not.toContain('public')
-    expect(s.collections[0].notes[0]).toContain('files up to 25600 KB')
+    expect(s.collections.map((c) => `${c.name} (${c.kind})`)).toEqual([
+      'blog:post (collection)',
+      'blog:page (collection)',
+      'blog:public (storage area)',
+      'blog:private (storage area)',
+    ])
+    // Drafts are unlisted: the public list is conditional, the read is not.
+    expect(named('blog:post').access).toEqual(['public: read, list (conditional)', 'author: list, write'])
+    expect(named('blog:post').notes).toEqual(['unique: title, path'])
+    expect(named('blog:page').access).toEqual(['public: read (conditional), list (conditional)', 'admin: read, list, write'])
+    expect(named('blog:public').access).toContain('public: read, list')
+    expect(named('blog:public').access).toContain('author: write')
+    expect(named('blog:private').access.join()).not.toContain('public')
+    expect(named('blog:public').notes[0]).toContain('files up to 25600 KB')
   })
   test('conditional grants, flags and capabilities are all shown', () => {
     const s = summarize({

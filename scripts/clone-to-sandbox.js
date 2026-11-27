@@ -67,6 +67,7 @@ import {
   parseArgs,
 } from './sandbox-lib.js'
 import { planRepair, applyPlan } from './migrate-schema-residue.js'
+import { movedPageData } from './blog-collections-lib.js'
 
 const { has, val } = parseArgs(process.argv)
 const APPLY = has('apply')
@@ -199,7 +200,7 @@ const prepare = (collection, data) => {
 async function writeDoc(projectId, tok, collection, id, data) {
   const url =
     `https://firestore.googleapis.com/v1/projects/${projectId}` +
-    `/databases/(default)/documents/${collection}/${encodeURIComponent(id)}`
+    `/databases/(default)/documents/${encodeURIComponent(collection)}/${encodeURIComponent(id)}`
   const res = await fetch(url, {
     method: 'PATCH',
     headers: {
@@ -229,7 +230,15 @@ async function main() {
   console.log(`Source: ${snapshot} (local backup, production not touched)`)
   console.log(`Mode:   ${RAW ? 'RAW (legacy residue kept)' : 'REPAIRED'}\n`)
 
-  const allPosts = loadCollection(snapshot, 'post')
+  // A snapshot from before D28's move has `post` and `page`; one from after
+  // has `blog:post` and `blog:page` (and the old ones, until they are removed).
+  // Either way the sandbox gets the new names, which its blog manifest
+  // (1.1.0 or later) must be installed to serve.
+  const named = (from, to) => {
+    const moved = loadCollection(snapshot, to)
+    return moved.length ? moved : loadCollection(snapshot, from)
+  }
+  const allPosts = named('post', 'blog:post')
   const { posts, coverage } = selectPosts(allPosts, POST_COUNT)
 
   console.log(`posts: ${posts.length} of ${allPosts.length}`)
@@ -244,8 +253,11 @@ async function main() {
     )
   }
 
-  const work = [['post', posts]]
-  for (const c of ['page', 'module', 'config']) {
+  const work = [['blog:post', posts]]
+  const pages = named('page', 'blog:page').map((d) => ({ ...d, data: movedPageData(d.data) }))
+  console.log(`blog:page: ${pages.length}`)
+  work.push(['blog:page', pages])
+  for (const c of ['module', 'config']) {
     const docs = loadCollection(snapshot, c)
     console.log(`${c}: ${docs.length}`)
     work.push([c, docs])
@@ -280,7 +292,8 @@ async function main() {
   let written = 0
   for (const [collection, docs] of work) {
     for (const d of docs) {
-      const data = d.generated ? d.data : prepare(collection, d.data)
+      // The repair rules are keyed by the old names (migrate-schema-residue.js).
+      const data = d.generated ? d.data : prepare(collection.replace(/^blog:/, ''), d.data)
       await writeDoc(projectId, tok, collection, d.id, data)
       written++
     }

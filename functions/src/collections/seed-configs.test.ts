@@ -5,9 +5,8 @@
  * This is the pre-flight for switching `/doc` onto the registry. Where the
  * shipped config is importable without Firebase (`module`, `role`, `config`,
  * and the install records) it is compared DIRECTLY against the live object.
- * `post` and `page` live in `blog.ts`/`page.ts`, which call
- * `admin.initializeApp()` at module scope, so they are covered behaviourally in
- * `install/equivalence.test.ts` instead.
+ * `post` and `page` are not here: they are the blog manifest's `blog:post` and
+ * `blog:page` (D28), pinned in `install/blog-manifest.test.ts`.
  *
  * Run: cd functions && bun test src/collections/seed-configs.test.ts
  */
@@ -26,8 +25,6 @@ import './config'
 import './role'
 import './install-records'
 import './token-records'
-import { readFileSync } from 'fs'
-import { join } from 'path'
 import { validateManifest } from '../install/manifest'
 
 const who = (roles: string[]): UserRoles => ({
@@ -43,7 +40,7 @@ const EVERY_ROLE = Object.values(ROLES)
 const { collections: seeded, failed } = compileStored(PLATFORM_CONFIGS)
 
 describe('every seeded config is usable', () => {
-  test('all nine compile', () => {
+  test('all of them compile', () => {
     expect(failed).toEqual([])
     expect(Object.keys(seeded).sort()).toEqual(
       PLATFORM_CONFIGS.map((c) => c.name).sort()
@@ -135,18 +132,6 @@ describe('the rules that must not drift', () => {
     }
   })
 
-  test('a draft is readable by link but never listed', async () => {
-    // Deliberate: unpublished posts are unlisted, not secret.
-    expect(getMethodAccess(seeded, 'post', 'GET', who([]))).toBe(ALL)
-    const list = getMethodAccess(seeded, 'post', 'LIST', who([])) as (
-      r: unknown
-    ) => Promise<unknown>
-    expect(await list({ title: 'draft', date: '' })).toBeInstanceOf(Error)
-    expect(await list({ title: 'live', date: '2026-01-01' })).toMatchObject({
-      title: 'live',
-    })
-  })
-
   test('the public cannot write anything, anywhere', () => {
     const writes: string[] = []
     for (const name of Object.keys(seeded)) {
@@ -161,25 +146,15 @@ describe('the rules that must not drift', () => {
 })
 
 describe('uniqueness matches the shipped TypeScript (D19)', () => {
-  // `post` makes title AND path unique, each on its own. The seed used to carry
-  // only `path`, because manifest v1 refused several fields — so the swap would
-  // have silently allowed duplicate titles.
   for (const entry of PLATFORM_CONFIGS) {
     const shipped = COLLECTIONS[entry.name]
-    if (!shipped) continue // post/page live in endpoint modules; see below
+    if (!shipped) continue
     test(`${entry.name}: unique is ${JSON.stringify(shipped.unique ?? [])}`, () => {
       expect([...(seeded[entry.name]?.unique ?? [])].sort()).toEqual(
         [...(shipped.unique ?? [])].sort()
       )
     })
   }
-
-  test('post: title AND path, as blog.ts declares', () => {
-    // blog.ts initialises firebase-admin at import, so it is read, not loaded.
-    const blog = readFileSync(join(__dirname, '..', 'blog.ts'), 'utf-8')
-    expect(blog).toContain("unique: ['title', 'path']")
-    expect([...(seeded.post?.unique ?? [])].sort()).toEqual(['path', 'title'])
-  })
 })
 
 describe('the seed names exactly the collections the code registers (B2)', () => {
@@ -190,15 +165,18 @@ describe('the seed names exactly the collections the code registers (B2)', () =>
   // Compiled but deliberately NOT seeded:
   //   - `token`: `access: {}` compiled, so deny either way — written only by
   //     the /token endpoint, never through /doc.
-  // `post`/`page` are registered by endpoint modules this file cannot load;
-  // seed-parity.isolated.ts covers them.
   const NOT_SEEDED = new Set(['token'])
-  const ENDPOINT_MODULES = new Set(['post', 'page'])
 
-  test('every seeded name is compiled (or an endpoint-module collection)', () => {
+  test('every seeded name is compiled', () => {
     for (const { name } of PLATFORM_CONFIGS) {
-      expect(COLLECTIONS[name] !== undefined || ENDPOINT_MODULES.has(name)).toBe(true)
+      expect(COLLECTIONS[name] !== undefined).toBe(true)
     }
+  })
+
+  test('post and page are not the platform\'s: the blog manifest installs them (D28)', () => {
+    const names = PLATFORM_CONFIGS.map((c) => c.name)
+    expect(names).not.toContain('post')
+    expect(names).not.toContain('page')
   })
 
   test('every compiled name is seeded (or deliberately not)', () => {

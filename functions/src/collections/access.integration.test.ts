@@ -87,7 +87,7 @@ describe('Access Control Integration Tests', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          p: 'post/test-post-' + Date.now(),
+          p: 'blog:post/test-post-' + Date.now(),
           data: { title: 'Test', content: 'Hello', path: 'test' },
         }),
       })

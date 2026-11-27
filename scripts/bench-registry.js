@@ -24,6 +24,10 @@
  * spaced to ~40/minute so the limiter never answers instead of the endpoint.
  *
  * Sandbox only: refuses production and unmarked hosts like every verify script.
+ *
+ * HISTORICAL since D28 (2026-11): posts are `blog:post`, an installed
+ * collection like `benchreg:post`, so there is no bare-name row left to
+ * compare and the `post` reads below find nothing. Kept for the method.
  */
 import { execSync } from 'child_process'
 const lib = await import(new URL('sandbox-lib.js', import.meta.url).href)

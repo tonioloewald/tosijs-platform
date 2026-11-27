@@ -156,7 +156,7 @@ describe('privilege lifecycle: grant → exercise → change → revoke → re-a
   test('2. the subject can EXERCISE the granted privilege', async () => {
     if (guard()) return expect(true).toBe(true)
     // `author` holds list: ALL on post, so an author sees unpublished posts.
-    const res = await emulatorFetch(`${FUNCTIONS_URL}/docs?p=post&c=5`, {
+    const res = await emulatorFetch(`${FUNCTIONS_URL}/docs?p=blog:post&c=5`, {
       headers: { Authorization: `Bearer ${subjectToken}` },
     })
     expect(res.status).toBe(200)
@@ -196,7 +196,7 @@ describe('privilege lifecycle: grant → exercise → change → revoke → re-a
   test('6. a revoked subject cannot exercise the privilege they used to have', async () => {
     if (guard()) return expect(true).toBe(true)
     // They may still LIST posts (public can), but must not see unpublished ones.
-    const res = await emulatorFetch(`${FUNCTIONS_URL}/docs?p=post&c=50`, {
+    const res = await emulatorFetch(`${FUNCTIONS_URL}/docs?p=blog:post&c=50`, {
       headers: { Authorization: `Bearer ${subjectToken}` },
     })
     if (res.status !== 200) {
@@ -242,18 +242,18 @@ describe('uid and contact are BOTH grants — neither caches the other', () => {
     const w = await setSubjectRoles(['author'], true, ['someone-else-uid'])
     if (w.status !== 200) return
     const id = `lifecycle-prov-${Date.now()}`
-    const created = await doc(subjectToken, 'POST', `post/${id}`, {
+    const created = await doc(subjectToken, 'POST', `blog:post/${id}`, {
       title: `provenance ${id}`,
       content: 'x',
       // This principal has no published name, so an empty author is refused.
       author: 'Subject',
     })
     expect(created.status).toBe(200)
-    const stored = await doc(ownerToken, 'GET', `post/${id}`)
+    const stored = await doc(ownerToken, 'GET', `blog:post/${id}`)
     const by = (JSON.parse(stored.text) as { _by?: { uid?: string } })._by
     expect(by?.uid).toBe(subjectUid)
     expect(by?.uid).not.toBe('someone-else-uid')
-    await doc(ownerToken, 'DELETE', `post/${id}`)
+    await doc(ownerToken, 'DELETE', `blog:post/${id}`)
   })
 
   test('8. a contact grant survives on its own merit, not via a cached uid', async () => {

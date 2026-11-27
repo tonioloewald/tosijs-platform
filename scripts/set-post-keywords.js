@@ -48,6 +48,8 @@ const projectId = readRc().projects?.[alias]
 if (!projectId) throw new Error(`no project for alias ${alias}`)
 const apply = has('apply')
 const base = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`
+// Posts are the blog manifest's `blog:post` since D28.
+const POSTS = encodeURIComponent('blog:post')
 
 function assertRecentBackup() {
   const root = path.join(os.homedir(), 'Backups', 'tosijs-platform', projectId)
@@ -77,13 +79,13 @@ console.log(`${apply ? 'APPLY' : 'DRY RUN'} → ${projectId}: ${plan.length} pla
 
 const counts = { written: 0, unchanged: 0, skipped: 0 }
 for (const entry of plan) {
-  const label = `post/${entry.id} ${String(entry.title).slice(0, 60)}`
+  const label = `blog:post/${entry.id} ${String(entry.title).slice(0, 60)}`
   if (!wellFormed(entry.keywords)) {
     console.log(`   SKIP ${label}: malformed keywords`)
     counts.skipped++
     continue
   }
-  const read = await api('GET', `${base}/post/${entry.id}`)
+  const read = await api('GET', `${base}/${POSTS}/${entry.id}`)
   if (!read.ok) {
     console.log(`   SKIP ${label}: read ${read.status}`)
     counts.skipped++
@@ -105,7 +107,7 @@ for (const entry of plan) {
     continue
   }
   const url =
-    `${base}/post/${entry.id}?updateMask.fieldPaths=keywords` +
+    `${base}/${POSTS}/${entry.id}?updateMask.fieldPaths=keywords` +
     `&currentDocument.updateTime=${encodeURIComponent(read.json.updateTime)}`
   const write = await api('PATCH', url, {
     fields: { keywords: { arrayValue: { values: entry.keywords.map((k) => ({ stringValue: k })) } } },

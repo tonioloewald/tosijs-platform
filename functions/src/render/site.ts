@@ -15,7 +15,8 @@
  * deliberate and listed where they occur.
  */
 import { firstImage } from '../social-meta'
-import { isPublished } from '../../shared/post'
+import { isPublished, POST_COLLECTION } from '../../shared/post'
+import { PAGE_COLLECTION } from '../../shared/page'
 import type { HeadOptions } from './document'
 import { postBodyHtml } from './markdown'
 
@@ -242,7 +243,7 @@ export function routeArtifact(input: {
   }
 
   // The blog page: a named post's head, or (by setting) the latest post's.
-  const post = Object.entries(hydrated).find(([p, d]) => p.startsWith('post/') && d)?.[1]
+  const post = Object.entries(hydrated).find(([p, d]) => p.startsWith(`${POST_COLLECTION}/`) && d)?.[1]
   if (page?.path === 'blog' && (post || (settings.defaultToBlogMetadata && latestPost))) {
     const shown = (post ?? latestPost) as Doc
     head.title = settings.postTitlePrefix + (shown.title || '')
@@ -258,7 +259,7 @@ export function routeArtifact(input: {
   const data: Record<string, unknown> = {}
   if (page) data.page = page
   const sources: Record<string, string | null> = {}
-  if (page) sources[`page/path=${pagePath}`] = sourceOf(page)
+  if (page) sources[`${PAGE_COLLECTION}/path=${pagePath}`] = sourceOf(page)
   for (const [path, doc] of Object.entries(hydrated)) {
     if (doc) data[path] = doc
     sources[path] = sourceOf(doc)
@@ -300,7 +301,7 @@ export function composePrefetched(
     out.recentPosts = blog.recentPosts
     out.blogDataTimestamp = blog.blogDataTimestamp
     out.blogVersion = 4
-    for (const post of blog.latestPosts) out[`post/path=${post.path}`] = post
+    for (const post of blog.latestPosts) out[`${POST_COLLECTION}/path=${post.path}`] = post
   }
   return out
 }

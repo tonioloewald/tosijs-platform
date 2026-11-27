@@ -100,6 +100,10 @@ async function startLocal() {
     port: 0,
     firebaseJson: join(__dirname, '../../../firebase.json'),
   })
+  // The blog's posts and pages are its manifest's collections (D28), so a host
+  // without it has none. The emulators get it from `bun seed`.
+  const { installAsOperator } = await import('../install/operator')
+  await installAsOperator(dataStore, JSON.parse(readFileSync(join(__dirname, '../../../manifests/blog.json'), 'utf-8')))
   const target: IntegrationTarget = {
     kind: 'local',
     functionsUrl: `${host.url}/${PROJECT_ID}/us-central1`,

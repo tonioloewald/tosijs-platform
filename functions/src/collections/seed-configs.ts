@@ -1,5 +1,5 @@
 /**
- * The nine platform collections, expressed as DATA.
+ * The platform's own collections, expressed as DATA.
  *
  * This is the translation of every `COLLECTIONS.x = {...}` in the codebase into
  * the declarative form the registry compiles. Once `/doc` reads from the
@@ -11,14 +11,14 @@
  * names because they belong to the platform's own namespace, and that is the
  * only thing distinguishing them from `virta:task`.
  *
+ * `post` and `page` are not here: they are the blog's, installed by its
+ * manifest as `blog:post` and `blog:page` (D28, manifests/blog.json).
+ *
  * ## Deliberately unchanged behaviour
  *
  * Every rule here reproduces what ships today, including the parts that look
  * odd:
  *
- *   - `post` is publicly READABLE including drafts. That is intentional —
- *     unpublished posts are unlisted, not secret, so a link can be sent to a
- *     friend for comment. Drafts are excluded from LIST only.
  *   - `role` is OWNER-ONLY for everything (D4). `getUserRoles` derives every
  *     caller's authority from this collection, so whoever writes it rewrites
  *     the input to their own authorization.
@@ -30,96 +30,6 @@ import type { StoredCollectionConfig } from './registry'
 import { ROLES } from './roles'
 
 export const PLATFORM_CONFIGS: StoredCollectionConfig[] = [
-  {
-    name: 'post',
-    namespace: null,
-    collection: {
-      schema: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          content: { type: 'string' },
-          path: { type: 'string' },
-          date: { type: 'string' },
-          summary: { type: 'string' },
-          keywords: { type: 'array', items: { type: 'string' } },
-          imageUrl: { type: 'string' },
-          author: { type: 'string' },
-          format: { type: 'string' },
-          _created: { type: 'string' },
-          _modified: { type: 'string' },
-        },
-        required: ['title', 'content'],
-      },
-      // Both, each on its own, matching blog.ts (D19: per-field unique).
-      unique: ['title', 'path'],
-      // Replaces blog.ts's `validate`, which generates a path from the title.
-      // …and an empty author from the caller's published name, refusing the
-      // write when there is none: every post's byline names someone.
-      derive: [
-        { op: 'slug', to: 'path', from: 'title', when: 'absent' },
-        { op: 'principal', to: 'author', field: 'name', required: true },
-      ],
-      access: [
-        {
-          role: ROLES.public,
-          // Drafts ARE readable by direct link, deliberately. See the header.
-          read: 'ALL',
-          // …but never listed. `nonEmpty` covers all three of D11's "empty"
-          // shapes; testing `date !== undefined` once leaked 57 drafts.
-          list: { visible: { field: 'date', op: 'nonEmpty' } },
-        },
-        { role: ROLES.author, write: 'ALL', list: 'ALL' },
-      ],
-    },
-  },
-  {
-    name: 'page',
-    namespace: null,
-    collection: {
-      schema: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          description: { type: 'string' },
-          path: { type: 'string' },
-          imageUrl: { type: 'string' },
-          source: { type: 'string' },
-          css: { type: 'string' },
-          tags: { type: 'array', items: { type: 'string' } },
-          type: { type: 'string' },
-          navSort: { type: 'string' },
-          icon: { type: 'string' },
-          _created: { type: 'string' },
-          _modified: { type: 'string' },
-        },
-        required: ['title', 'description', 'path', 'source'],
-      },
-      // page.ts makes `path` unique; the seed had lost it (caught by
-      // seed-parity.test.ts, D19).
-      unique: ['path'],
-      tagFields: ['tags'],
-      access: [
-        {
-          role: ROLES.public,
-          read: { visible: { field: 'tags', op: 'includes', value: 'public' } },
-          // LIST needs `public` AND `visible`: a public-but-not-visible page is
-          // reachable by link and deliberately absent from navigation. The seed
-          // required only `public`, so the swap would have listed unlisted
-          // pages to everyone.
-          list: {
-            visible: {
-              all: [
-                { field: 'tags', op: 'includes', value: 'public' },
-                { field: 'tags', op: 'includes', value: 'visible' },
-              ],
-            },
-          },
-        },
-        { role: ROLES.admin, read: 'ALL', write: 'ALL', list: 'ALL' },
-      ],
-    },
-  },
   {
     name: 'module',
     namespace: null,

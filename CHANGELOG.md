@@ -54,6 +54,12 @@ when content is stored (D22, D23).
 
 ### Changed
 
+- **Posts and pages are the blog's, not the platform's (D28).** They are
+  `blog:post` and `blog:page`, collections the blog manifest (1.1.0,
+  `manifests/blog.json`) installs, with the rules `post` and `page` had. The
+  platform no longer defines `post` or `page`: a host without the blog
+  manifest has no blog. Side effects attached by name (the blog cache, render
+  on store) now reach namespaced collections too. Render artifacts are `r5`.
 - **`bun run deploy` now means the whole host**, and it passes `--force`:
   indexes and functions that exist on the host but not in the checkout are
   deleted without a prompt. `deploy-functions` and `deploy-hosting` remain for
@@ -93,6 +99,16 @@ when content is stored (D22, D23).
 
 Run `bun run deploy` (or deploy functions, rules **and hosting**: this release
 changes all three).
+
+- **A host with a blog moves its posts and pages first**, in this order:
+  `bun run backup`; install the blog manifest 1.1.0
+  (`bun scripts/install-manifest.js manifests/blog.json`); copy the documents
+  (`bun scripts/migrate-blog-collections.js --alias <host> --apply`); deploy;
+  check (`… --check`). The copy keeps every id and field, renames the blog
+  page's prefetch pattern, clears `config/blog-cache`, and deletes nothing;
+  `post` and `page` stay as the rollback. `bun run deploy` refuses a host whose
+  posts are still only in `post`. Anything that reads or writes `/doc?p=post…`
+  directly (scripts, agents, a token scoped to `post`) must name `blog:post`.
 
 - **`firebase.json`, if you maintain your own:** add rewrites for
   `/authorize`, `/claim` and `/install` to their functions, **before** any

@@ -23,7 +23,8 @@ import { computedBackend, dataStore } from '../datastore'
 import type { AuthenticatedRequest } from '../utilities'
 import type { WriteChange } from '../collections/access'
 import { config as siteConfig } from '../config'
-import { isPublished } from '../../shared/post'
+import { isPublished, POST_COLLECTION } from '../../shared/post'
+import { PAGE_COLLECTION } from '../../shared/page'
 import { collectionsFor } from '../install/installed'
 import { ComputedStore, Deps, depsOfWrite } from './computed'
 import { INVALIDATING_COLLECTIONS, isInvalidatedDep } from './rules'
@@ -54,8 +55,12 @@ import {
  * Bump when a renderer or the page template changes: everything recomputes
  * lazily. Each version has its OWN collection, so an old one is never scanned
  * by invalidation and can be dropped whole.
+ *
+ * r5: posts and pages moved to `blog:post` and `blog:page` (D28). An r4
+ * artifact's dependencies name the old collections, which nothing writes now,
+ * so it would never be invalidated again.
  */
-export const RENDER_VERSION = 'r4'
+export const RENDER_VERSION = 'r5'
 const RENDER_COLLECTION = `system:render-${RENDER_VERSION}`
 /** Shared by all versions: which deps were invalidated, and when (see computed.ts, Races). */
 const LOG_COLLECTION = 'system:render-log'
@@ -126,7 +131,7 @@ const nav = (parent?: Deps) =>
     'nav',
     async (deps) => {
       const appConfig = (await readPublic('config/app', deps)) as AppConfig | undefined
-      const pages = await listPublic('page/tags=visible', deps, 100)
+      const pages = await listPublic(`${PAGE_COLLECTION}/tags=visible`, deps, 100)
       return { value: navFragment(appConfig, pages), storable: true }
     },
     { parent }
@@ -136,7 +141,7 @@ const blogIndex = (parent?: Deps) =>
   renderStore.get<BlogIndexFragment>(
     'blog-index',
     async (deps) => {
-      const posts = await listPublic('post', deps, 30, 'date(desc)')
+      const posts = await listPublic(POST_COLLECTION, deps, 30, 'date(desc)')
       return { value: blogIndexFragment(posts, new Date().toISOString()), storable: true }
     },
     { parent }
@@ -153,11 +158,11 @@ const routeTable = (parent?: Deps) =>
   renderStore.get<RouteTable>(
     'route-table',
     async (deps) => {
-      deps.add('list:page')
-      const paths = (await dataStore.query('page', { fields: ['path'], orderBy: '~' }))
+      deps.add(`list:${PAGE_COLLECTION}`)
+      const paths = (await dataStore.query(PAGE_COLLECTION, { fields: ['path'], orderBy: '~' }))
         .map((d) => d.data.path as string | undefined)
         .filter((p): p is string => typeof p === 'string')
-      const pages = (await Promise.all(paths.map((p) => readPublic(`page/path=${p}`, deps)))).filter(
+      const pages = (await Promise.all(paths.map((p) => readPublic(`${PAGE_COLLECTION}/path=${p}`, deps)))).filter(
         (p): p is Record<string, any> => Boolean(p)
       )
       return { value: routeTableFragment(pages), storable: true }
@@ -181,11 +186,11 @@ const route = (key: string) =>
   renderStore.get<RouteArtifact | null>(key, async (deps) => {
     const settings = ROUTE_SETTINGS
     const { pagePath, hydrated: paths } = parseRouteKey(key)
-    const page = await readPublic(`page/path=${pagePath}`, deps)
+    const page = await readPublic(`${PAGE_COLLECTION}/path=${pagePath}`, deps)
     const hydrated: Record<string, Record<string, any> | undefined> = {}
     for (const p of paths) hydrated[p] = await readPublic(p, deps)
     if (!page || paths.some((p) => hydrated[p] === undefined)) return { value: null, storable: false }
-    const isDraft = Object.entries(hydrated).some(([p, d]) => p.startsWith('post/') && d && !isPublished(d))
+    const isDraft = Object.entries(hydrated).some(([p, d]) => p.startsWith(`${POST_COLLECTION}/`) && d && !isPublished(d))
     // (Whether the rest may be kept — only reads that writes invalidate — is
     // enforced by the store itself: isInvalidatedDep.)
     // Only the blog page's head reads the blog index (the latest post's
@@ -203,7 +208,7 @@ const sitemap = () =>
     const appConfig = (await readPublic('config/app', deps)) as AppConfig | undefined
     // Newest first: if a scan cap ever truncates, it drops the OLDEST posts
     // (sitemapXml sorts by date itself).
-    const posts = await listPublic('post', deps, 5000, 'date(desc)')
+    const posts = await listPublic(POST_COLLECTION, deps, 5000, 'date(desc)')
     return {
       value: sitemapXml(siteHost(appConfig), posts.map((p) => postIndexEntry(p)), new Date().toISOString()),
       storable: true,

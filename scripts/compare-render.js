@@ -86,7 +86,7 @@ await Promise.all(
 console.log(`${urls.length} URLs: ${same} identical, ${different.length} different`)
 const tally = new Map()
 for (const { d } of different) for (const line of d) {
-  const kind = line.replace(/post\/path=[^.:]+/g, 'post/path=…').replace(/: OLD .*/, ': value differs')
+  const kind = line.replace(/(blog:)?post\/path=[^.:]+/g, 'post/path=…').replace(/: OLD .*/, ': value differs')
   tally.set(kind, (tally.get(kind) ?? 0) + 1)
 }
 for (const [kind, n] of [...tally].sort((a, b) => b[1] - a[1]).slice(0, 25)) console.log(`  ${String(n).padStart(4)}  ${kind}`)

@@ -1,11 +1,8 @@
-import { COLLECTIONS } from './collections'
-import { ALL } from './collections/access'
-import { ROLES } from './collections/roles'
 import { getDoc } from './doc'
 import { getDocs } from './docs'
 
 import { onPrefetch, PageOptions, PrefetchData } from './prefetch'
-import { Page, PageSchema } from '../shared/page'
+import { PAGE_COLLECTION, type Page } from '../shared/page'
 import { notFoundPath } from './render/site'
 
 // Exported so other prefetch handlers can check the current page
@@ -37,16 +34,16 @@ export function resolvePage(req: any, res: any, url: string) {
         !urlPath && appConfig?.defaultPath ? appConfig.defaultPath : urlPath
 
       // Load page by path
-      const pageResult = await getDoc(req, res, `page/path=${path}`)
+      const pageResult = await getDoc(req, res, `${PAGE_COLLECTION}/path=${path}`)
       let page = pageResult.ok ? (pageResult.data as Page) : undefined
 
       // Not found: the site's 404 page if it has one, else its home page,
       // marked so the response is a 404 and the client says so (#3913).
       if (!page) {
-        const notFoundResult = await getDoc(req, res, `page/path=404`)
+        const notFoundResult = await getDoc(req, res, `${PAGE_COLLECTION}/path=404`)
         page = notFoundResult.ok ? (notFoundResult.data as Page) : undefined
         if (!page && appConfig?.defaultPath && path !== appConfig.defaultPath) {
-          const homeResult = await getDoc(req, res, `page/path=${appConfig.defaultPath}`)
+          const homeResult = await getDoc(req, res, `${PAGE_COLLECTION}/path=${appConfig.defaultPath}`)
           page = homeResult.ok ? (homeResult.data as Page) : undefined
         }
         return { appConfig, page, notFound: true }
@@ -78,7 +75,7 @@ onPrefetch(
     if (notFound) data.notFound = notFoundPath(url)
 
     // Get visible pages for navigation menu
-    const visiblePages = await getDocs(req, res, 'page/tags=visible', 100)
+    const visiblePages = await getDocs(req, res, `${PAGE_COLLECTION}/tags=visible`, 100)
     data.visiblePages = visiblePages.sort((a: any, b: any) => {
       const aSort = a.navSort ?? a.title.toLowerCase()
       const bSort = b.navSort ?? b.title.toLowerCase()
@@ -132,26 +129,3 @@ onPrefetch(
     return data
   }
 )
-
-COLLECTIONS.page = {
-  schema: PageSchema,
-  unique: ['path'],
-  tagFields: ['tags'],
-  access: {
-    [ROLES.public]: {
-      read: async (page) => {
-        return page.tags.includes('public') ? page : new Error('not visible')
-      },
-      list: async (page) => {
-        return page.tags.includes('public') && page.tags.includes('visible')
-          ? page
-          : new Error('not public and visible')
-      },
-    },
-    [ROLES.admin]: {
-      read: ALL,
-      write: ALL,
-      list: ALL,
-    },
-  },
-}

@@ -5,14 +5,16 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore - bun:test types intermittently available
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { serveLocal, type LocalHost } from './serve'
 import { dataStore } from '../../datastore'
 import { devToken } from '../local/identity'
+import { installAsOperator } from '../../install/operator'
 
 const FIREBASE_JSON = join(__dirname, '../../../../firebase.json')
+const BLOG_MANIFEST = JSON.parse(readFileSync(join(__dirname, '../../../../manifests/blog.json'), 'utf-8'))
 
 test('dev identities are refused on anything but loopback', async () => {
   await expect(serveLocal({ dataDir: tmpdir(), host: '0.0.0.0', port: 0 })).rejects.toThrow('unsigned')
@@ -50,6 +52,8 @@ describe('serving the platform from a data directory', () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'serve-local-'))
     await start()
+    // Posts are the blog manifest's collection (D28): a bare host has none.
+    await installAsOperator(dataStore, BLOG_MANIFEST)
     await dataStore.set('role/local-owner', {
       name: 'local-owner',
       roles: ['owner', 'developer', 'admin', 'editor', 'author'],
@@ -69,25 +73,36 @@ describe('serving the platform from a data directory', () => {
   })
 
   test('an anonymous write is refused, and writes nothing', async () => {
-    const res = await doc('POST', null, { p: 'post/anon', data: { title: 'x', content: 'x', path: 'anon' } })
+    const res = await doc('POST', null, { p: 'blog:post/anon', data: { title: 'x', content: 'x', path: 'anon' } })
     expect(res.status).toBeGreaterThanOrEqual(400)
-    expect((await dataStore.get('post/anon')).exists).toBe(false)
+    expect((await dataStore.get('blog:post/anon')).exists).toBe(false)
   })
 
   test('a forged (non-dev) token is anonymous', async () => {
-    const res = await doc('POST', 'not-a-dev-token', { p: 'post/forged', data: { title: 'x', content: 'x', path: 'f' } })
+    const res = await doc('POST', 'not-a-dev-token', { p: 'blog:post/forged', data: { title: 'x', content: 'x', path: 'f' } })
     expect(res.status).toBeGreaterThanOrEqual(400)
-    expect((await dataStore.get('post/forged')).exists).toBe(false)
+    expect((await dataStore.get('blog:post/forged')).exists).toBe(false)
   })
 
   test('a dev identity with a role writes through the write path, stamped', async () => {
-    const res = await doc('POST', owner, { p: 'post/local-1', data: { title: 'Local', content: 'hi', path: 'local-1' } })
+    const res = await doc('POST', owner, { p: 'blog:post/local-1', data: { title: 'Local', content: 'hi', path: 'local-1' } })
     expect(res.status).toBe(200)
-    const read = await doc('GET', owner, undefined, '?p=post/local-1')
+    const read = await doc('GET', owner, undefined, '?p=blog:post/local-1')
     expect(read.status).toBe(200)
     const body = await read.json()
     expect(body.title).toBe('Local')
     expect(typeof body._created).toBe('string')
+  })
+
+  test('saving a post clears the blog cache: blog:post keeps its side effect (D28)', async () => {
+    // Its rules are the blog manifest's data, so the cache clear is attached by
+    // name; without it the site would serve the old post for up to a day.
+    await dataStore.set('config/blog-cache', { timestamp: new Date().toJSON(), latestPosts: [{ path: 'stale' }], recentPosts: [] })
+    const res = await doc('POST', owner, { p: 'blog:post/local-2', data: { title: 'Local 2', content: 'hi', path: 'local-2' } })
+    expect(res.status).toBe(200)
+    const cache = (await dataStore.get('config/blog-cache')).data
+    expect(cache.latestPosts).toBeUndefined()
+    expect(typeof cache.cleared).toBe('string')
   })
 
   test('/stored streams a legacy file from the directory, sandboxed by Hosting’s rule', async () => {
@@ -102,23 +117,23 @@ describe('serving the platform from a data directory', () => {
 
   test('/docs?modifiedAfter lists what was edited since, and refuses what Firestore could not answer (#4050)', async () => {
     const before = new Date(Date.now() - 1000).toISOString()
-    expect((await doc('POST', owner, { p: 'post/edited', data: { title: 'Edited', content: 'x', path: 'edited' } })).status).toBe(200)
+    expect((await doc('POST', owner, { p: 'blog:post/edited', data: { title: 'Edited', content: 'x', path: 'edited' } })).status).toBe(200)
     const docs = (query: string) =>
       fetch(`${fn('docs')}?${query}`, { headers: { Authorization: `Bearer ${owner}` } })
-    const found = await docs(`p=post&f=title,_modified&modifiedAfter=${encodeURIComponent(before)}`)
+    const found = await docs(`p=blog:post&f=title,_modified&modifiedAfter=${encodeURIComponent(before)}`)
     expect(found.status).toBe(200)
     expect((await found.json()).map((r: { title: string }) => r.title)).toContain('Edited')
-    const later = await docs(`p=post&modifiedAfter=${encodeURIComponent(new Date(Date.now() + 60000).toISOString())}`)
+    const later = await docs(`p=blog:post&modifiedAfter=${encodeURIComponent(new Date(Date.now() + 60000).toISOString())}`)
     expect(await later.json()).toEqual([])
-    expect((await docs('p=post&modifiedAfter=yesterday')).status).toBe(400)
-    expect((await docs(`p=post&o=date(desc)&modifiedAfter=${encodeURIComponent(before)}`)).status).toBe(400)
-    expect((await docs(`p=post/tags=x&modifiedAfter=${encodeURIComponent(before)}`)).status).toBe(400)
+    expect((await docs('p=blog:post&modifiedAfter=yesterday')).status).toBe(400)
+    expect((await docs(`p=blog:post&o=date(desc)&modifiedAfter=${encodeURIComponent(before)}`)).status).toBe(400)
+    expect((await docs(`p=blog:post/tags=x&modifiedAfter=${encodeURIComponent(before)}`)).status).toBe(400)
   })
 
   test('documents survive a restart', async () => {
     await host.close()
     await start()
-    const read = await doc('GET', owner, undefined, '?p=post/local-1')
+    const read = await doc('GET', owner, undefined, '?p=blog:post/local-1')
     expect(read.status).toBe(200)
     expect((await read.json()).title).toBe('Local')
   })

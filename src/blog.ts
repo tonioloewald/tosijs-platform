@@ -9,7 +9,12 @@ import {
   tosiValue,
   PartsMap,
 } from 'tosijs'
-import { isPublished, UNPUBLISHED_DATE } from '../functions/shared/post'
+import {
+  currentPostPath,
+  isPublished,
+  POST_COLLECTION,
+  UNPUBLISHED_DATE,
+} from '../functions/shared/post'
 import {
   formatBlogDate,
   resolvePostPath,
@@ -185,7 +190,7 @@ export const { blog } = tosi({
         ''
       )
       const recent = (await service.docs.get({
-        p: 'post',
+        p: POST_COLLECTION,
         f: INDEX_FIELDS,
         o: '_modified(desc)',
         c: count,
@@ -220,7 +225,7 @@ export const { blog } = tosi({
       const o =
         roles.includes('author') || roles.includes('editor') ? '' : 'date(desc)'
       return await service.docs.get({
-        p: 'post',
+        p: POST_COLLECTION,
         f: INDEX_FIELDS,
         o,
         c,
@@ -232,7 +237,10 @@ export const { blog } = tosi({
       )
       for (const item of cached) {
         if (!blog.index.find((entry) => entry.path === item.path)) {
-          blog.index.push(item)
+          // Cached before posts moved to blog:post (D28).
+          blog.index.push(
+            item._path ? { ...item, _path: currentPostPath(item._path) } : item
+          )
         }
       }
       blog.filterIndex()
@@ -246,12 +254,14 @@ export const { blog } = tosi({
         return Promise.all(
           latestPosts
             .slice(0, count)
-            .map((path: string) => getPrefetchedDoc(`post/path=${path}`, false))
+            .map((path: string) =>
+              getPrefetchedDoc(`${POST_COLLECTION}/path=${path}`, false)
+            )
         )
       } else {
         console.log(`fetching ${count} latest posts`)
         return await service.docs.get({
-          p: 'post',
+          p: POST_COLLECTION,
           c: count,
           o: 'date(desc)',
         })
@@ -263,7 +273,7 @@ export const { blog } = tosi({
         const [ref] = await blog.getLatest()
         p = ref._path as string
       } else {
-        p = `post/${id}`
+        p = `${POST_COLLECTION}/${id}`
       }
       return getPrefetchedDoc(p)
     },
@@ -274,7 +284,10 @@ export const { blog } = tosi({
       if (post.content) {
         blog.currentPost = post
       } else {
-        const loaded = await blog.loadPost(`post/path=${post.path}`, post.title)
+        const loaded = await blog.loadPost(
+          `${POST_COLLECTION}/path=${post.path}`,
+          post.title
+        )
         if (!loaded) return
       }
       const path = blog.linkFromRef(blog.currentPost as unknown as BlogRef)
@@ -292,16 +305,16 @@ export const { blog } = tosi({
       let [, , postPath] =
         (!notFound && path.match(/\/blog\/(\d+\/)*([\w-]+)\/?$/)) || []
       if (postPath) {
-        return `post/path=${postPath}`
+        return `${POST_COLLECTION}/path=${postPath}`
       }
       const urlParams = new URLSearchParams(window.location.search)
       const postId = notFound ? null : urlParams.get('p')
       if (postId) {
-        return `post/${postId}`
+        return `${POST_COLLECTION}/${postId}`
       }
       const latestPosts = await getPrefetchedDoc('latestPosts', false)
       if (latestPosts && latestPosts.length) {
-        return `post/path=${latestPosts[0]}`
+        return `${POST_COLLECTION}/path=${latestPosts[0]}`
       }
     },
     async loadPost(p?: string, title = 'post'): Promise<BlogPost | undefined> {
@@ -647,8 +660,15 @@ export class XinBlog extends Component {
           caption: 'Reopen Draft',
           enabled: () => !!localStorage.getItem('xin-blog-editor-post'),
           action() {
+            const draft = JSON.parse(
+              localStorage.getItem('xin-blog-editor-post') || '{}'
+            )
+            // A draft kept from before posts moved to blog:post (D28) must
+            // save to the new collection, not the retired one.
             blog.editPost(
-              JSON.parse(localStorage.getItem('xin-blog-editor-post') || '{}')
+              draft._path
+                ? { ...draft, _path: currentPostPath(draft._path) }
+                : draft
             )
           },
         },
@@ -1203,7 +1223,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
     let path = (data._path as string) || this.#path
     const method: ServiceRequestType = path ? 'put' : 'post'
     if (!path) {
-      path = `post/${randomID()}`
+      path = `${POST_COLLECTION}/${randomID()}`
     }
     data._path = path
 
@@ -1244,7 +1264,7 @@ export class XinPostEditor extends Component<PostEditorParts> {
     if (window.prefetched) {
       delete window.prefetched[path]
       if (data.path) {
-        delete window.prefetched[`post/path=${data.path}`]
+        delete window.prefetched[`${POST_COLLECTION}/path=${data.path}`]
       }
     }
     const fresh = await service.doc.get({ p: path })

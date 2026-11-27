@@ -2,13 +2,16 @@
  * The seeded DATA configs decide exactly what the shipped TYPESCRIPT decides —
  * including what their filter functions decide, not just that both have one.
  *
- * `seed-configs.test.ts` compares decisions by KIND ("ALL", "a filter", "deny")
- * and cannot load `post` or `page`, which are registered by endpoint modules
- * that initialise firebase-admin at import. Comparing kinds let a real drift
- * through: shipped `page` lists a page to the public only when it is tagged
- * `public` AND `visible`; the seed required only `public`, so the registry swap
- * (D19) would have listed unlisted pages to everyone. This file loads the real
- * modules with firebase-admin stubbed, and runs both filters over fixtures.
+ * `seed-configs.test.ts` compares decisions by KIND ("ALL", "a filter", "deny").
+ * Comparing kinds let a real drift through: shipped `page` listed a page to the
+ * public only when it was tagged `public` AND `visible`; the seed required only
+ * `public`, so the registry swap (D19) would have listed unlisted pages to
+ * everyone. This file runs both filters over fixtures.
+ *
+ * `post` and `page` are no longer here: they are the blog manifest's (D28), and
+ * what this file pinned for them is pinned on the installed rules in
+ * `install/blog-manifest.test.ts`. The endpoint modules are still loaded, with
+ * firebase-admin stubbed, for the side effects they register by name.
  */
 import { describe, test, expect, mock } from 'bun:test'
 
@@ -49,18 +52,6 @@ const FIXTURES: Record<string, Array<Record<string, unknown>>> = {
   ],
   config: [{ name: 'app', host: 'example.org' }, { name: 'blog' }],
   role: [{ name: 'r', roles: ['author'], userIds: ['u'], contacts: [] }],
-  post: [
-    { title: 'published', content: 'x', path: 'a', date: '2026-01-01' },
-    { title: 'unpublished, empty date', content: 'x', path: 'b', date: '' },
-    { title: 'unpublished, whitespace date', content: 'x', path: 'c', date: '  ' },
-    { title: 'no date field at all', content: 'x', path: 'd' },
-  ],
-  page: [
-    { title: 't', description: 'd', path: 'p1', source: 's', tags: [] },
-    { title: 't', description: 'd', path: 'p2', source: 's', tags: ['public'] },
-    { title: 't', description: 'd', path: 'p3', source: 's', tags: ['visible'] },
-    { title: 't', description: 'd', path: 'p4', source: 's', tags: ['public', 'visible'] },
-  ],
 }
 
 /** What a decision does to a document: allowed, denied, or which fields survive. */
@@ -116,9 +107,9 @@ for (const name of Object.keys(FIXTURES)) {
 
 test('the comparison exercises real filters, not deny-vs-deny', async () => {
   // Guards against the loop passing because both sides deny everything.
-  const list = getMethodAccess(seeded, 'page', 'LIST', who([ROLES.public]))
+  const list = getMethodAccess(seeded, 'module', 'LIST', who([ROLES.public]))
   expect(typeof list).toBe('function')
-  expect(await outcome(list, FIXTURES.page[3])).toStartWith('shown')
+  expect(await outcome(list, FIXTURES.module[2])).toStartWith('shown')
 })
 
 test('every compiled afterWrite is registered as a platform hook (D19)', () => {
@@ -126,10 +117,17 @@ test('every compiled afterWrite is registered as a platform hook (D19)', () => {
   // after a write must be attached by name on the registry path — or the swap
   // silently drops it (for `post`: stale pages for up to a day).
   const withHook = Object.entries(COLLECTIONS).filter(([, c]) => c.afterWrite)
-  expect(withHook.length).toBeGreaterThan(0)
   for (const [name, config] of withHook) {
     expect(PLATFORM_HOOKS[name]?.afterWrite).toBe(config.afterWrite)
   }
+})
+
+test('the blog\'s posts keep their side effect by name (D28)', () => {
+  // blog:post's rules are its manifest's data, so the cache clear blog.ts
+  // registers is the only way a saved post reaches the site before the cache
+  // expires (a day).
+  expect(typeof PLATFORM_HOOKS['blog:post']?.afterWrite).toBe('function')
+  expect(PLATFORM_HOOKS.post).toBeUndefined()
 })
 
 // --- schema parity ------------------------------------------------------------
@@ -137,20 +135,6 @@ test('every compiled afterWrite is registered as a platform hook (D19)', () => {
 // seeded schema is JSON Schema, the compiled one tosijs-schema — the same
 // documents must be accepted and refused by both.
 const SCHEMA_FIXTURES: Record<string, Array<Record<string, unknown>>> = {
-  post: [
-    { title: 't', content: 'c' },
-    { title: 't' },
-    { content: 'c' },
-    { title: 't', content: 'c', keywords: ['a'] },
-    { title: 't', content: 'c', keywords: 'a' },
-    { title: 1, content: 'c' },
-  ],
-  page: [
-    { title: 't', description: 'd', path: 'p', source: 's' },
-    { title: 't', description: 'd', path: 'p' },
-    { title: 't', description: 'd', path: 'p', source: 's', tags: ['x'] },
-    { title: 't', description: 'd', path: 'p', source: 's', tags: 'x' },
-  ],
   role: [
     { name: 'r', contacts: [], roles: [], userIds: [] },
     { name: 'r', contacts: [{ type: 'email', value: 'a@b.org' }], roles: ['author'], userIds: [] },
@@ -184,41 +168,3 @@ for (const name of Object.keys(SCHEMA_FIXTURES)) {
     expect(mismatches).toEqual([])
   })
 }
-
-test('post: saving a LEGACY path leaves it exactly as stored — code and data (B1)', async () => {
-  // 96 of 791 production paths are not what slugify would produce (trailing
-  // `-`, `_`, over 80 characters). An edit must not move them.
-  const legacy = ['what-s-in-a-name-', 'x'.repeat(86), 'under_score', 'Mixed-Case']
-  for (const path of legacy) {
-    const body = () => ({ title: 'Some Title', content: 'c', path })
-    const codeValidate = COLLECTIONS.post.validate
-    const dataValidate = seeded.post.validate
-    if (!codeValidate || !dataValidate) throw new Error('post has no validate on one side')
-    const fromCode = await codeValidate(body(), who([ROLES.author]), { path })
-    const fromData = await dataValidate(body(), who([ROLES.author]), { path })
-    expect((fromCode as { path: string }).path).toBe(path)
-    expect((fromData as { path: string }).path).toBe(path)
-  }
-})
-
-test('post: a NEW post with no path — ACCEPTED divergence, owner-approved 2026-09-26', async () => {
-  // Compiled blog.ts generates with `toLocaleLowerCase().replace(/[^\\w]+/g, '-')`
-  // (keeps `_`, leaves a trailing `-`, no length cap). The seeded derive uses
-  // slugify — the same rule the editor uses. The owner accepted slugify for new
-  // posts; EXISTING paths never change (see the legacy-path test above).
-  // (The client's slugify lives in a DOM-dependent module; its outputs for
-  // these titles are pinned in src/blog-pure.test.ts — same values.)
-  const dataValidate = seeded.post.validate
-  if (!dataValidate) throw new Error('seeded post has no validate')
-  const expected: Record<string, string> = {
-    'Hello, World!': 'hello-world',
-    'What’s in a name?': 'what-s-in-a-name',
-    'snake_case title': 'snake-case-title',
-  }
-  for (const [title, path] of Object.entries(expected)) {
-    const out = (await dataValidate({ title, content: 'c' }, who([ROLES.author]), {})) as {
-      path: string
-    }
-    expect(out.path).toBe(path)
-  }
-})

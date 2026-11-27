@@ -79,13 +79,14 @@ describe('extensions/assets/manifest.json', () => {
   })
 
   test('its areas have the same limits and rules as the blog’s', () => {
-    const rules = (m: Manifest, ns: string) =>
+    // The blog's storage areas only: its posts and pages are not files.
+    const areas = (m: Manifest, ns: string) =>
       Object.fromEntries(
-        Object.entries(m.collections).map(([name, c]) => [
-          name.replace(`${ns}:`, ''),
-          c,
-        ])
+        Object.entries(m.collections)
+          .filter(([, c]) => c.blob)
+          .map(([name, c]) => [name.replace(`${ns}:`, ''), c])
       )
-    expect(rules(manifest, 'assets')).toEqual(rules(blog, 'blog'))
+    expect(Object.keys(areas(blog, 'blog'))).toEqual(['public', 'private'])
+    expect(areas(manifest, 'assets')).toEqual(areas(blog, 'blog'))
   })
 })

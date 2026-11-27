@@ -271,7 +271,7 @@ describe('the switch ON: bare names come from the registry (D19)', () => {
 describe('withPlatformHooks', () => {
   const noop = async () => undefined
 
-  test('attaches a hook to the BARE name only — never to a library that shares the name', () => {
+  test('attaches a hook by EXACT name — never to a library that shares the name', () => {
     PLATFORM_HOOKS['zz-bench'] = { afterWrite: noop }
     try {
       const map = withPlatformHooks({
@@ -282,6 +282,22 @@ describe('withPlatformHooks', () => {
       expect(map['lib:zz-bench'].afterWrite).toBeUndefined()
     } finally {
       delete PLATFORM_HOOKS['zz-bench']
+    }
+  })
+
+  test('attaches to a namespaced name too: the blog\'s posts are blog:post (D28)', () => {
+    PLATFORM_HOOKS['zz:posts'] = { afterWrite: noop }
+    try {
+      const map = withPlatformHooks({
+        'zz:posts': { access: {} },
+        'yy:posts': { access: {} },
+        posts: { access: {} },
+      } as CollectionMap)
+      expect(map['zz:posts'].afterWrite).toBe(noop)
+      expect(map['yy:posts'].afterWrite).toBeUndefined()
+      expect(map.posts.afterWrite).toBeUndefined()
+    } finally {
+      delete PLATFORM_HOOKS['zz:posts']
     }
   })
 

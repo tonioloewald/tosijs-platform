@@ -164,19 +164,19 @@ COLLECTIONS.post = {
 }
 ```
 
-Roles are **independent, not a hierarchy**: `getMethodAccess` collects the `public` grant plus a grant for each role the caller actually holds, and joins them. Roles are `public`, `author`, `editor`, `admin`, `developer`, `configurator` and `owner`. `owner` is authority over rules and roles (D4), and on its own it grants nothing on `post`; someone who administers and writes holds both roles.
+Roles are **independent, not a hierarchy**: `getMethodAccess` collects the `public` grant plus a grant for each role the caller actually holds, and joins them. Roles are `public`, `author`, `editor`, `admin`, `developer`, `configurator` and `owner`. `owner` is authority over rules and roles (D4), and on its own it grants nothing on `blog:post`; someone who administers and writes holds both roles.
 
 ### Collection Configs
 
 The `COLLECTIONS` map is defined in `functions/src/collections/index.ts`; the access-control engine and role definitions live in `functions/src/collections/access.ts` and `roles.ts`. Individual collection configs register themselves by mutating `COLLECTIONS` (e.g. `COLLECTIONS.post = {...}`) when their module is imported.
 
-Config files are split across two locations and are activated only by being imported in `functions/src/index.ts`:
-- `functions/src/collections/` - core/internal collections (`module`, `config`, `role`)
-- `functions/src/` - content collections that also export endpoints (`blog.ts`, `page.ts`)
+Config files live in `functions/src/collections/` (core/internal collections: `module`, `config`, `role`, the install records) and are activated only by being imported in `functions/src/kernel.ts`.
+
+**The blog's posts and pages are not platform collections** (D28). They are `blog:post` and `blog:page`, declared in **`manifests/blog.json`** with the blog's storage areas, and a host has them only once that manifest is installed (`bun scripts/install-manifest.js manifests/blog.json`; test hosts and `bun seed` install it as the operator, `install/operator.ts`). A change to their rules goes in the manifest, as a new version, and `install/blog-manifest.test.ts` pins their behaviour. The names are `POST_COLLECTION` and `PAGE_COLLECTION` in `functions/shared/`. `blog.ts` and `page.ts` register prefetch handlers, and `blog.ts` the blog-cache clear, attached by exact name through `PLATFORM_HOOKS` (`collections/hooks.ts`; render on store adds its own in `render/hooks.ts`). Until 2026-11 they were the bare `post` and `page`; `scripts/migrate-blog-collections.js` moves a host's data.
 
 To add a content type: create the config module, assign to `COLLECTIONS.<name>`, and add a side-effect `import './<name>'` in `functions/src/kernel.ts`. A collection with no config is fully inaccessible (deny-by-default).
 
-**Production reads the platform collections' rules from the registry, not from this TypeScript** (`system:registry`, live since 2026-09-26). Their data form is `functions/src/collections/seed-configs.ts`, compiled by `install/compile.ts`; a change to `post`, `page`, `role`… goes in **both** places (the seed-parity tests compare them) and reaches production only when the registry is re-seeded with `scripts/seed-registry.js` (a dry run by default; `--apply` writes, and production also needs `--production`). That is a production write. Transforms are closed `derive` ops, not code: for example, a post's empty `author` is filled from the writer's published name or the write is refused (D24).
+**Production reads the platform collections' rules from the registry, not from this TypeScript** (`system:registry`, live since 2026-09-26). Their data form is `functions/src/collections/seed-configs.ts`, compiled by `install/compile.ts`; a change to `role`, `module`, `config`… goes in **both** places (the seed-parity tests compare them) and reaches production only when the registry is re-seeded with `scripts/seed-registry.js` (a dry run by default; `--apply` writes, and production also needs `--production`). That is a production write. Transforms are closed `derive` ops, not code: for example, a post's empty `author` is filled from the writer's published name or the write is refused (D24).
 
 ### Client Data Access
 

@@ -228,11 +228,12 @@ export function withPlatformHooks(map: CollectionMap): CollectionMap {
   for (const [key, config] of Object.entries(map)) {
     // Reserved keys are dropped here too, for the same reason as the merge.
     if (isReservedCollection(key)) continue
+    // By EXACT name, so a library's `virta:post` never inherits the blog's
+    // cache invalidation because the names end alike. Namespaced names are
+    // hooked too: the blog's collections are `blog:post` and `blog:page`
+    // (D28), and only the manifest named `blog` may declare those (D15).
     const hooks = PLATFORM_HOOKS[key]
-    // Hooks attach only to BARE names: a library's `virta:post` must never
-    // inherit the blog's cache invalidation because the names end alike.
-    out[key] =
-      hooks && !key.includes(NAMESPACE_SEPARATOR) ? { ...config, ...hooks } : config
+    out[key] = hooks ? { ...config, ...hooks } : config
   }
   hooked.set(map, out)
   return out
@@ -256,5 +257,7 @@ export async function collectionsFor(
   if (!collectionPath.includes(NAMESPACE_SEPARATOR) || reserved) {
     return COLLECTIONS
   }
-  return mergePlatformLast(await installedRegistry.collections())
+  // Hooked here too: without the registry switch an installed collection
+  // would otherwise lose its side effects (the blog cache, render on store).
+  return withPlatformHooks(mergePlatformLast(await installedRegistry.collections()))
 }

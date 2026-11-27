@@ -179,8 +179,10 @@ async function seedFirestore() {
   const files = fs.readdirSync(firestorePath).filter((f) => f.endsWith('.json'))
 
   for (const file of files) {
-    // Convert filename to collection path (| -> /)
-    const collectionPath = file.replace(/\.json$/, '').replace(/\|/g, '/')
+    // Filename to collection path: percent-decoded, then `|` -> `/`. A file
+    // name cannot hold `:` on every system, so `blog:post` is checked in as
+    // `blog%3Apost.json` (D28).
+    const collectionPath = decodeURIComponent(file.replace(/\.json$/, '')).replace(/\|/g, '/')
     const filePath = path.join(firestorePath, file)
 
     try {
@@ -213,7 +215,10 @@ async function seedFirestore() {
         // based on email matching in contacts
 
         // Write to Firestore emulator using REST API
-        const url = `${FIRESTORE_HOST}/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath}/${docId}`
+        const url = `${FIRESTORE_HOST}/v1/projects/${PROJECT_ID}/databases/(default)/documents/${collectionPath
+          .split('/')
+          .map(encodeURIComponent)
+          .join('/')}/${docId}`
 
         const firestoreDoc = {
           fields: objectToFirestoreFields(data),
@@ -241,6 +246,61 @@ async function seedFirestore() {
       console.log(`  Error processing ${file}: ${error.message}`)
     }
   }
+}
+
+const EMULATOR_DOCS = `${FIRESTORE_HOST}/v1/projects/${PROJECT_ID}/databases/(default)/documents`
+const docUrl = (docPath) => `${EMULATOR_DOCS}/${docPath.split('/').map(encodeURIComponent).join('/')}`
+const writeDoc = (docPath, data) =>
+  fetch(docUrl(docPath), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer owner' },
+    body: JSON.stringify({ fields: objectToFirestoreFields(data) }),
+  })
+
+/**
+ * Install the blog manifest, as the operator (functions/src/install/operator.ts).
+ *
+ * The blog's posts and pages are `blog:post` and `blog:page`, collections its
+ * manifest installs (D28), so an emulator without it has no blog. These are the
+ * records `/install` would write; the operator approves them, being the person
+ * who could write them by hand.
+ */
+async function installBlogManifest() {
+  console.log('\nInstalling the blog manifest...')
+  const manifest = JSON.parse(fs.readFileSync(path.join(projectRoot, 'manifests', 'blog.json'), 'utf-8'))
+  const grant = await fetch(docUrl(`grant/${manifest.name}`), { headers: { Authorization: 'Bearer owner' } })
+  if (grant.ok) {
+    const active = (await grant.json()).fields?.activeVersion?.stringValue
+    if (active === manifest.version) {
+      console.log(`  ${manifest.name}@${manifest.version} is already installed`)
+      return
+    }
+  }
+  // An upgrade over an older seed would need the previous manifest for the
+  // additive check; a seed is a fresh host, so it installs from scratch.
+  const { operatorInstall } = await import('../functions/src/install/operator.ts')
+  const nowIso = new Date().toISOString()
+  const decision = operatorInstall({
+    manifest,
+    existing: null,
+    previousManifest: null,
+    nowIso,
+    logId: `seed-${Date.now()}`,
+    by: 'seed',
+  })
+  if (decision.status === 'refused') throw new Error(`blog manifest refused: ${decision.problems.join('; ')}`)
+  const { records } = decision
+  for (const [docPath, data] of [
+    [`manifest/${records.manifest.id}`, records.manifest.data],
+    [`grant/${records.grant.id}`, records.grant.data],
+    [`install-log/${records.log.id}`, records.log.data],
+    // A new epoch, so a running instance reloads its collection rules.
+    ['system:registry/epoch', { value: Date.now(), at: nowIso }],
+  ]) {
+    const res = await writeDoc(docPath, data)
+    if (!res.ok) throw new Error(`could not write ${docPath}: ${await res.text()}`)
+  }
+  console.log(`  ${manifest.name}@${manifest.version} installed`)
 }
 
 function objectToFirestoreFields(obj) {
@@ -407,6 +467,7 @@ async function main() {
   await seedAuth()
   // Then seed firestore (roles will get userIds populated from contacts)
   await seedFirestore()
+  await installBlogManifest()
 
   // The platform's collection rules, as production stores them (D19). The
   // emulator loads the production switch file (.env.<projectId>), so without

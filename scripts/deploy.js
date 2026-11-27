@@ -62,6 +62,29 @@ if (!has('i-own-this-host') && projectId !== lib.productionProjectId()) {
   }
 }
 
+// ── are the blog's documents where this code reads them? ─────────────────────
+// Since D28 posts and pages are `blog:post` and `blog:page`. Code that reads
+// them, deployed to a host whose posts are still in the bare `post`, serves an
+// empty blog, so a host with posts in `post` and none in `blog:post` is refused
+// until scripts/migrate-blog-collections.js has moved them. Public reads only.
+{
+  const fnBase = `https://us-central1-${projectId}.cloudfunctions.net`
+  const count = async (collection) => {
+    const r = await fetch(`${fnBase}/docs?p=${collection}&f=path&c=1`).catch(() => null)
+    const rows = r?.ok ? await r.json().catch(() => null) : null
+    return Array.isArray(rows) ? rows.length : 0
+  }
+  const [moved, legacy] = await Promise.all([count('blog:post'), count('post')])
+  if (!moved && legacy && !has('allow-unmigrated-blog')) {
+    console.error(
+      `\nRefusing to deploy to ${projectId}: its posts are still in \`post\`, and this code reads \`blog:post\` (D28).\n` +
+        '  Install the blog manifest 1.1.0 and run scripts/migrate-blog-collections.js first.\n' +
+        '  To deploy anyway: --allow-unmigrated-blog\n'
+    )
+    process.exit(1)
+  }
+}
+
 // ── which checkout config are we on now (to restore it after)? ───────────────
 const configNow = fs.readFileSync(path.join(lib.projectRoot, 'src/firebase-config.ts'), 'utf-8')
 const previousProject = configNow.match(/PROJECT_ID = '([^']+)'/)?.[1]
@@ -164,7 +187,7 @@ if (site.status === 200) {
 const envFile = path.join(lib.projectRoot, `functions/.env.${projectId}`)
 const renderOnStore = fs.existsSync(envFile) && /^RENDER_ON_STORE=true\s*$/m.test(fs.readFileSync(envFile, 'utf-8'))
 if (renderOnStore) {
-  const [newest] = await fetch(`${base}/docs?p=post&f=path,title&o=date(desc)&c=1`)
+  const [newest] = await fetch(`${base}/docs?p=blog:post&f=path,title&o=date(desc)&c=1`)
     .then((r) => r.json())
     .catch(() => [])
   const html = newest?.path ? await fetch(`https://${projectId}.web.app/blog/${newest.path}`).then((r) => r.text(), () => '') : ''

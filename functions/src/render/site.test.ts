@@ -16,7 +16,7 @@ import {
 
 // Production's real shape (2026-10-01).
 const appConfig = { title: 'inconsequence', subtitle: 'musings', defaultPath: 'blog' }
-const BLOG_PATTERN = [{ regexp: '^\\/(([\\w\\d]+\\/)*)([\\w-]+)\\/?$', path: 'post/path=[3]' }]
+const BLOG_PATTERN = [{ regexp: '^\\/(([\\w\\d]+\\/)*)([\\w-]+)\\/?$', path: 'blog:post/path=[3]' }]
 const blogPage = { path: 'blog', title: '', description: 'the blog', tags: ['public', 'blog'], prefetch: BLOG_PATTERN, _modified: 'p1' }
 const settings: SiteSettings = {
   defaultHead: { title: 'inconsequence', description: 'musings on subjects of passing interest' },
@@ -44,8 +44,8 @@ describe('routes', () => {
     expect(pagePathFor('/', {})).toBe('')
   })
   test('the blog pattern names the post from the last segment', () => {
-    expect(hydratedPaths('/blog/2002/8/26/it-begins', BLOG_PATTERN)).toEqual(['post/path=it-begins'])
-    expect(hydratedPaths('/blog/it-begins?ref=x', BLOG_PATTERN)).toEqual(['post/path=it-begins'])
+    expect(hydratedPaths('/blog/2002/8/26/it-begins', BLOG_PATTERN)).toEqual(['blog:post/path=it-begins'])
+    expect(hydratedPaths('/blog/it-begins?ref=x', BLOG_PATTERN)).toEqual(['blog:post/path=it-begins'])
     expect(hydratedPaths('/', BLOG_PATTERN)).toEqual([])
   })
   test('serving tries the post, then the page — an unknown slug falls back to the blog index', () => {
@@ -53,7 +53,7 @@ describe('routes', () => {
     // EVERY page is in the table (an unknown page computes nothing).
     expect(table).toEqual({ blog: BLOG_PATTERN, about: [] })
     expect(routeKeysFor('/blog/2002/8/26/it-begins', appConfig, table)).toEqual([
-      'page:blog|post/path=it-begins',
+      'page:blog|blog:post/path=it-begins',
       'page:blog',
     ])
     expect(routeKeysFor('/', appConfig, table)).toEqual(['page:blog'])
@@ -81,7 +81,7 @@ describe('routes', () => {
   })
   test('invalid or oversized page patterns are dropped from the table', () => {
     const table = routeTableFragment([
-      { path: 'bad', prefetch: [{ regexp: '(', path: 'post/path=[1]' }, { regexp: 'a'.repeat(201), path: 'x' }] },
+      { path: 'bad', prefetch: [{ regexp: '(', path: 'blog:post/path=[1]' }, { regexp: 'a'.repeat(201), path: 'x' }] },
       { path: 'bad path', prefetch: [] },
     ])
     expect(table).toEqual({ bad: [] })
@@ -116,11 +116,11 @@ describe('route artifacts — the head and data the old handlers produced', () =
     const a = routeArtifact({
       pagePath: 'blog',
       page: blogPage,
-      hydrated: { 'post/path=it-begins': p },
+      hydrated: { 'blog:post/path=it-begins': p },
       latestPost: latest,
       settings: { ...settings, postTitlePrefix: 'blog: ' },
     })
-    expect(a.key).toBe('page:blog|post/path=it-begins')
+    expect(a.key).toBe('page:blog|blog:post/path=it-begins')
     expect(a.head).toEqual({
       title: 'blog: Title it-begins',
       description: 'Summary it-begins',
@@ -128,8 +128,8 @@ describe('route artifacts — the head and data the old handlers produced', () =
       url: '/blog/it-begins',
       type: 'article',
     })
-    expect(a.data['post/path=it-begins']).toBe(p)
-    expect(a.sources).toEqual({ 'page/path=blog': 'p1', 'post/path=it-begins': 'm-it-begins' })
+    expect(a.data['blog:post/path=it-begins']).toBe(p)
+    expect(a.sources).toEqual({ 'blog:page/path=blog': 'p1', 'blog:post/path=it-begins': 'm-it-begins' })
   })
 
   test('the blog index: the latest post\'s head (defaultToBlogMetadata)', () => {
@@ -152,7 +152,7 @@ describe('route artifacts — the head and data the old handlers produced', () =
 
   test('a published post carries its HTML for fetchers without JavaScript (#4063)', () => {
     const p = { ...post('it-begins', '2002-08-26'), content: 'It *begins*.' }
-    const a = routeArtifact({ pagePath: 'blog', page: blogPage, hydrated: { 'post/path=it-begins': p }, latestPost: latest, settings })
+    const a = routeArtifact({ pagePath: 'blog', page: blogPage, hydrated: { 'blog:post/path=it-begins': p }, latestPost: latest, settings })
     expect(a.body).toContain('<article data-ssr><h1>Title it-begins</h1><p>It <em>begins</em>.</p>')
   })
 
@@ -162,7 +162,7 @@ describe('route artifacts — the head and data the old handlers produced', () =
   })
 
   test('a draft opened by link has no body: drafts stay client-only (D10)', () => {
-    const a = routeArtifact({ pagePath: 'blog', page: blogPage, hydrated: { 'post/path=draft': post('draft', '') }, latestPost: latest, settings })
+    const a = routeArtifact({ pagePath: 'blog', page: blogPage, hydrated: { 'blog:post/path=draft': post('draft', '') }, latestPost: latest, settings })
     expect(a.body).toBeUndefined()
   })
 
@@ -194,7 +194,7 @@ describe('route artifacts — the head and data the old handlers produced', () =
     const route = routeArtifact({
       pagePath: 'blog',
       page: blogPage,
-      hydrated: { 'post/path=it-begins': p },
+      hydrated: { 'blog:post/path=it-begins': p },
       latestPost: latest,
       settings,
     })
@@ -206,9 +206,9 @@ describe('route artifacts — the head and data the old handlers produced', () =
         'blogVersion',
         'latestPosts',
         'page',
-        'post/path=it-begins',
-        'post/path=newest',
-        'post/path=older',
+        'blog:post/path=it-begins',
+        'blog:post/path=newest',
+        'blog:post/path=older',
         'recentPosts',
         'visiblePages',
       ].sort()

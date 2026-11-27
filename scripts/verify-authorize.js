@@ -48,13 +48,13 @@ const post = async (action, body, bearer) => {
 const firestore = (method, docPath) =>
   fetch(
     `https://firestore.googleapis.com/v1/projects/${projectId}` +
-      `/databases/(default)/documents/${docPath}`,
+      `/databases/(default)/documents/${docPath.split('/').map(encodeURIComponent).join('/')}`,
     { method, headers: { Authorization: `Bearer ${token()}` } }
   )
 
 console.log(`\nverify-authorize → ${projectId}\n`)
 
-await firestore('DELETE', 'post/authz-probe')
+await firestore('DELETE', 'blog:post/authz-probe')
 
 const out = execSync(
   `bun ${path.join(projectRoot, 'scripts', 'sandbox-token.js')} --alias ${ALIAS} --role authz --grant author,admin --export`,
@@ -73,7 +73,7 @@ const verifier = randomBytes(32).toString('base64url')
 const challenge = createHash('sha256').update(verifier).digest('base64url')
 const started = await post('start', {
   label: 'ci × verify-authorize',
-  caveats: { roles: ['author'], collections: ['post'] },
+  caveats: { roles: ['author'], collections: ['blog:post'] },
   codeChallenge: challenge,
   mode: 'poll',
 })
@@ -86,7 +86,7 @@ if (!requestId) fatal('no requestId')
 const page = await fetch(`${BASE}/authorize?request=${requestId}`).then(async r => ({ s: r.status, t: await r.text(), csp: r.headers.get('content-security-policy'), cc: r.headers.get('cache-control') }))
 ok('the consent page renders the request', page.s === 200 && page.t.includes('ci × verify-authorize'), String(page.s))
 ok('it shows the exact caveats a human is approving',
-   page.t.includes('<code>author</code>') && page.t.includes('<code>post</code>'), '')
+   page.t.includes('<code>author</code>') && page.t.includes('<code>blog:post</code>'), '')
 ok('poll mode shows the phishing warning', page.t.includes('Check you started this'), '')
 ok('it is served no-store, under a CSP', page.cc === 'no-store' && /default-src 'none'/.test(page.csp ?? ''), `${page.cc}`)
 
@@ -118,7 +118,7 @@ const got = await post('exchange', { requestId, verifier })
 ok('the CLI exchanges verifier for a token', got.status === 200 && got.json?.status === 'ready' && got.json?.secret?.startsWith('tsp_'),
    `${got.status} ${got.text.slice(0, 100)}`)
 ok('minted with exactly the approved caveats',
-   JSON.stringify(got.json?.caveats?.roles) === '["author"]' && JSON.stringify(got.json?.caveats?.collections) === '["post"]',
+   JSON.stringify(got.json?.caveats?.roles) === '["author"]' && JSON.stringify(got.json?.caveats?.collections) === '["blog:post"]',
    JSON.stringify(got.json?.caveats))
 
 const replay = await post('exchange', { requestId, verifier })
@@ -128,7 +128,7 @@ ok('the request is good for exactly ONE token', replay.status === 403, `${replay
 const agent = got.json?.secret
 const wrote = await fetch(`${BASE}/doc`, {
   method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${agent}` },
-  body: JSON.stringify({ p: 'post/authz-probe', data: { title: 'via browser loop', content: 'x' } }),
+  body: JSON.stringify({ p: 'blog:post/authz-probe', data: { title: 'via browser loop', content: 'x' } }),
 })
 ok('the resulting token works where it was scoped', wrote.status === 200, String(wrote.status))
 const offScope = await fetch(`${BASE}/doc?p=config/site`, { headers: { Authorization: `Bearer ${agent}` } })
@@ -151,7 +151,7 @@ const noRoles = await post('start', { label: 'no roles', caveats: {}, codeChalle
 ok('a request with no roles is refused — the human must see what they grant',
    noRoles.status === 400, `${noRoles.status} ${noRoles.text.slice(0, 80)}`)
 
-await firestore('DELETE', 'post/authz-probe')
+await firestore('DELETE', 'blog:post/authz-probe')
 
 console.log(failures ? `\n${failures} of ${step} checks FAILED\n` : `\nall ${step} checks passed\n`)
 process.exit(failures ? 1 : 0)

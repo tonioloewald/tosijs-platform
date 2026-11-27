@@ -101,7 +101,7 @@ const rewrite = await fetch(`${BASE}/doc`,{method:'PUT',headers:H,
 ok('a changed rewrite of an immutable event is refused (409)', rewrite.status===409, String(rewrite.status))
 
 // an unsequenced collection says so rather than returning nothing
-const un = await fetch(`${BASE}/docs?p=post&since=0&c=5`,{headers:H})
+const un = await fetch(`${BASE}/docs?p=blog:post&since=0&c=5`,{headers:H})
 ok('an unsequenced collection is a clear error, not an empty page',
    un.status===400 && /not-sequenced/.test(await un.text()), String(un.status))
 
