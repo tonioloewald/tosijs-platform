@@ -2,13 +2,17 @@ import * as path from 'path'
 import { statSync, readFileSync } from 'fs'
 import { watch } from 'chokidar'
 import { gzipSync } from 'zlib'
-import { $ } from 'bun'
 
 const PROJECT_ROOT = import.meta.dir
 
 const PUBLIC_DIR = path.resolve(PROJECT_ROOT, 'public')
+// The dev server builds ONLY here. `dist/` is what `firebase deploy` uploads,
+// and this server used to rebuild it on every change, with whatever project
+// the checkout pointed at. A deploy switches that project and rebuilds
+// `dist/`, so a running dev server raced it: on 2026-11-27 the two deleted
+// each other's files and the deploy failed, and the other outcome was a
+// production upload of a client built for the sandbox.
 const BUILD_DIR = path.resolve(PROJECT_ROOT, 'build')
-const DIST_DIR = path.resolve(PROJECT_ROOT, 'dist')
 
 const isSPA = true
 
@@ -26,8 +30,7 @@ async function build() {
   console.time('build')
 
   try {
-    await $`rm -rf ${DIST_DIR}`.text()
-    let result = await Bun.build({
+    const result = await Bun.build({
       entrypoints: ['./src/index.ts'],
       outdir: './build',
       sourcemap: 'linked',
@@ -46,29 +49,10 @@ async function build() {
       lastBuildFailed = true
       return
     }
-    result = await Bun.build({
-      entrypoints: ['./src/index.ts'],
-      outdir: './dist',
-      sourcemap: 'linked',
-      minify: true,
-      splitting: true,
-    })
-    if (!result.success) {
-      if (!lastBuildFailed) {
-        console.error('Build to /dist failed')
-        for (const message of result.logs) {
-          console.error(message)
-        }
-      }
-      lastBuildFailed = true
-      return
-    }
-    await $`cp -a ${PUBLIC_DIR}/. ${DIST_DIR}/`.text()
-    await $`rm ${DIST_DIR}/index.html`
     console.timeEnd('build')
 
     // Show bundle size with gzip
-    const bundlePath = path.join(DIST_DIR, 'index.js')
+    const bundlePath = path.join(BUILD_DIR, 'index.js')
     try {
       const bundleContent = readFileSync(bundlePath)
       const gzipped = gzipSync(bundleContent)
