@@ -21,6 +21,6 @@
     "rootDir": ".",
     "types": []
   },
-  "include": ["lib/index.ts", "functions/src/collections/write-pipeline.ts",
+  "include": ["lib/index.ts", "extensions/assets/index.ts", "functions/src/collections/write-pipeline.ts",
               "functions/src/collections/access.ts", "functions/src/collections/roles.ts"]
 }

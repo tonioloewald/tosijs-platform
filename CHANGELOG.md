@@ -7,6 +7,15 @@ when content is stored (D22, D23).
 
 ### Added
 
+- **`service-compris/assets`: the asset manager as an installable extension**
+  (D28). The `<asset-manager>` component, `blobFiles()` (an `AssetFiles` over
+  a host's storage areas: `/blob` for the bytes, `/docs` for the listing, a
+  refused write retried once with a fresh token), and
+  `service-compris/assets/manifest.json`, which installs two storage areas,
+  `assets:public` and `assets:private`. The component is told its `files`,
+  `folders` and `insertInto`, and assumes nothing about the host. tosijs and
+  tosijs-ui are optional peer dependencies: the root import still needs
+  neither, and has no DOM.
 - **`bun run deploy`**: the whole host in order (indexes, then functions,
   rules and hosting), then checked from outside. `bun run deploy:sandbox` does
   the same for a sandbox and refuses a host that is not marked as one.

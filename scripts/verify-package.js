@@ -79,6 +79,55 @@ try {
   }).trim()
 
   ok('the tarball installs, imports by name, and works', result.startsWith('OK:'), result)
+
+  // The extensions (D28). The probe above ran with no tosijs or tosijs-ui
+  // installed (they are OPTIONAL peers, which npm does not install), so the
+  // root import needs neither. A consumer of `service-compris/assets` installs
+  // them and runs in a browser; happy-dom stands in for the browser.
+  const peers = ['tosijs', 'tosijs-ui', '@happy-dom/global-registrator']
+    .map((name) => `${name}@${pkg.peerDependencies[name] ?? pkg.devDependencies[name]}`)
+  execSync(`npm install --no-audit --no-fund ${peers.map((p) => JSON.stringify(p)).join(' ')}`, {
+    cwd: consumer,
+    stdio: 'pipe',
+  })
+  const assetsProbe = `
+    import { GlobalRegistrator } from '@happy-dom/global-registrator'
+    import { createRequire } from 'module'
+    import { readFileSync } from 'fs'
+    GlobalRegistrator.register()
+    const m = await import(${JSON.stringify(`${pkg.name}/assets`)})
+    const missing = ['assetManager','AssetManager','blobFiles','locate','cleanPath']
+      .filter((n) => m[n] === undefined)
+    if (missing.length) { console.error('MISSING:' + missing.join(',')); process.exit(2) }
+    const listed = []
+    const files = {
+      list: async (folder) => { listed.push(folder); return [{ name: 'a.png', path: folder + '/a.png' }] },
+      upload: async (b, p) => p, remove: async () => true, move: async () => true, url: (p) => '/' + p,
+    }
+    const el = m.assetManager({ files, folders: ['assets:public'] })
+    document.body.append(el)
+    await new Promise((r) => setTimeout(r, 50))
+    if (listed.join() !== 'assets:public' || !el.textContent.includes('a.png')) {
+      console.error('RENDER:' + listed.join() + ' ' + el.textContent.slice(0, 80)); process.exit(3)
+    }
+    const manifestPath = createRequire(import.meta.url).resolve(${JSON.stringify(`${pkg.name}/assets/manifest.json`)})
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
+    if (manifest.name !== 'assets') { console.error('MANIFEST:' + manifest.name); process.exit(4) }
+    console.log('OK:' + Object.keys(m).length)
+    process.exit(0)
+  `
+  const assetsFile = path.join(consumer, 'probe-assets.mjs')
+  writeFileSync(assetsFile, assetsProbe)
+  const assetsResult = execSync(`node ${assetsFile}`, {
+    cwd: consumer,
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim()
+  ok(
+    `${pkg.name}/assets imports, renders, and its manifest resolves`,
+    assetsResult.startsWith('OK:'),
+    assetsResult
+  )
 } catch (e) {
   const detail = (e.stderr?.toString() || e.message || '').split('\n').slice(0, 4).join(' ')
   ok('the tarball imports and its exports work', false, detail)

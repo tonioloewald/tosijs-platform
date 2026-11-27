@@ -68,9 +68,33 @@ writes anything. Provenance (`_by`) is stamped from `userRoles`, never taken fro
 Every dependency is injected, which is the whole point: the decisions are the part you want to be
 able to reason about, and reasoning about them should not require standing anything up.
 
+## Extensions
+
+Content management is part of almost any web app, so its pieces ship from here as **installable
+extensions** (D28): a manifest a host installs, plus components for the browser. They are separate
+imports, so the root import stays pure and DOM-free.
+
+- **`service-compris/assets`** — the asset manager. `<asset-manager>` lists, uploads, renames and
+  deletes files and inserts them into an editor; `blobFiles()` connects it to a host's storage areas;
+  `service-compris/assets/manifest.json` installs two of them (`assets:public`, `assets:private`).
+  Needs `tosijs` and `tosijs-ui` (optional peer dependencies).
+
+```ts
+import { assetManager, blobFiles } from 'service-compris/assets'
+
+document.body.append(
+  assetManager({
+    files: blobFiles({ serviceUrl: 'https://example.com/', getToken: (refresh) => user?.getIdToken(refresh) }),
+    folders: ['assets:public', 'assets:private'],
+  })
+)
+```
+
+The blog follows the same way.
+
 ## What it does *not* give you
 
-No storage, no HTTP, no auth, no realtime. Those belong to the deployable platform in this
+The root import has no storage, no HTTP, no auth, no realtime. Those belong to the deployable platform in this
 repository (not published to npm): clone it and follow [BETA.md](BETA.md) to stand up a host. The
 npm package is the piece of that backend that can be audited on its own.
 

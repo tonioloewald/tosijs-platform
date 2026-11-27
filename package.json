@@ -20,6 +20,7 @@
   "type": "module",
   "files": [
     "dist-lib",
+    "extensions/assets/manifest.json",
     "README.md",
     "LICENSE"
   ],
@@ -35,7 +36,7 @@
     "seed-production": "bun scripts/seed-production.js",
     "backup": "bun scripts/backup-firestore.js",
     "build": "bun build ./src/index.ts --outdir ./dist --sourcemap=linked --minify --splitting && cp -a public/. dist/ && rm dist/index.html",
-    "format": "bun prettier --write src functions/src",
+    "format": "bun prettier --write src extensions functions/src",
     "latest": "bun upgrade && bun install && cd functions && npm install && cd ..",
     "deploy": "bun scripts/deploy.js",
     "deploy-hosting": "firebase deploy -P default --only hosting",
@@ -44,7 +45,7 @@
     "restore": "bun scripts/restore-firestore.js",
     "backup:install": "bun scripts/backup-install.js",
     "backup:uninstall": "bun scripts/backup-install.js --uninstall",
-    "test": "bun test ./src ./scripts && cd functions && bun test",
+    "test": "bun test ./src ./scripts ./extensions && cd functions && bun test",
     "typecheck": "tsc --noEmit",
     "build:lib": "tsc -p tsconfig.lib.json",
     "install:ci": "cd functions && npm install --ignore-scripts --no-audit --no-fund",
@@ -92,10 +93,25 @@
     ".": {
       "types": "./dist-lib/lib/index.d.ts",
       "default": "./dist-lib/lib/index.js"
-    }
+    },
+    "./assets": {
+      "types": "./dist-lib/extensions/assets/index.d.ts",
+      "default": "./dist-lib/extensions/assets/index.js"
+    },
+    "./assets/manifest.json": "./extensions/assets/manifest.json"
   },
   "peerDependencies": {
-    "tosijs-schema": "^1.8.0"
+    "tosijs-schema": "^1.8.0",
+    "tosijs": "^1.10.9",
+    "tosijs-ui": "^1.19.2"
+  },
+  "peerDependenciesMeta": {
+    "tosijs": {
+      "optional": true
+    },
+    "tosijs-ui": {
+      "optional": true
+    }
   },
   "releaseDoctor": {
     "build": "build:lib",

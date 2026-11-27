@@ -14,6 +14,6 @@
     "types": ["bun-types"],
     "noEmit": true
   },
-  "include": ["src", "functions/shared"],
+  "include": ["src", "extensions", "functions/shared"],
   "exclude": ["functions/src"]
 }

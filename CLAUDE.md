@@ -89,7 +89,7 @@ npm run lint                                # Lint (eslint, google config)
 
 Tests come in two flavors. Unit tests (`*.test.ts`, e.g. `access.test.ts`) run standalone. Integration tests (`*.integration.test.ts`, e.g. `access.integration.test.ts`) hit live endpoints through `collections/integration-target.test.ts`: the Firebase emulators when their functions answer, otherwise the **Bun host started in-process** (`adapters/bun/serve.ts`, SQLite, dev identities). So they **do** exercise the code on every `bun test`, without Java. `INTEGRATION_TARGET=emulators|local` forces one. Against the emulators they run compiled code from `lib/`, so **rebuild and restart emulators** after changing functions.
 
-Run client tests as `bun test ./src ./scripts` (what `bun run test` does). A bare `bun test src` from the root also matches `functions/src` and runs the functions suite under the client's happy-dom preload, where a dozen of its tests fail for reasons that are not bugs.
+Run client tests as `bun test ./src ./scripts ./extensions` (what `bun run test` does). A bare `bun test src` from the root also matches `functions/src` and runs the functions suite under the client's happy-dom preload, where a dozen of its tests fail for reasons that are not bugs.
 
 **Emulator note:** the global `firebase-tools` was **10.1.0** until late September 2026, which crashed the functions emulator under firebase-functions v7 (it calls the removed `functions.config()`). It is now **15.x** (15.28.2 as of 2026-10-01), so that failure should be gone, but `bun start-emulated` has not been re-verified since the upgrade. The scripts here use `npx -y firebase-tools@latest`, which always works:
 
@@ -222,6 +222,8 @@ src/                    # Client code (tosijs components)
   firebase.ts          # Firebase client wrapper with REST calls
   blog.ts              # Blog component
   style.ts             # Theme configuration
+extensions/            # Installable extensions (D28), published as service-compris/<name>
+  assets/              # The asset manager: component, blobFiles client, manifest.json
 functions/
   src/                 # Cloud Functions
     collections/       # Access control configs per collection

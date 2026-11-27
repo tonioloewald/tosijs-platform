@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { cleanName, cleanPath, fileKind, fileUrl, locate } from './blob-files'
-import { cleanName as scriptCleanName } from '../scripts/sandbox-lib.js'
-import { validateBlobPath } from '../functions/src/collections/blob'
+import { cleanName, cleanPath, fileKind, locate } from './files'
+import { cleanName as scriptCleanName } from '../../scripts/sandbox-lib.js'
+import { validateBlobPath } from '../../functions/src/collections/blob'
 
 describe('locate', () => {
   test('a folder with a colon is a storage area', () => {
@@ -23,13 +23,6 @@ describe('locate', () => {
       name: 'a.png',
     })
     expect(locate('blog')).toEqual({ area: null, folder: 'blog', name: '' })
-  })
-})
-
-describe('fileUrl', () => {
-  test('areas are served by /blob, legacy folders by /stored', () => {
-    expect(fileUrl('blog:public/a.png')).toBe('/blob/blog:public/a.png')
-    expect(fileUrl('/public/a.png')).toBe('/stored/public/a.png')
   })
 })
 

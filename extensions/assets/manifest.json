@@ -1,0 +1,49 @@
+{
+  "manifest": 1,
+  "name": "assets",
+  "version": "1.0.0",
+  "description": "General-purpose file storage for the asset manager (D28): public files anyone may read, and private files only content writers see. A host whose files already live in another manifest's areas (the blog's) need not install this; the asset manager works on any storage area.",
+  "collections": {
+    "assets:public": {
+      "blob": {
+        "maxBytes": 26214400,
+        "contentTypes": [
+          "image/*",
+          "video/*",
+          "audio/*",
+          "application/pdf",
+          "application/json",
+          "text/plain"
+        ]
+      },
+      "access": [
+        { "role": "public", "read": "ALL", "list": "ALL" },
+        { "role": "author", "write": "ALL" },
+        { "role": "editor", "write": "ALL" },
+        { "role": "admin", "write": "ALL" },
+        { "role": "developer", "write": "ALL" },
+        { "role": "owner", "write": "ALL" }
+      ]
+    },
+    "assets:private": {
+      "blob": {
+        "maxBytes": 26214400,
+        "contentTypes": [
+          "image/*",
+          "video/*",
+          "audio/*",
+          "application/pdf",
+          "application/json",
+          "text/plain"
+        ]
+      },
+      "access": [
+        { "role": "author", "read": "ALL", "list": "ALL", "write": "ALL" },
+        { "role": "editor", "read": "ALL", "list": "ALL", "write": "ALL" },
+        { "role": "admin", "read": "ALL", "list": "ALL", "write": "ALL" },
+        { "role": "developer", "read": "ALL", "list": "ALL", "write": "ALL" },
+        { "role": "owner", "read": "ALL", "list": "ALL", "write": "ALL" }
+      ]
+    }
+  }
+}

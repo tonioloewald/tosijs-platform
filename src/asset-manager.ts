@@ -1,525 +1,94 @@
+/**
+ * This site's asset manager: the assets extension (`extensions/assets`,
+ * published as `service-compris/assets`), configured for loewald.com.
+ *
+ * Its files live in two places. `blog:public` is a storage area (the blog
+ * manifest's), served by /blob; `public` is a legacy Storage folder, not
+ * migrated yet (board #2486), still read through /stored and written with the
+ * Storage SDK. The old `blog` folder's files were copied into the area and
+ * still serve from /stored. The legacy folder is this site's, not the
+ * extension's, so its handling lives here.
+ */
 import {
-  Component,
-  ElementCreator,
-  PartsMap,
-  elements,
-  vars,
-  varDefault,
-  getListItem,
-  tosi,
-  touch,
-  tosiValue,
-} from 'tosijs'
-import {
-  tosiFloat,
-  tosiSizer,
-  icons,
-  postNotification,
-  popMenu,
-  tosiSelect,
-  TosiSelect,
-  TosiDialog,
-} from 'tosijs-ui'
+  getStorage,
+  ref as storageRef,
+  getBytes,
+  getMetadata,
+  uploadBytes,
+  listAll,
+  deleteObject,
+} from 'firebase/storage'
 import type { CodeEditor } from 'tosijs-ui/code-editor'
 import {
-  uploadFile,
-  listFiles,
-  pathToStoredUrl,
-  deleteFile,
-  renameFile,
-} from './firebase'
-import { getDimensionsStyleAttr } from './dimensions'
-import { fileKind } from './blob-files'
-import {
-  getExtension,
-  getMediaType,
-  MediaType,
-} from '../functions/shared/mime-types'
+  assetManager as createAssetManager,
+  blobFiles,
+  locate,
+  type AssetFiles,
+} from '../extensions/assets/index.js'
+import { baseServiceUrl, getFirebaseUser } from './firebase'
 
-const altText = (fileName: string): string => {
-  let [text] = fileName.split('.')
-  return text.replace(/[-_]/g, ' ')
-}
-
-export const escapeHTMLAttribute = (value: string): string => {
-  return value.replace(/"/g, '&quot;').replace(/'/g, '&apos;')
-}
-
-// Labels for insert/copy actions based on file type
-const INSERT_LABELS: Record<string, { markdown: string; html: string }> = {
-  image: { markdown: 'Insert Image', html: 'Insert <img>' },
-  video: { markdown: 'Insert Link', html: 'Insert <video>' },
-  audio: { markdown: 'Insert Link', html: 'Insert <audio>' },
-  other: { markdown: 'Insert Link', html: 'Insert Link' },
-}
-
-const COPY_LABELS: Record<string, { markdown: string; html: string }> = {
-  image: { markdown: 'Copy Image Markdown', html: 'Copy <img> HTML' },
-  video: { markdown: 'Copy Link Markdown', html: 'Copy <video> HTML' },
-  audio: { markdown: 'Copy Link Markdown', html: 'Copy <audio> HTML' },
-  other: { markdown: 'Copy Link Markdown', html: 'Copy Link HTML' },
-}
-
-const { h4, label, input, button, div, span, template } = elements
-
-export interface Asset {
-  name: string
-  path: string
-  contentType?: string
-}
-
-const { assetManagerData } = tosi({
-  assetManagerData: {
-    files: [] as Asset[],
-    filter: '',
-    // Must use `this`, not the outer `assetManagerData` binding, and must have a
-    // setter. tosijs 1.7 Object.assigns over this literal during registration,
-    // which evaluates the getter before `assetManagerData` is assigned (throws)
-    // and then writes the result back (throws on a getter-only property).
-    get filteredFiles(): Asset[] {
-      const filter = String(this.filter).toLocaleLowerCase()
-      const { files } = this as unknown as { files: Asset[] }
-      return filter === ''
-        ? files
-        : files.filter(
-            (asset: Asset) =>
-              asset.name.toLocaleLowerCase().includes(filter) ||
-              asset.path.toLocaleLowerCase().includes(filter)
-          )
-    },
-    set filteredFiles(_files: Asset[]) {
-      /* computed from files + filter; the registration write-back is ignored */
-    },
-  },
+const areas = blobFiles({
+  serviceUrl: baseServiceUrl,
+  getToken: (refresh) => getFirebaseUser()?.getIdToken(refresh),
 })
 
-interface AssetManagerParts extends PartsMap {
-  search: HTMLInputElement
-  fileInput: HTMLInputElement
-  pathSelector: TosiSelect
-  filePath: HTMLInputElement
-  convertToWebP: HTMLInputElement
-}
+const legacy = (path: string) => storageRef(getStorage(), path)
 
-class AssetManager extends Component<AssetManagerParts> {
-  static preferredTagName = 'asset-manager'
-  static lightStyleSpec = {
-    ':host': {
-      _spacing: varDefault.pad('10px'),
-    },
-    ':host tosi-sizer': {
-      _resizeIconFill: vars.textColor,
-    },
-    ':host [part=assetList] .row': {
-      padding: 2,
-    },
-    ':host tosi-select': {
-      display: 'inline-flex',
-      width: 100,
-      _fieldWidth: 40,
-      _touchSize: 32,
-    },
-    ':host tosi-float': {
-      background: vars.panelBg,
-      display: 'flex',
-      flexDirection: 'column',
-    },
-    ':host .text-nowrap': {
-      whiteSpace: 'nowrap',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-    },
-  }
-  popItemMenu = (event: Event) => {
-    const target = event.target as HTMLElement
-    const file = getListItem(target)
-    const codeEditor = document.querySelector(
-      'xin-post-editor tosi-code'
-    ) as CodeEditor | null
-    const { getFiles } = this
-    const storedUrl = pathToStoredUrl(file.path)
-    // Unwrapped: a field read off a list proxy is a boxed object, not a string.
-    const record = tosiValue(file) as Asset
-    const type = fileKind(record.contentType, getMediaType(record.path))
+/** Storage areas through /blob; any other folder through the Storage SDK. */
+export const siteFiles: AssetFiles = {
+  async list(folder) {
+    if (locate(folder).area) return areas.list(folder)
+    const { items } = await listAll(legacy(folder))
+    return items.map((item) => ({ name: item.name, path: item.fullPath }))
+  },
 
-    const labels = codeEditor ? INSERT_LABELS[type] : COPY_LABELS[type]
+  async upload(body, path) {
+    if (locate(path).area) return areas.upload(body, path)
+    const { metadata } = await uploadBytes(legacy(path), body)
+    return metadata.fullPath
+  },
 
-    popMenu({
-      target,
-      menuItems: [
-        {
-          caption: labels.markdown,
-          icon: codeEditor ? 'code' : 'copy',
-          async action() {
-            // Markdown only has native syntax for images; video/audio use link syntax
-            const code =
-              type === 'image'
-                ? `![${altText(file.name)}](${storedUrl})`
-                : `[${altText(file.name)}](${storedUrl})`
-            // tosijs-ui 1.7 swapped ACE for CodeMirror 6: `editor` is an
-            // EditorView, and it's undefined until the editor has mounted.
-            const editor = codeEditor?.editor
-            if (editor) {
-              editor.dispatch(editor.state.replaceSelection(code))
-            } else {
-              navigator.clipboard.writeText(code)
-            }
-          },
-        },
-        {
-          caption: labels.html,
-          icon: codeEditor ? 'code' : 'copy',
-          async action() {
-            let code: string
-            const alt = escapeHTMLAttribute(altText(file.name))
-
-            if (type === 'image' || type === 'video') {
-              const closeNotification = postNotification({
-                type: 'progress',
-                message: 'Getting dimensions…',
-              })
-              const styleAttr = await getDimensionsStyleAttr(
-                storedUrl,
-                type as MediaType
-              )
-              closeNotification()
-              code =
-                type === 'image'
-                  ? `<img alt="${alt}" src="${storedUrl}"${styleAttr}>`
-                  : `<video controls src="${storedUrl}" title="${alt}"${styleAttr}></video>`
-            } else if (type === 'audio') {
-              code = `<audio controls src="${storedUrl}" title="${alt}"></audio>`
-            } else {
-              code = `<a href="${storedUrl}">${altText(file.name)}</a>`
-            }
-
-            // tosijs-ui 1.7 swapped ACE for CodeMirror 6: `editor` is an
-            // EditorView, and it's undefined until the editor has mounted.
-            const editor = codeEditor?.editor
-            if (editor) {
-              editor.dispatch(editor.state.replaceSelection(code))
-            } else {
-              navigator.clipboard.writeText(code)
-            }
-          },
-        },
-        {
-          caption: 'Copy URL',
-          icon: 'link',
-          action() {
-            navigator.clipboard.writeText(storedUrl)
-            postNotification({
-              type: 'info',
-              message: `url for "${file.name}" copied to clipboard`,
-            })
-          },
-        },
-        null,
-        {
-          caption: 'View',
-          icon: 'eye',
-          action() {
-            window.open(storedUrl)
-          },
-        },
-        null,
-        {
-          caption: 'Rename',
-          icon: 'edit',
-          async action() {
-            const newName = await TosiDialog.prompt(
-              'Filename:',
-              'Rename Asset',
-              file.name
-            )
-            if (newName && newName !== file.name) {
-              // Check if extension changed
-              const oldExt = getExtension(file.name)
-              const newExt = getExtension(newName)
-              if (oldExt !== newExt) {
-                const confirmed = await TosiDialog.confirm(
-                  `Changing extension from "${
-                    oldExt ? `.${oldExt}` : '(none)'
-                  }" to "${
-                    newExt ? `.${newExt}` : '(none)'
-                  }" may cause the file to be embedded incorrectly. Continue?`
-                )
-                if (!confirmed) return
-              }
-
-              const dir = file.path.substring(0, file.path.lastIndexOf('/'))
-              const newPath = `${dir}/${newName}`
-              const closeNotification = postNotification({
-                type: 'progress',
-                message: `Renaming "${file.name}" to "${newName}"…`,
-              })
-              const success = await renameFile(file.path, newPath)
-              closeNotification()
-              if (success) {
-                postNotification({
-                  type: 'info',
-                  message: `Renamed to "${newName}"`,
-                })
-              } else {
-                postNotification({
-                  type: 'error',
-                  message: `Failed to rename "${file.name}"`,
-                })
-              }
-              await getFiles()
-            }
-          },
-        },
-        {
-          caption: 'Delete',
-          icon: 'trash',
-          async action() {
-            if (await TosiDialog.confirm(`Delete "${file.path}"?`)) {
-              if (await deleteFile(file.path)) {
-                postNotification({
-                  type: 'info',
-                  message: `File ${file.path} has ceased to be. Bereft of life, it rests in peace. It is an ex-file.`,
-                })
-              } else {
-                postNotification({
-                  type: 'error',
-                  message: `${file.path} was not deleted, or was already deleted by someone else. Who knows…?`,
-                })
-              }
-              await getFiles()
-            }
-          },
-        },
-      ],
-    })
-  }
-
-  uploadFile = () => {
-    const { fileInput, pathSelector, filePath, convertToWebP } = this.parts
-    const basePath = pathSelector.value
-    if (fileInput.files?.length === 1) {
-      const file = fileInput.files[0]
-      uploadFile(file, `/${basePath}/${filePath.value}`, convertToWebP.checked)
-        .then((path: string) => {
-          postNotification({
-            type: 'info',
-            message: `${file.name} uploaded to path '${path}'`,
-          })
-          // The name the file actually got (an area cleans it).
-          assetManagerData.filter.value = path.slice(path.indexOf('/') + 1)
-          filePath.value = ''
-          fileInput.value = ''
-          this.getFiles()
-        })
-        .catch((e) => {
-          postNotification({
-            type: 'error',
-            message: `${file.name} was not uploaded: ${e?.message ?? e}`,
-          })
-        })
-    } else {
-      postNotification({
-        type: 'error',
-        message: 'Pick a file first!',
-      })
-    }
-  }
-
-  setPath = () => {
-    const { fileInput, filePath, convertToWebP } = this.parts
-    if (fileInput.files?.length === 1) {
-      const fileName = fileInput.files[0].name
-      filePath.value = fileName.replace(/\s+/g, '-')
-      const isImage = getMediaType(fileName) === 'image'
-      const ext = getExtension(fileName)
-      // Don't convert GIF (loses animation) or SVG (vector format) to webP
-      const shouldConvert = isImage && ext !== 'gif' && ext !== 'svg'
-      convertToWebP.disabled = !isImage
-      convertToWebP.checked = shouldConvert
-    } else {
-      filePath.value = ''
-      convertToWebP.disabled = false
-      convertToWebP.checked = true
-    }
-  }
-
-  getFiles = async () => {
-    const { pathSelector } = this.parts
+  async remove(path) {
+    if (locate(path).area) return areas.remove(path)
     try {
-      assetManagerData.files.value = await listFiles(pathSelector.value)
-      touch(assetManagerData.filteredFiles)
+      await deleteObject(legacy(path))
+      return true
     } catch (e) {
-      postNotification({
-        type: 'error',
-        message: `Error: ${e}`,
-      })
+      return false
     }
-  }
+  },
 
-  // On every keystroke, not just on `change` (Return or blur), which a phone's
-  // search field rarely fires. Read from the field itself, so the list never
-  // waits on the binding to catch up.
-  updateList = () => {
-    assetManagerData.filter.value = this.parts.search.value
-    touch(assetManagerData.filteredFiles)
-  }
+  async move(from, to) {
+    const fromArea = locate(from).area
+    const toArea = locate(to).area
+    if (fromArea && toArea) return areas.move(from, to)
+    // Legacy ↔ area is not a rename (that is the migration's `import`).
+    if (fromArea || toArea) return false
+    try {
+      const metadata = await getMetadata(legacy(from))
+      const bytes = await getBytes(legacy(from))
+      await uploadBytes(legacy(to), bytes, {
+        contentType: metadata.contentType,
+        customMetadata: metadata.customMetadata,
+      })
+      await deleteObject(legacy(from))
+      return true
+    } catch (e) {
+      console.error('Error renaming file:', e)
+      return false
+    }
+  },
 
-  content = () =>
-    tosiFloat(
-      {
-        class: 'compact',
-        drag: true,
-        style: {
-          bottom: '10px',
-          left: '10px',
-          maxWidth: 'calc(100% - 20px)',
-          minHeight: '360px',
-          minWidth: '360px',
-          width: '400px',
-          overflow: 'hidden',
-        },
-      },
-      h4('Asset Manager', {
-        class: 'primary',
-        style: { textAlign: 'center', padding: vars.spacing75, margin: 0 },
-      }),
-      div(
-        { class: 'row no-drag', style: { padding: vars.spacing50 } },
-        input({
-          part: 'search',
-          type: 'search',
-          placeholder: 'filter items',
-          bindValue: assetManagerData.filter,
-          onInput: this.updateList,
-          onChange: this.updateList,
-        }),
-        span({ class: 'elastic' }),
-        label(
-          {
-            class: 'row',
-            style: {
-              padding: 0,
-              justifyContent: 'flex-end',
-            },
-          },
-          span('Path'),
-          tosiSelect({
-            // `blog:public` is a storage area (/blob); `public` is the legacy
-            // folder, not migrated yet. The old `blog` folder's files were
-            // copied into the area (board #2486) and still serve from /stored.
-            options: 'blog:public,public',
-            value: 'blog:public',
-            part: 'pathSelector',
-            onChange: this.getFiles,
-          })
-        )
-      ),
-      div(
-        {
-          part: 'assetList',
-          class: 'column elastic no-drag',
-          style: {
-            height: '300px',
-            overflow: 'hidden scroll',
-            alignItems: 'stretch',
-            content: ' ',
-            margin: `0 ${vars.spacing50}`,
-          },
-          bindList: {
-            value: assetManagerData.filteredFiles,
-            idPath: 'path',
-          },
-        },
-        template(
-          div(
-            { class: 'row' },
-            span({ class: 'text-nowrap elastic', bindText: '^.name' }),
-            button(
-              {
-                title: 'Options',
-                onClick: this.popItemMenu,
-              },
-              icons.moreVertical()
-            )
-          )
-        )
-      ),
-      div(
-        {
-          class: 'column no-drag',
-          style: {
-            alignItems: 'stretch',
-            padding: vars.spacing50,
-            gap: vars.spacing50,
-          },
-        },
-        label(
-          { class: 'row nopad' },
-          span('File'),
-          input({
-            part: 'fileInput',
-            type: 'file',
-            onChange: this.setPath,
-            class: 'elastic',
-          })
-        ),
-        label(
-          { class: 'row nopad' },
-          span('Path'),
-          input({
-            placeholder: 'File Name',
-            part: 'filePath',
-            class: 'elastic',
-          })
-        ),
-        div(
-          { class: 'row' },
-          label(
-            input({ part: 'convertToWebP', checked: true, type: 'checkbox' }),
-            span('Convert to webP')
-          ),
-          span({ class: 'elastic' }),
-          button(
-            {
-              class: 'row',
-              style: {
-                alignSelf: 'center',
-                alignItems: 'center',
-                gap: vars.spacing50,
-                marginRight: vars.spacing150,
-              },
-            },
-            span('Upload'),
-            icons.upload(),
-            {
-              onClick: this.uploadFile,
-            }
-          )
-        )
-      ),
-      tosiSizer({ class: 'no-drag' }),
-      button(
-        {
-          title: 'close asset manager',
-          target: 'asset-manager',
-          class: 'iconic no-drag',
-          style: {
-            position: 'absolute',
-            top: 0,
-            right: 0,
-          },
-          onClick: this.remove.bind(this),
-        },
-        icons.x()
-      )
-    )
-
-  connectedCallback() {
-    super.connectedCallback()
-
-    this.getFiles()
-  }
+  url(path) {
+    const { area, folder, name } = locate(path)
+    return area ? areas.url(path) : `/stored/${folder}/${name}`
+  },
 }
 
-export const assetManager =
-  AssetManager.elementCreator() as ElementCreator<AssetManager>
+export const assetManager = () =>
+  createAssetManager({
+    files: siteFiles,
+    folders: ['blog:public', 'public'],
+    insertInto: () =>
+      document.querySelector('xin-post-editor tosi-code') as CodeEditor | null,
+  })
