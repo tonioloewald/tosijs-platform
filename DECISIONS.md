@@ -38,6 +38,7 @@ time, carry the entry with the code.
 | [D25](#d25) | Server HTML of content is written fresh from an allowlist, never a parser's serialization | this repo (renderers → stored ajs later) |
 | [D26](#d26) | Game rooms: one room interface, two backends (our own host, and Firebase as an option whose scale is unproven); relay-only first | this repo + the room client + Manta |
 | [D27](#d27) | Rooms v1: our host only, on the preview box, with host-issued guest tokens; Firebase deferred (amends D26) | this repo + tosijs-rooms |
+| [D28](#d28) | The blog and asset manager are installable extensions of the core, built and published from this repo (amends D1) | this repo |
 
 ---
 
@@ -52,6 +53,8 @@ on tosijs-ui — separate projects, not subdirectories.
 **Consequence:** `src/blog.ts`, `src/asset-manager.ts` and the editors are not this repo's product.
 Work on them is migration preparation, not investment.
 **Lands in:** all three repos. → ROADMAP "Three legs".
+**Amended by [D28](#d28)** (the blog and asset manager stay in this repo as installable
+extensions, and are its product).
 
 ## D2
 **ajs rules stay pure boolean predicates; transform/field-strain/provenance/unique stay compiled
@@ -759,3 +762,33 @@ and closes its first open question.
   identities that persist; and D26's Cloud Run and tick-rate questions.
 
 Board: #3374.
+
+---
+
+## D28
+**The blog and the asset manager are installable extensions of the core, built in this repo and
+published from it as components. No `tosijs-blog` or `tosijs-assets` repos.** *(2026-11-27,
+owner)* Amends D1 and ROADMAP's "move client out".
+
+- **Why in the core's repo:** basic content management is part of almost any web app, so it
+  belongs with the core rather than in more repos to manage (owner).
+- **Why installable:** they are the reference extensions, the proof that the core is general. A
+  host gets the blog by installing it (a manifest for its collections, rules and storage areas,
+  plus its client components), not because the core has it built in. The start is already here:
+  `manifests/blog.json` declares the blog's storage areas (#1136).
+- **The rule that follows:** the core does not special-case the blog. Whatever the blog needs and a
+  manifest cannot express is a gap in the core, to be closed in the core. The known gaps:
+  - `post`, `page` and their rules are platform collections (`seed-configs.ts`, the registry),
+    not the blog's manifest;
+  - server code: render on store (D23) for pages, the blog index, the sitemap and RSS; the plain
+    HTML of a post (D25); `/sitemap` and `/prefetch`. Install v1 refuses `functions` (D17), so the
+    blog needs stored ajs or render hooks a manifest can declare;
+  - delivering an extension's client: nothing yet says how a host gets an installed extension's
+    UI (a package the site build imports, `/esm` modules, or a stored build).
+- **The client code is product again.** D1's "not this repo's product, migration preparation"
+  no longer holds for the blog, its editors and the asset manager. Generic pieces still go
+  upstream to tosijs-ui.
+- **Lands here:** D11 (one definition of published), and the tosijs-blog parts of D20 and D24.
+- **Still open:** the package shape (subpath exports of `service-compris`, or separate packages
+  published from this repo); and the order of the gaps, which ROADMAP will plan.
+

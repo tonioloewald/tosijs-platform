@@ -2,7 +2,12 @@
 
 > **Decisions live in [DECISIONS.md](DECISIONS.md)** — a dated, append-only ledger. This file is a
 > *plan* and gets rewritten; the ledger is the durable record, and each entry names which repo it
-> lands in so it survives the extraction of `tosijs-blog` / `tosijs-assets`.
+> lands in.
+>
+> **Amended 2026-11-27 by [D28](DECISIONS.md#d28):** the blog and asset manager are **not**
+> extracted into `tosijs-blog` / `tosijs-assets`. They stay here as installable extensions of the
+> core, published from this repo as components. Where this plan says "extract" or "move out" for
+> them, read "make installable"; generic pieces still go upstream to tosijs-ui.
 >
 > Rewritten 2026-08-24. **Supersedes** the prior "ajs / universal-endpoint" roadmap (whose
 > center of gravity — a server-side interpreter that *rebuilds* the content system as data —
@@ -137,9 +142,9 @@ the capability model — are the product. Client-side polish is not.
    generic batteries*; its reference `functions/` universal-endpoint layer (`store.tjs`/`rbac.tjs`/
    `schema.tjs`/`routing.tjs`) consolidates into this repo, reconciled with loewald's stronger RBAC
    (field-level access + role hierarchy + provenance + typed outcomes), or is dropped.
-2. **Client-side code here moves out** — to small projects or upstream into tosijs-ui. The obvious
-   breakdown: **`tosijs-blog`** and **`tosijs-assets`** (the asset manager). Generic doc/site
-   behavior is already tosijs-ui's.
+2. **Client-side code here becomes installable extensions** (D28): the blog and the asset manager,
+   published from this repo as components. Generic doc/site behavior is already tosijs-ui's and
+   generic pieces go upstream.
 3. **This hosting becomes a standard tosijs-ui build, deployed to Firestore**, so `/prefetch` grabs
    the server-side-rendered / cached HTML (for SEO + load time). All unique code left in this
    project is backend → **super easy to test**.
@@ -152,8 +157,8 @@ the capability model — are the product. Client-side polish is not.
 | Concern | Owner |
 |---|---|
 | Static page-per-path, SEO/OG/sitemap, hydration + SPA, in-browser edit UI | **tosijs-ui build** |
-| Blog UI + editor | **`tosijs-blog`** (extracted from here) |
-| Asset-manager UI | **`tosijs-assets`** (extracted from here) |
+| Blog UI + editor | **this repo**, as an installable extension (D28) |
+| Asset-manager UI | **this repo**, as an installable extension (D28) |
 | `/doc` + `/docs` + universal stored-ajs endpoint; RBAC; ajs procs; batteries | **this repo** |
 | Language + VM + generic batteries | **tjs-lang** (backend endpoint layer moves here) |
 | The `DocStore` **contract** | tosijs-ui defines it; **this repo conforms** (decision 5) |
@@ -346,8 +351,9 @@ capabilities) against 0.13.11's `SafeCapabilities` + `maxSourceBytes`.
   scaffolded as acceptance tests in `functions/src/collections/universal-endpoint.invariants.test.ts`.
   **Acceptance ladder** (gap analysis): drop-in `doc`/`docs` parity → prefetch as a stored procedure
   → storage capability + asset-manager → *add a module editor / the blog with no function deploy*.
-- **Phase 2 — extract the client.** Split out `tosijs-blog` and `tosijs-assets`; upstream generic
-  bits into tosijs-ui. This repo's client shrinks to nothing unique.
+- **Phase 2 — make the client installable (D28).** The blog and the asset manager become
+  extensions a host installs (manifest + components), published from this repo; upstream generic
+  bits into tosijs-ui. *(Was: extract them into `tosijs-blog` and `tosijs-assets`.)*
 - **Phase 3 — hosting eats its own backend.** Make this site a standard tosijs-ui build deployed to
   Firestore; wire `/prefetch` to serve the cached SSR HTML ([Serving model](#serving-model)).
 - **Testability falls out of Phases 1–2:** once unique code is all backend and ajs is deterministic

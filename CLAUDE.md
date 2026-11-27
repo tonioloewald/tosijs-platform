@@ -25,16 +25,19 @@ entry naming the repo it lands in). Read that before proposing a change to RBAC,
 SSR, or the endpoint surface — several of those questions are settled and the reasoning matters more
 than the conclusion.
 
-The platform is pivoting — see **[ROADMAP.md](ROADMAP.md)** (direction settled 2026-08-24).
-**This repo consolidates into the pure backend** — `/doc` + `/docs` + one universal stored-ajs
-endpoint, with everything else expressed as collection config or stored ajs — while all client code
-moves *out* (upstream to tosijs-ui, or into small projects **`tosijs-blog`** and **`tosijs-assets`**).
+The platform is pivoting — see **[ROADMAP.md](ROADMAP.md)** (direction settled 2026-08-24, amended
+by D28 on 2026-11-27). **The backend consolidates** into `/doc` + `/docs` + one universal stored-ajs
+endpoint, with everything else expressed as collection config or stored ajs. **The blog and the
+asset manager stay in this repo as installable extensions of that core** (D28), published from here
+as components; generic client pieces go upstream to tosijs-ui.
 Its own hosting becomes a standard **tosijs-ui build deployed to Firestore**, served via `/prefetch`
 as cached SSR HTML. Consequences for any work here:
 
-- **Client code is leaving — don't invest in it.** `blog.ts` (+ the blog/page/schema editors) →
-  `tosijs-blog`; `asset-manager.ts` → `tosijs-assets`; generic bits → upstream to tosijs-ui.
-  `page.ts` and `sitemap.ts` are removed; `prefetch.ts`'s SSR-*data-injection* role is removed and
+- **The blog and asset manager are product: build them as installable extensions (D28).** A host
+  gets them by installing a manifest plus components, so the core must not special-case them:
+  whatever they need that a manifest cannot express is a core gap to close (D28 lists them).
+  Keep this client code good (upgrades, deprecations, tests). Generic bits → upstream to
+  tosijs-ui. `page.ts` and `sitemap.ts` are removed; `prefetch.ts`'s SSR-*data-injection* role is removed and
   re-cast as a cached-HTML page server.
 - **The backend is where value concentrates.** `doc.ts`/`docs.ts` (the universal document atom),
   the auth atom (`user.ts`), and hardened `gen`/`stored` are the trusted core (TCB); the backend
